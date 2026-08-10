@@ -4,13 +4,10 @@ package es.jvbabi.trails.android
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.location.Location
@@ -19,7 +16,6 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
@@ -122,15 +118,6 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
                 0f,
                 this
             )
-
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    10000L,
-                    0f,
-                    this
-                )
-            }
 
         } catch (unlikely: SecurityException) {
             Log.e("LocationService", "Keine Berechtigung: $unlikely")
