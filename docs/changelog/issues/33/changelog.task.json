@@ -1,0 +1,8 @@
+{
+  "description": "Remove network position provider to enhance accuracy",
+  "localized": {
+    "de": {
+      "description": "Entfernt den Netzwerkpositionsanbieter, um die Genauigkeit zu verbessern"
+    }
+  }
+}
