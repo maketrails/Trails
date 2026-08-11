@@ -17,6 +17,10 @@ import java.io.File
  * Builds the changelog for a release from the per-issue entries in
  * docs/changelog/issues/<id>/changelog.<type>.json.
  *
+ * Only changes to the app are listed: a release ships the app, and its changelog
+ * is read by the app itself, so server and web app changes have no place in it.
+ * See [APP_LABEL].
+ *
  * Produces one JSON file per language plus an English markdown version for the
  * release body. Nothing is written into the repository: everything lands in the
  * output directory and is attached to the release as an artifact.
@@ -113,7 +117,38 @@ fun textOf(source: JsonObject?) = Text(
     description = (source?.get("description") as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() },
 )
 
+/**
+ * The label that marks an issue as a change to the app.
+ *
+ * The other side of the same coin is the deploy workflow, which builds the app
+ * only for a pull request carrying this label. An issue without it never reached
+ * the app, so listing it would tell users about something they cannot see.
+ */
+val APP_LABEL = "project:app"
+
+/** The project:* labels on an issue, empty when it carries none. */
+fun labelsOf(issue: Int): List<String> =
+    capture("gh", "issue", "view", "$issue", "--json", "labels", "--jq", "[.labels[].name] | join(\",\")")
+        .orEmpty()
+        .split(",")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
 val entries = issues.mapNotNull { issue ->
+    // Asked before the issue type, so a server-only issue costs one call and
+    // never reports a missing type or a missing entry it does not need.
+    val labels = labelsOf(issue)
+    if (APP_LABEL !in labels) {
+        if (labels.isEmpty()) {
+            // Almost always a forgotten label rather than a deliberate omission,
+            // and the entry disappears without a trace otherwise.
+            warn("Issue #$issue has no labels, so it is not treated as an app change. Add $APP_LABEL if it is one.")
+        } else {
+            println("Issue #$issue is labelled ${labels.joinToString()}, not $APP_LABEL, leaving it out.")
+        }
+        return@mapNotNull null
+    }
+
     val issueType = capture("gh", "issue", "view", "$issue", "--json", "issueType", "--jq", ".issueType.name // \"\"")
     val category = categoryOf(issueType) ?: run {
         // Better a wrong section than a lost entry, and the pull request check

@@ -117,6 +117,26 @@ files over inventing new ones.
 - Add KDoc / Javadoc-style documentation comments where they add value
   (public APIs, non-obvious behaviour, invariants). Don't document the obvious.
 
+### Labels
+
+Three labels say which part of the system a change belongs to:
+`project:app`, `project:server` and `project:webapp`. Several may apply at once.
+
+They are not documentation, they steer the release
+([deploy.yaml](.github/workflows/deploy.yaml)):
+
+| Label on the pull request        | Effect on a merge to `main`                          |
+|----------------------------------|------------------------------------------------------|
+| `project:app`                    | builds the APKs and publishes a GitHub release       |
+| `project:server` / `project:webapp` | builds and pushes the Docker image                |
+| none                             | builds nothing                                       |
+
+The pull request label decides what gets built, the issue label decides what the
+changelog shows (see below) — but **labelling one of the two is enough**:
+[sync-labels.yaml](.github/workflows/sync-labels.yaml) copies every `project:*`
+label between an issue and the pull requests closing it, in both directions, and
+removing one removes it on the other side too. Other labels are left alone.
+
 ### Commits
 
 Commit subjects follow:
@@ -192,6 +212,14 @@ collects the entries for all issues referenced by the commits since the last
 release and renders them under *Features*, *Fixes* and *Other changes*. Keep the
 JSON valid — a broken file fails the release, which is exactly what the pull
 request check is there to catch early.
+
+**Only issues labelled `project:app` make it into the changelog.** A release
+ships the app and its changelog is read by the app itself, so a server or web app
+change would tell users about something they cannot see. An issue labelled
+`project:app` *and* `project:webapp` still counts as an app change. An issue with
+no label at all counts as none and is left out with a warning — so label the
+issue, not just the pull request. Write the entry anyway: nothing is lost, it is
+simply not published to app users.
 
 ### Internationalization (i18n)
 

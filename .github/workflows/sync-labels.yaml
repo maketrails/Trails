@@ -1,0 +1,187 @@
+name: Sync labels
+
+# The project:* labels steer the release: the ones on the pull request decide
+# what gets built (deploy.yaml), the ones on the issue decide what the changelog
+# lists (generate_changelog.main.kts). Syncing them means it no longer matters
+# which of the two someone labels.
+#
+# This cannot loop, for two independent reasons:
+#
+#  1. GitHub never starts a workflow run from an event that GITHUB_TOKEN caused,
+#     and this workflow labels with exactly that token. Every labeled/unlabeled
+#     event it produces is a dead end.
+#  2. Every write is checked against the target's current labels first, so a side
+#     that already agrees is never written to. Even if an event did come back, it
+#     would find nothing left to do and stop there.
+#
+# The second reason is what makes this safe to keep should the token ever be
+# swapped for a PAT, which is not covered by the first.
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+  # edited fires when the description changes, which is where the closing
+  # reference lives — a pull request that gets linked afterwards still syncs.
+  pull_request:
+    types: [opened, reopened, edited, labeled, unlabeled]
+
+jobs:
+  sync:
+    name: Sync project labels
+    runs-on: ubuntu-latest
+    # A pull request from a fork only gets a read-only token, so it could not
+    # write the labels anyway. Issue events carry no pull request at all.
+    if: github.event.pull_request.head.repo.fork != true
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Sync project labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Issue and pull request data goes through the environment, never into
+          # the script body, so no branch name or label is ever interpolated into
+          # the shell. Same rule as check_changelog.main.kts.
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          CHANGED_LABEL: ${{ github.event.label.name }}
+        run: |
+          set -euo pipefail
+
+          # Only these steer anything. Everything else (duplicate, wontfix, …)
+          # belongs to the side someone put it on and stays there.
+          PREFIX='project:'
+
+          # --- finding the other side ---------------------------------------
+          # The closing reference is authoritative and the branch name is the
+          # fallback, exactly how check_changelog.main.kts resolves it.
+
+          issues_of_pr() {
+            local linked
+            linked=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+            if [ -z "$linked" ]; then
+              # e.g. feat/36-use-labels-to-determine-builds -> 36
+              linked=$(printf '%s' "$PR_BRANCH" | sed -nE 's|^([a-zA-Z]+/)?([0-9]+)-.*|\2|p')
+            fi
+            printf '%s\n' "$linked" | sed '/^$/d'
+          }
+
+          # The same rule backwards. Every open pull request is read in one call
+          # and kept when it resolves to this issue.
+          prs_of_issue() {
+            gh pr list --state open --limit 100 \
+              --json number,headRefName,closingIssuesReferences \
+              --jq '.[] | [(.number|tostring), .headRefName, ([.closingIssuesReferences[].number|tostring] | join(","))] | @tsv' |
+            while IFS=$(printf '\t') read -r number branch closes; do
+              if [ -n "$closes" ]; then
+                if printf '%s\n' "$closes" | tr ',' '\n' | grep -qxF "$1"; then
+                  printf '%s\n' "$number"
+                fi
+              elif printf '%s' "$branch" | grep -qE "^([a-zA-Z]+/)?$1-"; then
+                printf '%s\n' "$number"
+              fi
+            done
+          }
+
+          # --- reading and writing labels -----------------------------------
+          # Both helpers take the kind (issue or pr) as their first argument,
+          # which is also the gh subcommand for it.
+
+          labels_of() {
+            gh "$1" view "$2" --json labels --jq '.labels[].name' | { grep "^$PREFIX" || true; }
+          }
+
+          has_label() {
+            printf '%s\n' "$1" | grep -qxF "$2"
+          }
+
+          # --- which way is this going? -------------------------------------
+
+          if [ "$EVENT" = 'issues' ]; then
+            SOURCE_KIND=issue
+            SOURCE=$ISSUE_NUMBER
+            TARGET_KIND=pr
+            TARGETS=$(prs_of_issue "$ISSUE_NUMBER")
+          else
+            SOURCE_KIND=pr
+            SOURCE=$PR_NUMBER
+            TARGET_KIND=issue
+            TARGETS=$(issues_of_pr "$PR_NUMBER")
+          fi
+
+          if [ -z "$TARGETS" ]; then
+            echo "::notice::Nothing is linked to $SOURCE_KIND #$SOURCE, so there is nothing to sync."
+            exit 0
+          fi
+
+          echo "Syncing $SOURCE_KIND #$SOURCE with $TARGET_KIND $(echo $TARGETS | sed 's/\([0-9]*\)/#\1/g')."
+
+          case "$ACTION" in
+            labeled|unlabeled)
+              # One label changed, so only that one is carried over. Following the
+              # single change is what keeps a removal a removal — taking the union
+              # of both sides would put it straight back.
+              case "$CHANGED_LABEL" in
+                "$PREFIX"*) ;;
+                *)
+                  echo "'$CHANGED_LABEL' is not a $PREFIX label, ignoring it."
+                  exit 0
+                  ;;
+              esac
+
+              for target in $TARGETS; do
+                current=$(labels_of "$TARGET_KIND" "$target")
+                if [ "$ACTION" = 'labeled' ]; then
+                  if has_label "$current" "$CHANGED_LABEL"; then
+                    echo "$TARGET_KIND #$target already has $CHANGED_LABEL."
+                  else
+                    gh "$TARGET_KIND" edit "$target" --add-label "$CHANGED_LABEL"
+                    echo "Added $CHANGED_LABEL to $TARGET_KIND #$target."
+                  fi
+                else
+                  if has_label "$current" "$CHANGED_LABEL"; then
+                    gh "$TARGET_KIND" edit "$target" --remove-label "$CHANGED_LABEL"
+                    echo "Removed $CHANGED_LABEL from $TARGET_KIND #$target."
+                  else
+                    echo "$TARGET_KIND #$target does not have $CHANGED_LABEL."
+                  fi
+                fi
+              done
+              ;;
+
+            *)
+              # opened, reopened or edited: there is no single change to follow,
+              # so both sides are brought up to the union of what they have.
+              # Nothing is removed here — a freshly opened, unlabelled pull request
+              # must not strip the issue it closes.
+              UNION=$(labels_of "$SOURCE_KIND" "$SOURCE")
+              for target in $TARGETS; do
+                UNION=$(printf '%s\n%s\n' "$UNION" "$(labels_of "$TARGET_KIND" "$target")")
+              done
+              UNION=$(printf '%s\n' "$UNION" | sed '/^$/d' | sort -u)
+
+              if [ -z "$UNION" ]; then
+                echo "::warning::Neither $SOURCE_KIND #$SOURCE nor what it is linked to carries a $PREFIX label. Without one the release builds nothing and the changelog stays empty."
+                exit 0
+              fi
+
+              catch_up() {
+                local current
+                current=$(labels_of "$1" "$2")
+                printf '%s\n' "$UNION" | while read -r label; do
+                  if has_label "$current" "$label"; then continue; fi
+                  gh "$1" edit "$2" --add-label "$label"
+                  echo "Added $label to $1 #$2."
+                done
+              }
+
+              catch_up "$SOURCE_KIND" "$SOURCE"
+              for target in $TARGETS; do
+                catch_up "$TARGET_KIND" "$target"
+              done
+              ;;
+          esac
