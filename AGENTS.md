@@ -131,8 +131,11 @@ They are not documentation, they steer the release
 | `project:server` / `project:webapp` | builds and pushes the Docker image                |
 | none                             | builds nothing                                       |
 
-Label **both the issue and the pull request**: the pull request label decides
-what gets built, the issue label decides what the changelog shows (see below).
+The pull request label decides what gets built, the issue label decides what the
+changelog shows (see below) — but **labelling one of the two is enough**:
+[sync-labels.yaml](.github/workflows/sync-labels.yaml) copies every `project:*`
+label between an issue and the pull requests closing it, in both directions, and
+removing one removes it on the other side too. Other labels are left alone.
 
 ### Commits
 
