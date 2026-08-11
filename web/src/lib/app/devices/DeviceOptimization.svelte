@@ -165,6 +165,24 @@
             </div>
         </div>
 
+        <!-- The measurements as recorded. Overlaps the numbers above rather than
+             adding to them, so they sit apart: this is what the optimized track
+             is compared against. -->
+        <div class="flex flex-col gap-2 border-t border-border pt-3">
+            <span class="text-sm font-medium">{$_("devices.optimization.raw_title")}</span>
+
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                <div class="flex flex-col">
+                    <span class="text-muted-foreground">{$_("devices.optimization.raw_points")}</span>
+                    <span class="font-medium">{formatCount(optimization.raw_points)}</span>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-muted-foreground">{$_("devices.optimization.raw_distance")}</span>
+                    <span class="font-medium">{formatDistance(optimization.raw_distance_meters)}</span>
+                </div>
+            </div>
+        </div>
+
         <!-- A finished optimization has nothing to report, so the bar only shows
              while there is something left to do. -->
         {#if percentage < 100 || isRunning}

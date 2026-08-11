@@ -86,7 +86,10 @@
       "running": "Optimizing…",
       "unavailable": "Optimization state unavailable",
       "meters": "{value} m",
-      "kilometers": "{value} km"
+      "kilometers": "{value} km",
+      "raw_title": "Measurements",
+      "raw_points": "Recorded positions",
+      "raw_distance": "Recorded distance"
     },
     "dialogs": {
       "rename": {
@@ -171,6 +174,10 @@
         "day": "Last day",
         "week": "Last week"
       }
+    },
+    "source": {
+      "optimized": "Optimized",
+      "raw": "Raw data"
     },
     "custom": {
       "days": "{count, plural, one {Last day} other {Last # days}}",

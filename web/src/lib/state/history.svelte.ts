@@ -1,11 +1,16 @@
-import {HistoryRepository, type HistoryPoint, type LocationHistory} from "$lib/api/history/history_repository";
+import {
+    HistoryRepository,
+    type HistoryPoint,
+    type HistorySource,
+    type LocationHistory,
+} from "$lib/api/history/history_repository";
 
 /**
  * What to load a history for — one of the user's own devices, or a share
  * (possibly living on a foreign homeserver).
  */
 export type HistoryTarget =
-    | {kind: "device"; deviceId: string}
+    | {kind: "device"; deviceId: string; source?: HistorySource}
     | {kind: "share"; shareId: string; homeserver: string};
 
 /** A history load in progress or finished. `null` history + `failed` = gave up. */
@@ -21,7 +26,7 @@ export interface HistoryLoad {
 
 function fetchFor(target: HistoryTarget): Promise<LocationHistory | null> {
     return target.kind === "device"
-        ? HistoryRepository.forDevice(target.deviceId)
+        ? HistoryRepository.forDevice(target.deviceId, target.source ?? "optimized")
         : HistoryRepository.forShare(target.shareId, target.homeserver);
 }
 

@@ -25,6 +25,13 @@ export interface HistoryPoint {
     is_raw: boolean;
 }
 
+/**
+ * Which of a device's two series to read: the optimized track (optimized
+ * positions as far as they reach, then the raw tail behind them), or only the
+ * measurements as the device reported them.
+ */
+export type HistorySource = "optimized" | "raw";
+
 /** A device's recorded location history, oldest point first. */
 export interface LocationHistory {
     /**
@@ -69,10 +76,10 @@ export const HistoryRepository = {
      * never limited, so `history_seconds` is always null here. Resolves `null` on
      * any failure (network error, unknown device, someone else's device).
      */
-    async forDevice(deviceId: string): Promise<LocationHistory | null> {
+    async forDevice(deviceId: string, source: HistorySource = "optimized"): Promise<LocationHistory | null> {
         let response: Response;
         try {
-            response = await fetch(`/api/v1/devices/${deviceId}/history`);
+            response = await fetch(`/api/v1/devices/${deviceId}/history?source=${source}`);
         } catch {
             return null;
         }

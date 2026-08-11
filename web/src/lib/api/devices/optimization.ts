@@ -4,8 +4,11 @@ import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
 export interface DeviceOptimization {
     optimized_points: number;
     unoptimized_points: number;
+    /** The whole measured series — overlaps the two above, for comparison. */
+    raw_points: number;
     optimized_distance_meters: number;
     unoptimized_distance_meters: number;
+    raw_distance_meters: number;
     /** Share of the settled positions that are optimized, 0..1. */
     progress: number;
     is_running: boolean;
