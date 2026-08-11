@@ -12,9 +12,24 @@ import org.jetbrains.exposed.v1.core.greaterEq
 import kotlin.time.Instant
 
 /**
- * The recorded positions of a device the way a track should show them: the
- * optimized series as far as it reaches, then the raw measurements that come
- * after it.
+ * Which of a device's two series a caller wants to see.
+ *
+ * The optimized track is what a map should normally draw; the raw measurements
+ * are what the device actually reported, jitter and standstill clouds included.
+ */
+enum class TrackSource {
+    /** The optimized series as far as it reaches, then the raw tail behind it. */
+    Optimized,
+
+    /** Only the measurements, exactly as they were recorded. */
+    Raw,
+}
+
+/**
+ * The recorded positions of a device the way a track should show them.
+ *
+ * For [TrackSource.Optimized] that is the optimized series as far as it reaches,
+ * then the raw measurements that come after it.
  *
  * The [TrailOptimizer] only covers what has settled, so the newest positions
  * are always still raw. Handing out the optimized series alone would make a
@@ -27,8 +42,19 @@ import kotlin.time.Instant
  * @param since Only positions at or after this instant, for the retention
  *   window of a share. Null means the whole history.
  */
-fun deviceTrack(device: Device, since: Instant? = null): List<DataSnapshot> {
+fun deviceTrack(
+    device: Device,
+    since: Instant? = null,
+    source: TrackSource = TrackSource.Optimized,
+): List<DataSnapshot> {
     val window = since?.let { DataSnapshots.createdAt greaterEq it } ?: Op.TRUE
+
+    if (source == TrackSource.Raw) {
+        return DataSnapshot
+            .find { (DataSnapshots.device eq device.id) and (DataSnapshots.isRaw eq true) and window }
+            .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
+            .toList()
+    }
 
     val optimizedEnd = DataSnapshot
         .find { (DataSnapshots.device eq device.id) and (DataSnapshots.isRaw eq false) }
