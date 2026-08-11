@@ -14,6 +14,7 @@ import org.jetbrains.exposed.v1.core.eq
 import org.koin.ktor.ext.inject
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /**
@@ -32,6 +33,13 @@ import kotlin.uuid.Uuid
  *   and `history_seconds` is reported as null.
  * - otherwise — only points recorded within that many seconds of now.
  *
+ * `?since=<epoch millis>` lets a caller that already holds the older part of the
+ * history ask for the tail only, which keeps the query on the
+ * `(device, timestamp, is_raw)` index. It may only *narrow* what the share
+ * reveals: the share's own window always wins, so a `since` older than it changes
+ * nothing. `history_seconds` keeps reporting the share's window either way — it
+ * describes the share, not this one request. An unparseable value is ignored.
+ *
  * The battery state is withheld unless the share opted in, mirroring the snapshot
  * endpoints.
  */
@@ -41,6 +49,10 @@ fun Route.getActiveShareHistory() {
     get {
         val activeShareId = call.parameters["activeShareId"]?.let(Uuid::parseOrNull)
             ?: throw EntityNotFoundException("Active share not found")
+
+        val requestedSince = call.request.queryParameters["since"]
+            ?.toLongOrNull()
+            ?.let(Instant::fromEpochMilliseconds)
 
         val response = db.transaction {
             // A returned share is deleted and a removed device is soft-deleted;
@@ -57,7 +69,10 @@ fun Route.getActiveShareHistory() {
                 return@transaction LocationHistoryResponse(historySeconds = 0, points = emptyList())
             }
 
-            val since = if (historySeconds < 0) null else Clock.System.now() - historySeconds.seconds
+            val window = if (historySeconds < 0) null else Clock.System.now() - historySeconds.seconds
+            // The later of the two bounds: the caller may skip what it already has,
+            // but never reach further back than the share allows.
+            val since = listOfNotNull(window, requestedSince).maxOrNull()
 
             LocationHistoryResponse(
                 historySeconds = historySeconds.takeIf { it > 0 },
