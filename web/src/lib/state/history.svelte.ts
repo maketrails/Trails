@@ -136,7 +136,11 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                 return;
             }
 
-            points = base == null ? history.points : applyFreshPoints(base.points, history.points);
+            // An answer that carried nothing leaves the list exactly as it is, identity
+            // included: consumers redraw when it changes, and there is nothing to redraw.
+            if (history.points.length > 0) {
+                points = base == null ? history.points : applyFreshPoints(base.points, history.points);
+            }
             historySeconds = history.history_seconds;
             // Only what the answer actually carried is written back: the cache already
             // holds the rest, and rewriting a month of positions on every visit would
