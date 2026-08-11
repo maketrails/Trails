@@ -53,11 +53,21 @@
     const TRAIL_GAP_LAYER = "location-history-gap";
     const TRAIL_POINT_SOURCE = "location-history-points";
     const TRAIL_POINT_LAYER = "location-history-points-hover";
+    const TRAIL_PUCK_SOURCE = "location-history-puck";
+    const TRAIL_PUCK_LAYER = "location-history-puck-dot";
     const trailColors = $derived(
         darkMode.current
             ? { line: "#e2e8f0", casing: "#020617" }
             : { line: "#0f172a", casing: "#ffffff" }
     );
+
+    /**
+     * The stretch that lies *after* the hovered position in time recedes into grey while
+     * the puck is shown, so what has already been travelled up to it stands out. Grey
+     * enough to read as "set aside" against both styles, and let through by a low opacity
+     * rather than by a colour close to the basemap.
+     */
+    const trailDimmedColor = $derived(darkMode.current ? "#94a3b8" : "#64748b");
 
     /**
      * Stretches the optimizer has not reached yet are drawn violet: they are raw
@@ -78,10 +88,74 @@
     // mapbox-gl's own typings reference is unavailable here.
     type TrailFeature = {
         type: "Feature";
-        properties: { gap: boolean; raw: boolean };
+        properties: { gap: boolean; raw: boolean; dimmed: boolean };
         geometry: { type: "LineString"; coordinates: number[][] };
     };
     type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
+
+    /**
+     * A position *on* the trail rather than one of its recorded positions: the segment
+     * starting at [index], and how far along it (0–1). What the hover resolves to, and what
+     * the puck is placed at.
+     */
+    type TrailPosition = { index: number; fraction: number };
+
+    function interpolate(from: number[], to: number[], fraction: number): number[] {
+        return [from[0] + (to[0] - from[0]) * fraction, from[1] + (to[1] - from[1]) * fraction];
+    }
+
+    /**
+     * How close to a position's own coordinates a fraction has to land before it counts as
+     * being *at* it. Below that the split vertex would sit on top of one that is already
+     * there, which is a zero-length segment for the run splitting to trip over.
+     */
+    const TRAIL_SPLIT_EPSILON = 0.0005;
+
+    /**
+     * The trail cut at [position]: the boundary becomes a vertex of its own, and every
+     * segment beyond it is flagged so it can be drawn apart from the rest.
+     *
+     * `dims` follows the same "incoming segment" convention as {@link gapFlags}, and so do
+     * the copies of `gaps` and `raws` the inserted vertex needs — the segment it splits in
+     * two keeps its kind on both halves.
+     */
+    function splitTrail(
+        coordinates: number[][],
+        gaps: boolean[],
+        raws: boolean[],
+        position: TrailPosition | null,
+    ): {coordinates: number[][]; gaps: boolean[]; raws: boolean[]; dims: boolean[]} {
+        const undimmed = {coordinates, gaps, raws, dims: coordinates.map(() => false)};
+        // Nothing to set apart when there is no hover, or when the position sits on the last
+        // drawn point — during the grow-in animation the line can be shorter than the trail.
+        if (position == null || coordinates[position.index] == null) return undimmed;
+        if (coordinates[position.index + 1] == null) return undimmed;
+
+        // At a recorded position: no vertex to insert, the split runs along its own segment.
+        if (position.fraction <= TRAIL_SPLIT_EPSILON) {
+            return {...undimmed, dims: coordinates.map((_, i) => i > position.index)};
+        }
+        if (position.fraction >= 1 - TRAIL_SPLIT_EPSILON) {
+            return {...undimmed, dims: coordinates.map((_, i) => i > position.index + 1)};
+        }
+
+        const at = position.index + 1;
+        const boundary = interpolate(coordinates[position.index], coordinates[at], position.fraction);
+        const kind = <T,>(flags: T[], fallback: T) => [
+            ...flags.slice(0, at),
+            flags[at] ?? fallback,
+            ...flags.slice(at),
+        ];
+
+        return {
+            coordinates: [...coordinates.slice(0, at), boundary, ...coordinates.slice(at)],
+            gaps: kind(gaps, false),
+            raws: kind(raws, false),
+            // One longer than the input, and dimmed from the segment that leaves the
+            // boundary vertex onwards.
+            dims: Array.from({length: coordinates.length + 1}, (_, i) => i > at),
+        };
+    }
 
     /**
      * The trail's individual positions, as their own features. They exist only to be
@@ -141,21 +215,29 @@
      * the solid and the dotted layer can each filter for their own features. Runs
      * share their boundary point, which keeps the line visually continuous.
      */
-    function trailData(coordinates: number[][], gaps: boolean[], raws: boolean[] = []): TrailData {
+    function trailData(
+        coordinates: number[][],
+        gaps: boolean[],
+        raws: boolean[] = [],
+        dims: boolean[] = []
+    ): TrailData {
         const features: TrailFeature[] = [];
         // A LineString needs at least two positions; fewer means nothing to draw.
         let runStart = 1;
         for (let segment = 1; segment < coordinates.length; segment++) {
             const gap = gaps[segment] ?? false;
             const raw = raws[segment] ?? false;
+            const dimmed = dims[segment] ?? false;
             const isLast = segment === coordinates.length - 1;
             const sameKind =
-                (gaps[segment + 1] ?? false) === gap && (raws[segment + 1] ?? false) === raw;
+                (gaps[segment + 1] ?? false) === gap &&
+                (raws[segment + 1] ?? false) === raw &&
+                (dims[segment + 1] ?? false) === dimmed;
             if (!isLast && sameKind) continue;
 
             features.push({
                 type: "Feature",
-                properties: { gap, raw },
+                properties: { gap, raw, dimmed },
                 geometry: { type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1) }
             });
             runStart = segment + 1;
@@ -184,14 +266,20 @@
         try {
             currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], []) });
 
-            // Violet where the track is still raw, the theme colour where it is
-            // optimized. One expression, so a stretch cannot end up in both.
+            // Grey once the hover has set a stretch aside, otherwise violet where the
+            // track is still raw and the theme colour where it is optimized. One
+            // expression, so a stretch cannot end up in more than one of them.
             const lineColor: mapboxgl.ExpressionSpecification = [
                 "case",
+                ["get", "dimmed"],
+                trailDimmedColor,
                 ["get", "raw"],
                 trailRawColor,
                 trailColors.line
             ];
+            // What "somewhat transparent" means, per kind of stretch.
+            const lineOpacity: mapboxgl.ExpressionSpecification = ["case", ["get", "dimmed"], 0.35, 0.9];
+            const gapOpacity: mapboxgl.ExpressionSpecification = ["case", ["get", "dimmed"], 0.2, 0.45];
 
             // `slot` positions the layers in the v3 "standard" style (which imports
             // its basemap, so it exposes no symbol layers to sort against); the
@@ -199,12 +287,14 @@
             const beforeId = firstSymbolLayerId(currentMap);
             // Solid stretches only — a solid casing under the dots would undo the
             // point of drawing them faintly.
+            // The casing stops where the trail is set aside: a solid halo would keep the
+            // stretch as present as the rest, which is the opposite of the point.
             currentMap.addLayer({
                 id: TRAIL_CASING_LAYER,
                 type: "line",
                 slot: "middle",
                 source: TRAIL_SOURCE,
-                filter: ["!", ["get", "gap"]],
+                filter: ["all", ["!", ["get", "gap"]], ["!", ["get", "dimmed"]]],
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
@@ -215,7 +305,7 @@
                 source: TRAIL_SOURCE,
                 filter: ["!", ["get", "gap"]],
                 layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": lineColor, "line-width": 3.5, "line-opacity": 0.9 }
+                paint: { "line-color": lineColor, "line-width": 3.5, "line-opacity": lineOpacity }
             }, beforeId);
             // Recording gaps: round caps plus a zero-length dash renders as dots.
             // Dash lengths are multiples of the line width, so 2 = one dot diameter
@@ -231,7 +321,7 @@
                 paint: {
                     "line-color": lineColor,
                     "line-width": 3.5,
-                    "line-opacity": 0.45,
+                    "line-opacity": gapOpacity,
                     "line-dasharray": [0, 2]
                 }
             }, beforeId);
@@ -257,6 +347,21 @@
                 source: TRAIL_POINT_SOURCE,
                 paint: {"circle-radius": 1, "circle-opacity": 0, "circle-stroke-width": 0}
             }, beforeId);
+
+            // The indicator itself, added last so it sits on top of the line it marks.
+            currentMap.addSource(TRAIL_PUCK_SOURCE, {type: "geojson", data: trailPuckData(null)});
+            currentMap.addLayer({
+                id: TRAIL_PUCK_LAYER,
+                type: "circle",
+                slot: "middle",
+                source: TRAIL_PUCK_SOURCE,
+                paint: {
+                    "circle-radius": 12.5,
+                    "circle-color": trailColors.line,
+                    "circle-stroke-width": 5,
+                    "circle-stroke-color": trailColors.casing
+                }
+            }, beforeId);
             return true;
         } catch {
             return false;
@@ -268,7 +373,7 @@
      * pixels. It applies to the segments between the positions exactly as it does to the
      * positions themselves — the line is what is visible, so that is what is aimed at.
      */
-    const TRAIL_HOVER_RADIUS = 6;
+    const TRAIL_HOVER_RADIUS = 10;
 
     /**
      * How far out to look for the endpoints of a segment when nothing is within reach.
@@ -283,6 +388,13 @@
 
     /** Enough movement along a segment to be worth another line in the console. */
     const TRAIL_HOVER_LOG_STEP = 0.05;
+
+    /**
+     * Where on the trail the cursor is, or null when it is not near it. Drives the
+     * indicator puck and the stretch that recedes behind it, and is read by
+     * {@link setTrailCoordinates} on every redraw.
+     */
+    let hovered: TrailPosition | null = null;
 
     // What was last reported, so moving on within the same stretch stays quiet instead of
     // logging on every mouse event. Cleared when nothing is in reach, so coming back to a
@@ -310,19 +422,17 @@
     }
 
     /**
-     * Reports the recorded position the cursor is nearest to, and where between that
-     * position and one of its neighbours the cursor actually sits: `progress` runs from 0
-     * to 1 towards the *next* position and from 0 to -1 towards the *previous* one. The
-     * nearer end of a segment is the position reported, so in practice the value stays
-     * within half a segment either way.
+     * Follows the cursor along the trail: puts the indicator puck where it runs closest and
+     * sets the stretch beyond that aside, or clears both once the cursor is further away
+     * than {@link TRAIL_HOVER_RADIUS} from the whole line.
      *
-     * A development aid for looking data up by hand, hence `console.log` and hence
-     * dev-only — in a production build `import.meta.env.DEV` is false and this compiles
-     * away.
+     * In development it also reports what it found — the recorded position the cursor is
+     * nearest to, and where between that position and one of its neighbours the cursor
+     * sits: `progress` runs from 0 to 1 towards the *next* position and from 0 to -1
+     * towards the *previous* one. The nearer end of a segment is the position reported, so
+     * in practice the value stays within half a segment either way.
      */
-    function logHoveredPoint(event: mapboxgl.MapMouseEvent) {
-        if (!import.meta.env.DEV) return;
-
+    function updateHoveredPoint(event: mapboxgl.MapMouseEvent) {
         const currentMap = map;
         // Bound to the map, not to the layer, so it also fires beside the trail rather
         // than only on it. The layer is gone between style swaps and while no trail is
@@ -385,12 +495,17 @@
 
         if (nearest == null) {
             loggedPointId = null;
+            setHovered(currentMap, null);
             return;
         }
 
+        const {index: segmentStart, fraction, distance} = nearest;
+        setHovered(currentMap, {index: segmentStart, fraction});
+
+        if (!import.meta.env.DEV) return;
+
         // Anchor on the nearer end of the segment and let the sign say which way the cursor
         // went from it: forwards to the next position, backwards to the previous one.
-        const {index: segmentStart, fraction, distance} = nearest;
         const forwards = fraction <= 0.5;
         const index = forwards ? segmentStart : segmentStart + 1;
         const progress = forwards ? fraction : fraction - 1;
@@ -413,6 +528,26 @@
         });
     }
 
+    /**
+     * Moves the puck and the boundary of the set-aside stretch, redrawing only when
+     * something actually changed — a mouse move within the same fraction of the same
+     * segment leaves the map alone.
+     *
+     * While the grow-in animation runs, its next frame redraws the line anyway; only the
+     * puck is moved here.
+     */
+    function setHovered(currentMap: mapboxgl.Map, position: TrailPosition | null) {
+        if (position?.index === hovered?.index && position?.fraction === hovered?.fraction) return;
+
+        hovered = position;
+        setTrailPuck(currentMap, position);
+
+        if (trailFrame != null) return;
+
+        const points = mapTrail.points;
+        setTrailCoordinates(currentMap, toCoordinates(points), gapFlags(points), rawFlags(points));
+    }
+
     function setTrailCoordinates(
         currentMap: mapboxgl.Map,
         coordinates: number[][],
@@ -420,7 +555,48 @@
         raws: boolean[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws));
+        if (source?.type !== "geojson") return;
+
+        // The hovered position is read here rather than passed in, so every redraw — a
+        // frame of the grow-in animation included — sets the same stretch aside.
+        const split = splitTrail(coordinates, gaps, raws, hovered);
+        source.setData(trailData(split.coordinates, split.gaps, split.raws, split.dims));
+    }
+
+    /** A collection of one point, or of none while nothing is hovered. */
+    function trailPuckData(coordinate: number[] | null): TrailPointData {
+        return {
+            type: "FeatureCollection",
+            features: coordinate == null
+                ? []
+                : [{
+                    type: "Feature",
+                    properties: {index: 0},
+                    geometry: {type: "Point", coordinates: coordinate}
+                }],
+        };
+    }
+
+    /** Puts the indicator on [position], or takes it off the map for null. */
+    function setTrailPuck(currentMap: mapboxgl.Map, position: TrailPosition | null) {
+        const source = currentMap.getSource(TRAIL_PUCK_SOURCE);
+        if (source?.type !== "geojson") return;
+
+        const points = mapTrail.points;
+        const from = position == null ? null : points[position.index];
+        const to = position == null ? null : points[position.index + 1];
+
+        if (from == null) {
+            source.setData(trailPuckData(null));
+            return;
+        }
+
+        // Interpolated in coordinates, the same way the line between the two is drawn, so
+        // the puck sits on it rather than beside it.
+        const start = [from.longitude, from.latitude];
+        source.setData(trailPuckData(
+            to == null ? start : interpolate(start, [to.longitude, to.latitude], position!.fraction)
+        ));
     }
 
     /** The hit targets for {@link logHoveredPoint}; see {@link TRAIL_POINT_SOURCE}. */
@@ -569,7 +745,9 @@
 
             // Registered once for the map's whole life, not with the layer: the layer is
             // added again after every style swap, and so would the listener be.
-            map.on("mousemove", logHoveredPoint);
+            map.on("mousemove", updateHoveredPoint);
+            // Leaving the map is not a mouse move, so the puck would stay behind.
+            map.on("mouseout", () => setHovered(map!, null));
 
             // Fires for the initial style and again after every setStyle.
             map.on("style.load", () => styleEpoch++);
@@ -638,7 +816,12 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
+        // A different track is not the one that was hovered, and after a style swap the
+        // re-added puck layer starts out empty — either way it is put back from here.
+        if (isNewTrail) hovered = null;
+
         drawTrail(currentMap, points, animateFrom);
+        setTrailPuck(currentMap, hovered);
         // Independent of the animation: the hit targets are the whole trail from the
         // start, so hovering does not have to wait for the line to arrive.
         setTrailPoints(currentMap, points);
@@ -650,6 +833,7 @@
             try {
                 setTrailCoordinates(currentMap, []);
                 setTrailPoints(currentMap, []);
+                setTrailPuck(currentMap, null);
             } catch {
                 // Nothing to clear.
             }
