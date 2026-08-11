@@ -51,6 +51,8 @@
     const TRAIL_CASING_LAYER = "location-history-casing";
     const TRAIL_LINE_LAYER = "location-history-line";
     const TRAIL_GAP_LAYER = "location-history-gap";
+    const TRAIL_POINT_SOURCE = "location-history-points";
+    const TRAIL_POINT_LAYER = "location-history-points-hover";
     const trailColors = $derived(
         darkMode.current
             ? { line: "#e2e8f0", casing: "#020617" }
@@ -80,6 +82,29 @@
         geometry: { type: "LineString"; coordinates: number[][] };
     };
     type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
+
+    /**
+     * The trail's individual positions, as their own features. They exist only to be
+     * hovered — the trail itself is drawn as lines, which cannot say *which* position the
+     * cursor is over.
+     */
+    type TrailPointFeature = {
+        type: "Feature";
+        properties: { id: string; timestamp: number; index: number; raw: boolean };
+        geometry: { type: "Point"; coordinates: number[] };
+    };
+    type TrailPointData = { type: "FeatureCollection"; features: TrailPointFeature[] };
+
+    function trailPointData(points: HistoryPoint[]): TrailPointData {
+        return {
+            type: "FeatureCollection",
+            features: points.map((point, index) => ({
+                type: "Feature",
+                properties: {id: point.id, timestamp: point.timestamp, index, raw: point.is_raw},
+                geometry: {type: "Point", coordinates: [point.longitude, point.latitude]},
+            })),
+        };
+    }
 
     /**
      * Anything longer than this between two consecutive points is a recording gap:
@@ -206,10 +231,56 @@
                     "line-dasharray": [0, 2]
                 }
             }, beforeId);
+
+            /*
+             * Invisible hit targets over the trail's positions, so hovering can report
+             * which one the cursor is on. Its own source: the line's data is rewritten on
+             * every frame of the grow-in animation, and rebuilding tens of thousands of
+             * point features at that rate would stall the map.
+             */
+            currentMap.addSource(TRAIL_POINT_SOURCE, {
+                type: "geojson",
+                data: trailPointData([]),
+            });
+            currentMap.addLayer({
+                id: TRAIL_POINT_LAYER,
+                type: "circle",
+                slot: "middle",
+                source: TRAIL_POINT_SOURCE,
+                paint: {"circle-radius": 6, "circle-opacity": 0, "circle-stroke-width": 0}
+            }, beforeId);
             return true;
         } catch {
             return false;
         }
+    }
+
+    /**
+     * The position last reported, so moving within one hit target stays quiet instead of
+     * logging on every mouse event.
+     */
+    let loggedPointId: string | null = null;
+
+    /**
+     * Reports which recorded position the cursor is over. A development aid for looking
+     * data up by hand, hence `console.log` and hence dev-only — in a production build
+     * `import.meta.env.DEV` is false and this compiles away.
+     */
+    function logHoveredPoint(event: mapboxgl.MapMouseEvent & {features?: {properties?: Record<string, unknown>}[]}) {
+        if (!import.meta.env.DEV) return;
+
+        const properties = event.features?.[0]?.properties;
+        const id = properties?.id;
+        if (typeof id !== "string" || id === loggedPointId) return;
+
+        loggedPointId = id;
+        console.log("trail point", {
+            id,
+            index: properties?.index,
+            raw: properties?.raw,
+            timestamp: properties?.timestamp,
+            recordedAt: new Date(Number(properties?.timestamp)).toISOString(),
+        });
     }
 
     function setTrailCoordinates(
@@ -220,6 +291,13 @@
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
         if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws));
+    }
+
+    /** The hit targets for {@link logHoveredPoint}; see {@link TRAIL_POINT_SOURCE}. */
+    function setTrailPoints(currentMap: mapboxgl.Map, points: HistoryPoint[]) {
+        const source = currentMap.getSource(TRAIL_POINT_SOURCE);
+        if (source?.type === "geojson") source.setData(trailPointData(points));
+        loggedPointId = null;
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -359,6 +437,11 @@
             map.on("rotatestart", onUserInteraction);
             map.on("pitchstart", onUserInteraction);
 
+            // Registered once for the map's whole life, not with the layer: the layer is
+            // added again after every style swap, and so would the listener be. A
+            // layer-scoped listener simply stays quiet while its layer is absent.
+            map.on("mousemove", TRAIL_POINT_LAYER, logHoveredPoint);
+
             // Fires for the initial style and again after every setStyle.
             map.on("style.load", () => styleEpoch++);
         });
@@ -427,6 +510,9 @@
                 : trailAnimationStart;
 
         drawTrail(currentMap, points, animateFrom);
+        // Independent of the animation: the hit targets are the whole trail from the
+        // start, so hovering does not have to wait for the line to arrive.
+        setTrailPoints(currentMap, points);
 
         return () => {
             cancelTrailAnimation();
@@ -434,6 +520,7 @@
             // teardown, or mid-swap between two styles.
             try {
                 setTrailCoordinates(currentMap, []);
+                setTrailPoints(currentMap, []);
             } catch {
                 // Nothing to clear.
             }

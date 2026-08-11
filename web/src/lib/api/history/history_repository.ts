@@ -15,6 +15,12 @@ import type {Battery} from "$lib/state/webapp_socket.svelte";
  * line as equally clean.
  */
 export interface HistoryPoint {
+    /**
+     * The stored row's own id, for pointing at exactly this position when inspecting the
+     * data. Stable for a measurement, but an optimized position gets a new one on every
+     * rebuild — `timestamp` is the identity to rely on.
+     */
+    id: string;
     timestamp: number;
     latitude: number;
     longitude: number;

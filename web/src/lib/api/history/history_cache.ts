@@ -54,6 +54,13 @@ class HistoryDatabase extends Dexie {
             points: "[device+source+timestamp], device",
             cursors: "[device+source], device",
         });
+        // A stored position gained the id of the row it came from. What was cached
+        // without one would read back as positions that cannot be pointed at, so it is
+        // dropped and read again — cursors included, or nothing would be re-read.
+        this.version(3).upgrade(async (tx) => {
+            await tx.table("points").clear();
+            await tx.table("cursors").clear();
+        });
     }
 }
 
