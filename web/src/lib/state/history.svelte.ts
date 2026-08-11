@@ -5,10 +5,10 @@ import {
     type LocationHistory,
 } from "$lib/api/history/history_repository";
 import {
+    appendCachedHistory,
     clearCachedHistory,
     mergeHistoryPoints,
     readCachedHistory,
-    writeCachedHistory,
 } from "$lib/api/history/history_cache";
 
 /**
@@ -83,10 +83,6 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         }
 
         const cacheKey = cacheKeyFor(current);
-        // What the cache holds is shown right away; the request that follows only
-        // has to fill in the tail.
-        const cached = cacheKey == null ? null : readCachedHistory(cacheKey);
-        if (cached != null) points = cached;
 
         loading = true;
         // Guards against a stale response overwriting a newer target's history:
@@ -96,7 +92,12 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         void (async () => {
             // The part of the result the response is merged onto; dropped as soon as
             // the cache turns out not to describe this history any more.
-            let base = cached;
+            let base = cacheKey == null ? null : await readCachedHistory(cacheKey);
+            if (cancelled) return;
+
+            // What the cache holds goes on the map before the request even goes out;
+            // the response only has to fill in the tail.
+            if (base != null) points = base;
 
             // A rejection (e.g. a response that isn't from Trails) must surface as
             // a failed load rather than leaving `loading` stuck true forever.
@@ -110,7 +111,7 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
              */
             if (!cancelled && base != null && history?.points.length === 0) {
                 base = null;
-                if (cacheKey != null) clearCachedHistory(cacheKey);
+                if (cacheKey != null) await clearCachedHistory(cacheKey);
                 history = await fetchFor(current).catch(() => null);
             }
 
@@ -124,10 +125,12 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                 return;
             }
 
-            const merged = base == null ? history.points : mergeHistoryPoints(base, history.points);
-            points = merged;
+            points = base == null ? history.points : mergeHistoryPoints(base, history.points);
             historySeconds = history.history_seconds;
-            if (cacheKey != null) writeCachedHistory(cacheKey, merged);
+            // Only what was just read is written back — the cache already holds the
+            // rest, and rewriting a month of positions on every visit would be the
+            // very cost this cache exists to avoid.
+            if (cacheKey != null) void appendCachedHistory(cacheKey, history.points);
         })();
 
         return () => {

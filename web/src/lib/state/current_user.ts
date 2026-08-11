@@ -29,8 +29,13 @@ const LOGOUT_URL = "/api/v1/webapp/auth/logout";
  * endpoint directly, so anything that has to be cleaned up in the future is added
  * here and takes effect everywhere at once.
  */
-export function logout(): void {
-    forgetSession();
+export async function logout(): Promise<void> {
+    // Awaited, because the navigation below tears down everything that is still
+    // running — including a half-finished database transaction. Should storage take
+    // too long or hang, signing out still wins: the redirect lands back in the app,
+    // where [updateUser] sees the ended session and cleans up on the second attempt.
+    await Promise.race([forgetSession(), new Promise((resolve) => setTimeout(resolve, 2_000))]);
+
     // A navigation, not a fetch: the endpoint answers with a redirect and clears the
     // session cookie on the way. Nothing runs after this.
     location.assign(LOGOUT_URL);
@@ -46,9 +51,9 @@ export function logout(): void {
  * is gone — that second path covers a session that expired or was signed out in
  * another tab, and must not navigate anywhere.
  */
-function forgetSession(): void {
+async function forgetSession(): Promise<void> {
     currentUser.set(null);
-    clearAllCachedHistories();
+    await clearAllCachedHistories();
 }
 
 export async function updateUser() {
@@ -61,7 +66,7 @@ export async function updateUser() {
          * leaves the store alone. That makes it the one safe point to clean up after
          * a session that ended without the user pressing "log out" here.
          */
-        if (currentUserResult == null) forgetSession();
+        if (currentUserResult == null) await forgetSession();
         else currentUser.set(currentUserResult);
     } finally {
         authInitialized.set(true);

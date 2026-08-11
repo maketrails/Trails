@@ -1,8 +1,9 @@
 import {browser} from "$app/environment";
+import Dexie, {type EntityTable} from "dexie";
 import type {HistoryPoint} from "$lib/api/history/history_repository";
 
 /**
- * `localStorage` cache for the **raw** location history of a device.
+ * IndexedDB cache for the **raw** location history of a device, via Dexie.
  *
  * The raw series is the only one worth caching: it is append-only — the optimizer
  * derives its own points and never touches the measurements — so a cached prefix
@@ -10,135 +11,120 @@ import type {HistoryPoint} from "$lib/api/history/history_repository";
  * rebuilt whenever the optimizer catches up, which would leave a cache holding
  * positions of an older generation.
  *
- * A history of years is far too big to re-download on every visit, and equally too
- * big to always fit in a 5 MB origin quota, so a cache that cannot be stored is
- * simply dropped: the next visit reads the full history again. What must never
- * happen is storing *part* of a history, because the merge below would then present
- * a truncated track as the complete one.
- */
-
-/** Bumped whenever the stored shape changes; entries of any other version are dropped. */
-const VERSION = 1;
-
-const KEY_PREFIX = "trails.history.raw.";
-
-/**
- * Entries larger than this are not stored at all. Browsers grant an origin around
- * 5 MB and the map, the socket snapshots and the other devices' histories share it,
- * so one device may not claim all of it.
- */
-const MAX_SERIALIZED_LENGTH = 2_000_000;
-
-interface CacheEntry {
-    version: number;
-    points: HistoryPoint[];
-}
-
-function key(deviceId: string): string {
-    return `${KEY_PREFIX}${deviceId}`;
-}
-
-/**
- * The cached raw history of [deviceId], oldest point first, or `null` when there is
- * nothing usable stored. Anything unreadable (another version, truncated JSON,
- * hand-edited storage) is discarded rather than repaired — the full history is one
- * request away.
- */
-export function readCachedHistory(deviceId: string): HistoryPoint[] | null {
-    if (!browser) return null;
-
-    let raw: string | null;
-    try {
-        raw = localStorage.getItem(key(deviceId));
-    } catch {
-        // Storage can be denied outright (private mode, blocked cookies).
-        return null;
-    }
-    if (raw == null) return null;
-
-    try {
-        const entry = JSON.parse(raw) as CacheEntry;
-        if (entry?.version !== VERSION || !Array.isArray(entry.points) || entry.points.length === 0) {
-            clearCachedHistory(deviceId);
-            return null;
-        }
-        return entry.points;
-    } catch {
-        clearCachedHistory(deviceId);
-        return null;
-    }
-}
-
-/**
- * Stores [points] as the complete raw history of [deviceId]. Only ever call this
- * with a full history — see the note on truncation above.
+ * `localStorage` cannot hold this: a device that recorded for a month reaches ~4 MB
+ * of serialized positions, and because `localStorage` is measured in UTF-16 units
+ * that is ~8 MB against a ~5 MB origin quota. IndexedDB stores the points as
+ * structured data, has a quota measured in a share of the free disk instead, and
+ * lets a visit write **only the new tail** rather than rewriting the whole history.
  *
- * An empty history is not stored: "nothing cached" and "cached, and there is
- * nothing" would otherwise be indistinguishable, and a device without positions is
- * the cheap case anyway.
+ * One record per position, with `[device+timestamp]` as the primary key:
+ * - a device's points come out of a range query already in timestamp order,
+ * - re-storing a point the cache already holds overwrites it instead of duplicating
+ *   it, which is what makes the overlapping seam of an incremental read harmless,
+ * - and because a bulk write is one transaction, a cached history is never a partial
+ *   one — the invariant the merge in `history.svelte.ts` relies on, since it presents
+ *   what it holds as the complete track.
  */
-export function writeCachedHistory(deviceId: string, points: HistoryPoint[]): void {
-    if (!browser) return;
-    if (points.length === 0) {
-        clearCachedHistory(deviceId);
-        return;
-    }
 
-    const entry: CacheEntry = {version: VERSION, points};
-    const serialized = JSON.stringify(entry);
-    if (serialized.length > MAX_SERIALIZED_LENGTH) {
-        clearCachedHistory(deviceId);
-        return;
+/** A cached position: a [HistoryPoint] plus the device it was recorded by. */
+interface StoredPoint extends HistoryPoint {
+    device: string;
+}
+
+class HistoryDatabase extends Dexie {
+    rawPoints!: EntityTable<StoredPoint>;
+
+    constructor() {
+        super("trails");
+        // The extra `device` index is what makes "which devices hold something?" a
+        // walk over devices instead of over every cached position.
+        this.version(1).stores({rawPoints: "[device+timestamp], device"});
     }
+}
+
+/**
+ * The database, opened on first use. `null` while server-side rendering, where there
+ * is no IndexedDB to talk to — every function below then does nothing, and the
+ * history is read from the server as if nothing were cached.
+ */
+let database: HistoryDatabase | null = null;
+
+function open(): HistoryDatabase | null {
+    if (!browser) return null;
+    if (database == null) {
+        forgetLegacyEntries();
+        database = new HistoryDatabase();
+    }
+    return database;
+}
+
+/**
+ * The key range covering every point of one device: from the device's first possible
+ * timestamp to its last.
+ */
+function deviceRange(deviceId: string) {
+    return open()?.rawPoints.where("[device+timestamp]").between(
+        [deviceId, Dexie.minKey],
+        [deviceId, Dexie.maxKey],
+    );
+}
+
+/**
+ * The cached raw history of [deviceId], oldest point first, or `null` when nothing is
+ * cached for it (and whenever storage cannot be reached at all).
+ */
+export async function readCachedHistory(deviceId: string): Promise<HistoryPoint[] | null> {
+    try {
+        const stored = await deviceRange(deviceId)?.toArray();
+        if (stored == null || stored.length === 0) return null;
+        // The device id is part of the key, not of what a caller asked for.
+        return stored.map(({device: _device, ...point}) => point);
+    } catch (e) {
+        console.warn("Could not read the cached location history", e);
+        return null;
+    }
+}
+
+/**
+ * Adds [points] to the cached history of [deviceId]. Only the positions a load
+ * actually read have to be passed — the ones already cached stay untouched, and a
+ * point handed over twice (the inclusive seam of an incremental read) overwrites its
+ * own record.
+ */
+export async function appendCachedHistory(deviceId: string, points: HistoryPoint[]): Promise<void> {
+    if (points.length === 0) return;
 
     try {
-        localStorage.setItem(key(deviceId), serialized);
-    } catch {
-        // Out of quota (or storage denied): leave nothing behind, so the next read
-        // cannot pick up a half-written or stale entry.
-        clearCachedHistory(deviceId);
+        await open()?.rawPoints.bulkPut(points.map((point) => ({...point, device: deviceId})));
+    } catch (e) {
+        // Never silently: a cache that cannot be written means every visit downloads
+        // the whole history again, and that should be visible rather than just slow.
+        console.warn("Could not cache the location history", e);
     }
 }
 
 /** Forgets the cached raw history of [deviceId]. */
-export function clearCachedHistory(deviceId: string): void {
-    if (!browser) return;
+export async function clearCachedHistory(deviceId: string): Promise<void> {
     try {
-        localStorage.removeItem(key(deviceId));
-    } catch {
-        // Nothing to do — a cache we cannot clear is a cache we never read either.
-    }
-}
-
-/**
- * The device ids that currently hold a cached history, as a snapshot — removing an
- * entry while walking `localStorage` would shift the indices of the keys behind it.
- * `null` means storage could not be read at all.
- */
-function cachedDeviceIds(): string[] | null {
-    try {
-        const deviceIds: string[] = [];
-        for (let index = 0; index < localStorage.length; index++) {
-            const storedKey = localStorage.key(index);
-            if (storedKey == null || !storedKey.startsWith(KEY_PREFIX)) continue;
-            deviceIds.push(storedKey.slice(KEY_PREFIX.length));
-        }
-        return deviceIds;
-    } catch {
-        return null;
+        await deviceRange(deviceId)?.delete();
+    } catch (e) {
+        console.warn("Could not clear the cached location history", e);
     }
 }
 
 /**
  * Forgets every cached history, whichever device it belongs to.
  *
- * Sign-out is the moment for this: a location history is the most personal thing
- * this app holds, and once the session is gone it must not be left behind on a
- * possibly shared computer for the next visitor to find.
+ * Sign-out is the moment for this: a location history is the most personal thing this
+ * app holds, and once the session is gone it must not be left behind on a possibly
+ * shared computer for the next visitor to find.
  */
-export function clearAllCachedHistories(): void {
-    if (!browser) return;
-    for (const deviceId of cachedDeviceIds() ?? []) clearCachedHistory(deviceId);
+export async function clearAllCachedHistories(): Promise<void> {
+    try {
+        await open()?.rawPoints.clear();
+    } catch (e) {
+        console.warn("Could not clear the cached location histories", e);
+    }
 }
 
 /**
@@ -156,12 +142,42 @@ export function clearAllCachedHistories(): void {
  * would wipe caches that are still wanted. An authoritative list that happens to be
  * empty (a user without devices) is fine.
  */
-export function pruneCachedHistories(knownDeviceIds: Iterable<string>): void {
-    if (!browser) return;
+export async function pruneCachedHistories(knownDeviceIds: Iterable<string>): Promise<void> {
+    const opened = open();
+    if (opened == null) return;
 
-    const known = new Set(knownDeviceIds);
-    for (const deviceId of cachedDeviceIds() ?? []) {
-        if (!known.has(deviceId)) clearCachedHistory(deviceId);
+    try {
+        // One key per cached device rather than one per position: `uniqueKeys` walks
+        // the `device` index by distinct value.
+        const cached = await opened.rawPoints.orderBy("device").uniqueKeys();
+        const known = new Set(knownDeviceIds);
+
+        for (const key of cached) {
+            const deviceId = key as string;
+            if (!known.has(deviceId)) await clearCachedHistory(deviceId);
+        }
+    } catch (e) {
+        console.warn("Could not prune the cached location histories", e);
+    }
+}
+
+/**
+ * Drops the entries of the first, `localStorage`-based version of this cache. It never
+ * shipped, but a development browser can still hold a few hundred kilobytes of
+ * positions under those keys, and location data must not be left lying around just
+ * because the storage behind the cache changed.
+ */
+function forgetLegacyEntries(): void {
+    const legacyPrefix = "trails.history.raw.";
+    try {
+        const keys: string[] = [];
+        for (let index = 0; index < localStorage.length; index++) {
+            const storedKey = localStorage.key(index);
+            if (storedKey?.startsWith(legacyPrefix)) keys.push(storedKey);
+        }
+        for (const storedKey of keys) localStorage.removeItem(storedKey);
+    } catch {
+        // Storage denied — then nothing was ever written under those keys either.
     }
 }
 

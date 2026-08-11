@@ -181,7 +181,7 @@ function handleMessage(message: ServerMessage) {
              * a closed socket or an offline start never hands over an empty list that
              * could wipe the caches, they simply never get here.
              */
-            pruneCachedHistories(devices.map((device) => device.id));
+            void pruneCachedHistories(devices.map((device) => device.id));
             shares = message.shares ?? [];
             emittedShares = message.emitted_shares ?? [];
             foreignShares = message.foreign_shares ?? [];
