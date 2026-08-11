@@ -39,6 +39,12 @@ export interface LocationHistory {
      * was cut off — the caller's own device, or a share with an unbounded window.
      */
     history_seconds: number | null;
+    /**
+     * Where to continue reading: hand this back as `since` and the next answer holds
+     * what has been *stored* in the meantime. `null` when nothing came back, in which
+     * case the cursor already held stays valid.
+     */
+    cursor: number | null;
     points: HistoryPoint[];
 }
 
@@ -65,9 +71,10 @@ async function readHistory(response: Response): Promise<LocationHistory | null> 
  * it is fetched when a detail view opens and does not update live.
  */
 /**
- * `?since=<epoch millis>` for a caller that already holds the older part of a
- * history: the server then only reads the tail. The bound is inclusive on both
- * endpoints, so the answer overlaps the caller's last known point.
+ * `?since=<epoch millis>` is the `cursor` of an earlier answer: the server then reads
+ * only what has been **stored** since, which is what catches the optimizer's rebuilt
+ * positions as well — they carry old recording timestamps but a new storage time. The
+ * bound is inclusive, so the answer overlaps what the caller already has.
  */
 function historyQuery(since?: number, source?: HistorySource): string {
     const query = new URLSearchParams();
@@ -83,8 +90,8 @@ export const HistoryRepository = {
      * limited, so `history_seconds` is always null here. Resolves `null` on any
      * failure (network error, unknown device, someone else's device).
      *
-     * [since] asks for the positions from that instant (epoch milliseconds,
-     * inclusive) onwards instead of the whole history — see [historyQuery].
+     * [since] continues from the `cursor` of an earlier answer instead of reading the
+     * whole history — see [historyQuery].
      */
     async forDevice(
         deviceId: string,
