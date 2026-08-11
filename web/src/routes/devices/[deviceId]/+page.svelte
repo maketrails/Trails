@@ -35,10 +35,12 @@
         return () => setCameraTarget(null);
     });
 
-    // Draw the history as a line on the map while the page is open.
+    // Draw the history as a line on the map while the page is open. The key names the
+    // track, so switching the source animates the new line in while the history
+    // arriving in pieces does not.
     $effect(() => {
-        setMapTrail(history.points);
-        return () => setMapTrail(null);
+        setMapTrail(history.points, deviceId ? `device:${deviceId}:${historySource}` : null);
+        return () => setMapTrail(null, null);
     });
 
     let imageUrl = $derived(device ? `/api/v1/devices/image/${device.manufacturer}-${device.model}` : null);

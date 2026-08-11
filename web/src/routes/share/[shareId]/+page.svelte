@@ -69,8 +69,8 @@
 
     // Draw the history as a line on the map while the page is open.
     $effect(() => {
-        setMapTrail(history.points);
-        return () => setMapTrail(null);
+        setMapTrail(history.points, shareId ? `share:${shareId}` : null);
+        return () => setMapTrail(null, null);
     });
 
     let historyState: HistoryState = $derived.by(() => {

@@ -10,10 +10,21 @@ import kotlinx.serialization.Serializable
  * `null` means nothing was cut off (the caller owns the device, or the share it
  * holds carries an unbounded window), any other value is the share's
  * `location_history_seconds` that capped the response.
+ *
+ * [cursor] is how a caller reads incrementally: hand it back as `?since=` and the
+ * next answer holds what has been *stored* in the meantime. That is not the same as
+ * "recorded in the meantime" — the optimizer writes positions under the timestamps of
+ * the measurements they came from, so a rebuilt stretch of the optimized track is new
+ * data under old timestamps, and only a storage-time cursor catches it.
+ *
+ * Because a rebuild replaces positions instead of only adding them, an answer is not
+ * merely something to append: everything the caller holds from the *first* returned
+ * point's timestamp onwards has been superseded by it.
  */
 @Serializable
 data class LocationHistoryResponse(
     @SerialName("history_seconds") val historySeconds: Int? = null,
+    @SerialName("cursor") val cursor: Long? = null,
     @SerialName("points") val points: List<LocationHistoryPoint> = emptyList(),
 )
 

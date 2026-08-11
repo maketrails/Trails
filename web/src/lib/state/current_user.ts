@@ -1,5 +1,6 @@
 import {writable} from "svelte/store";
 import {getMe} from "$lib/api/auth/get_me";
+import {clearAllCachedHistories} from "$lib/api/history/history_cache";
 
 export interface User {
     id: string;
@@ -17,10 +18,56 @@ export const currentUser = writable<User | null>(null);
  */
 export const authInitialized = writable(false);
 
+/** Drops the server-side session and redirects back into the app. */
+const LOGOUT_URL = "/api/v1/webapp/auth/logout";
+
+/**
+ * Signs the user out: everything this browser holds about the session is forgotten
+ * first, then the server-side session is dropped.
+ *
+ * The one entry point for signing out — a UI element only calls this, never the
+ * endpoint directly, so anything that has to be cleaned up in the future is added
+ * here and takes effect everywhere at once.
+ */
+export async function logout(): Promise<void> {
+    // Awaited, because the navigation below tears down everything that is still
+    // running — including a half-finished database transaction. Should storage take
+    // too long or hang, signing out still wins: the redirect lands back in the app,
+    // where [updateUser] sees the ended session and cleans up on the second attempt.
+    await Promise.race([forgetSession(), new Promise((resolve) => setTimeout(resolve, 2_000))]);
+
+    // A navigation, not a fetch: the endpoint answers with a redirect and clears the
+    // session cookie on the way. Nothing runs after this.
+    location.assign(LOGOUT_URL);
+}
+
+/**
+ * Forgets everything about the session that lives in this browser.
+ *
+ * A location history is the most personal thing this app holds, so it must not be
+ * left behind on a possibly shared computer once the session has ended.
+ *
+ * Called by [logout], and by [updateUser] when the server reports that the session
+ * is gone — that second path covers a session that expired or was signed out in
+ * another tab, and must not navigate anywhere.
+ */
+async function forgetSession(): Promise<void> {
+    currentUser.set(null);
+    await clearAllCachedHistories();
+}
+
 export async function updateUser() {
     try {
         const currentUserResult = await getMe();
-        currentUser.set(currentUserResult ?? null);
+
+        /*
+         * Reaching this with no user means the server *answered* that nobody is
+         * signed in — a request that failed or was blocked rejects instead and
+         * leaves the store alone. That makes it the one safe point to clean up after
+         * a session that ended without the user pressing "log out" here.
+         */
+        if (currentUserResult == null) await forgetSession();
+        else currentUser.set(currentUserResult);
     } finally {
         authInitialized.set(true);
     }

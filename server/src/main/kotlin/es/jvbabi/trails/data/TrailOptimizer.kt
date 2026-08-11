@@ -465,9 +465,18 @@ class TrailOptimizer(device: Device) : KoinComponent {
         }
 
     private fun write(positions: List<Position>) {
+        /*
+         * One instant for the whole batch: a derived position carries the timestamp of
+         * the measurement it came from, so `inserted_at` is the only thing that tells a
+         * client this generation of the track is new. Sharing it across the batch keeps
+         * a batch indivisible for a cursor — nobody can read half of one.
+         */
+        val insertedAt = Clock.System.now()
+
         DataSnapshots.batchInsert(positions) { position ->
             this[DataSnapshots.device] = deviceId
             this[DataSnapshots.createdAt] = position.timestamp
+            this[DataSnapshots.insertedAt] = insertedAt
             this[DataSnapshots.latitude] = position.latitude
             this[DataSnapshots.longitude] = position.longitude
             this[DataSnapshots.locationAccuracy] = position.accuracy

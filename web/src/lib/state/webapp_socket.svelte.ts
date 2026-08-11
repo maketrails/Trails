@@ -1,4 +1,5 @@
 import {currentUser, type User} from "$lib/state/current_user";
+import {pruneCachedHistories} from "$lib/api/history/history_cache";
 import {t} from "$lib/i18n";
 
 export interface Battery {
@@ -173,6 +174,14 @@ function handleMessage(message: ServerMessage) {
     switch (message.type) {
         case "devices.update":
             devices = message.devices.map(toDevice);
+            /*
+             * A received update is the authoritative device list, so anything cached
+             * for a device outside it belongs to a device that is gone. Pruning is
+             * deliberately tied to *this* message and nothing else: a failed request,
+             * a closed socket or an offline start never hands over an empty list that
+             * could wipe the caches, they simply never get here.
+             */
+            void pruneCachedHistories(devices.map((device) => device.id));
             shares = message.shares ?? [];
             emittedShares = message.emitted_shares ?? [];
             foreignShares = message.foreign_shares ?? [];

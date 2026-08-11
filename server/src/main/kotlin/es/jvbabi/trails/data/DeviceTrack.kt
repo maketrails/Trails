@@ -39,15 +39,26 @@ enum class TrackSource {
  *
  * Must be called inside a transaction — the result are Exposed entities.
  *
- * @param since Only positions at or after this instant, for the retention
- *   window of a share. Null means the whole history.
+ * The two windows below cut along different time axes and are applied together:
+ * [notOlderThan] is about *when a position was recorded*, [storedSince] about
+ * *when the row was written*. Conflating them would either let a share reveal
+ * positions past its retention window, or make an incremental read miss the
+ * optimized positions a rebuild has just written under old timestamps.
+ *
+ * @param notOlderThan Only positions recorded at or after this instant, for the
+ *   retention window of a share. Null means no limit on the recording time.
+ * @param storedSince Only rows stored at or after this instant, for a caller that
+ *   already holds everything written before it. Null means the whole history.
  */
 fun deviceTrack(
     device: Device,
-    since: Instant? = null,
+    notOlderThan: Instant? = null,
+    storedSince: Instant? = null,
     source: TrackSource = TrackSource.Optimized,
 ): List<DataSnapshot> {
-    val window = since?.let { DataSnapshots.createdAt greaterEq it } ?: Op.TRUE
+    val recorded = notOlderThan?.let { DataSnapshots.createdAt greaterEq it } ?: Op.TRUE
+    val stored = storedSince?.let { DataSnapshots.insertedAt greaterEq it } ?: Op.TRUE
+    val window = recorded and stored
 
     if (source == TrackSource.Raw) {
         return DataSnapshot
@@ -56,6 +67,9 @@ fun deviceTrack(
             .toList()
     }
 
+    // Deliberately unwindowed: where the optimized series ends is a property of the
+    // whole track, so the raw tail starts at the same position no matter how little
+    // of the track this call is about to return.
     val optimizedEnd = DataSnapshot
         .find { (DataSnapshots.device eq device.id) and (DataSnapshots.isRaw eq false) }
         .orderBy(DataSnapshots.createdAt to SortOrder.DESC)

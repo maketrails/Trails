@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {currentUser} from "$lib/state/current_user";
+    import {currentUser, logout} from "$lib/state/current_user";
     import {
         DropdownMenu,
         DropdownMenuContent,
@@ -30,7 +30,7 @@
 
         <DropdownMenuContent>
             <DropdownMenuGroup>
-                <DropdownMenuItem class="text-destructive" href="/api/v1/webapp/auth/logout">
+                <DropdownMenuItem class="text-destructive" onclick={logout}>
                     <SignOutIcon />
                     {$_("auth.logout")}
                 </DropdownMenuItem>

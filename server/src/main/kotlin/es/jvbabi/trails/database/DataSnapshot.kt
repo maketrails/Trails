@@ -8,6 +8,7 @@ import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 import org.jetbrains.exposed.v1.dao.UuidEntity
 import org.jetbrains.exposed.v1.dao.UuidEntityClass
 import org.jetbrains.exposed.v1.datetime.timestamp
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 class DataSnapshot(id: EntityID<Uuid>) : UuidEntity(id) {
@@ -15,6 +16,7 @@ class DataSnapshot(id: EntityID<Uuid>) : UuidEntity(id) {
 
     var device by Device referencedOn DataSnapshots.device
     var createdAt by DataSnapshots.createdAt
+    var insertedAt by DataSnapshots.insertedAt
     var longitude by DataSnapshots.longitude
     var latitude by DataSnapshots.latitude
     var locationAccuracy by DataSnapshots.locationAccuracy
@@ -28,6 +30,24 @@ class DataSnapshot(id: EntityID<Uuid>) : UuidEntity(id) {
 object DataSnapshots : UuidTable("data_snapshots") {
     val device = reference("device", Devices, onDelete = ReferenceOption.CASCADE)
     val createdAt = timestamp("timestamp")
+
+    /**
+     * When this row was stored, as opposed to [createdAt], which is when the position
+     * was *recorded*.
+     *
+     * The two come apart in both directions: an app that was offline uploads
+     * measurements long after they happened, and the [es.jvbabi.trails.data.TrailOptimizer]
+     * derives optimized positions that carry the timestamp of the measurement they
+     * came from, years after the fact and again on every rebuild. Only this column
+     * grows monotonically with the writes, which is what lets a client ask for
+     * "everything stored since I last looked" and get the rebuilt positions too.
+     *
+     * Filled in by the client default, so no insert has to remember it. Rows that
+     * predate the column were backfilled with [createdAt] — the closest the past can be
+     * reconstructed, and monotonic in the same direction, so reading from a cursor stays
+     * correct across them.
+     */
+    val insertedAt = timestamp("inserted_at").clientDefault { Clock.System.now() }
     val longitude = double("longitude")
     val latitude = double("latitude")
     val locationAccuracy = double("location_accuracy")
@@ -45,5 +65,12 @@ object DataSnapshots : UuidTable("data_snapshots") {
          * part of a snapshot's identity.
          */
         index(true, device, createdAt, isRaw)
+
+        /*
+         * Serves the incremental history reads: "everything this device stored since
+         * X" stays a range scan over the tail instead of a walk across its whole
+         * series, which is the entire point of handing a client a cursor.
+         */
+        index(false, device, insertedAt)
     }
 }

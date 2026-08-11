@@ -278,34 +278,57 @@
     const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
     let trailFrame: number | null = null;
 
+    /**
+     * When the running grow-in animation started, or null when none is running. A trail
+     * that grows while it is being drawn — the cache first, the server's answer a moment
+     * later — continues from this instant instead of starting over.
+     */
+    let trailAnimationStart: number | null = null;
+
     function cancelTrailAnimation() {
         if (trailFrame != null) cancelAnimationFrame(trailFrame);
         trailFrame = null;
     }
 
-    /** Grows the trail in from its oldest point over {@link TRAIL_ANIMATION_MS}. */
-    function drawTrail(currentMap: mapboxgl.Map, points: HistoryPoint[], animate: boolean) {
+    /**
+     * Grows the trail in from its oldest point over {@link TRAIL_ANIMATION_MS}, counted
+     * from [animateFrom]. Passing the start of an animation that is already running
+     * carries it on with the new geometry; null draws the finished line at once.
+     */
+    function drawTrail(currentMap: mapboxgl.Map, points: HistoryPoint[], animateFrom: number | null) {
         cancelTrailAnimation();
 
         const coordinates = toCoordinates(points);
         const gaps = gapFlags(points);
         const raws = rawFlags(points);
-        if (!animate || coordinates.length < 2) {
+        if (animateFrom == null || coordinates.length < 2) {
+            trailAnimationStart = null;
             setTrailCoordinates(currentMap, coordinates, gaps, raws);
             return;
         }
 
+        trailAnimationStart = animateFrom;
         const lengths = cumulativeLengths(coordinates);
-        const start = performance.now();
-        const step = (now: number) => {
-            const t = Math.min(1, (now - start) / TRAIL_ANIMATION_MS);
-            // The truncated head keeps the original point indices (its interpolated
-            // tip sits in the segment it replaces), so `gaps` still lines up.
+        // The truncated head keeps the original point indices (its interpolated tip sits
+        // in the segment it replaces), so `gaps` still lines up.
+        const drawUpTo = (now: number) => {
+            const t = Math.min(1, (now - animateFrom) / TRAIL_ANIMATION_MS);
             setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws);
-            trailFrame = t < 1 ? requestAnimationFrame(step) : null;
+            return t;
         };
-        // Start from nothing so the first frame doesn't flash the full line.
-        setTrailCoordinates(currentMap, []);
+        const step = (now: number) => {
+            if (drawUpTo(now) < 1) {
+                trailFrame = requestAnimationFrame(step);
+                return;
+            }
+            trailFrame = null;
+            trailAnimationStart = null;
+        };
+
+        // The first frame is drawn straight away rather than clearing the line: at a
+        // fresh start that is nothing yet, and a trail picking an animation back up is
+        // already part-way in and must not flash empty.
+        drawUpTo(performance.now());
         trailFrame = requestAnimationFrame(step);
     }
 
@@ -351,9 +374,10 @@
         map?.setStyle(style);
     });
 
-    // The point set the grow-in animation last played for, so a style swap can
-    // restore the finished line instead of replaying it.
-    let animatedTrail: HistoryPoint[] | null = null;
+    // The track the grow-in animation last played for, so everything that re-runs the
+    // effect for the *same* track — a style swap, a history that arrived in pieces —
+    // restores or continues the line instead of replaying it.
+    let animatedTrailKey: string | null = null;
 
     // Draw the published location history (see setMapTrail). Clearing it on
     // teardown is what removes the line when the detail view navigates away —
@@ -368,6 +392,7 @@
         const currentMap = map;
         const epoch = styleEpoch;
         const points = mapTrail.points;
+        const trailKey = mapTrail.key;
 
         // `style.load` (epoch > 0) is the signal that a style is in place, and
         // deliberately not isStyleLoaded() — that one also waits for every tile to
@@ -376,11 +401,32 @@
         if (currentMap == null || epoch === 0) return;
         if (!addTrailLayers(currentMap)) return;
 
-        // Animate a newly opened trail; a re-run for the same points (dark-mode
-        // style swap) just puts the finished line back.
-        const isNewTrail = points !== animatedTrail;
-        animatedTrail = points;
-        drawTrail(currentMap, points, isNewTrail && !reducedMotion.current);
+        /*
+         * A newly opened track grows in. The same track re-published — its cached part
+         * followed by whatever the server added, or a dark-mode style swap that wiped the
+         * layers — carries on from where its animation is, and once that has finished
+         * (or never ran) the line is simply put back complete.
+         *
+         * Leaving a detail view publishes no trail at all, which also forgets the track:
+         * coming back to it is a new trail and animates again.
+         */
+        const isNewTrail = trailKey !== animatedTrailKey;
+
+        /*
+         * Only a trail that has something in it counts as drawn. A view that has just
+         * switched track publishes an empty list while its history is still on its way,
+         * and were that to claim the key, the points arriving a moment later would be
+         * taken for an update and never animate at all.
+         */
+        if (points.length > 0 || trailKey == null) animatedTrailKey = trailKey;
+
+        const animateFrom = trailKey == null
+            ? null
+            : isNewTrail
+                ? (reducedMotion.current ? null : performance.now())
+                : trailAnimationStart;
+
+        drawTrail(currentMap, points, animateFrom);
 
         return () => {
             cancelTrailAnimation();

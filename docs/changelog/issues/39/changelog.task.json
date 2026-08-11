@@ -1,0 +1,8 @@
+{
+  "description": "Cache the location history in the web app and only load what changed since the last visit",
+  "localized": {
+    "de": {
+      "description": "Speichert den Standortverlauf in der Web-App zwischen und lädt nur noch nach, was sich seit dem letzten Besuch geändert hat"
+    }
+  }
+}

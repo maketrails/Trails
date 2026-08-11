@@ -39,6 +39,12 @@ export interface LocationHistory {
      * was cut off — the caller's own device, or a share with an unbounded window.
      */
     history_seconds: number | null;
+    /**
+     * Where to continue reading: hand this back as `since` and the next answer holds
+     * what has been *stored* in the meantime. `null` when nothing came back, in which
+     * case the cursor already held stays valid.
+     */
+    cursor: number | null;
     points: HistoryPoint[];
 }
 
@@ -64,16 +70,37 @@ async function readHistory(response: Response): Promise<LocationHistory | null> 
  * History is a one-shot read, deliberately not part of the snapshot sockets:
  * it is fetched when a detail view opens and does not update live.
  */
+/**
+ * `?since=<epoch millis>` is the `cursor` of an earlier answer: the server then reads
+ * only what has been **stored** since, which is what catches the optimizer's rebuilt
+ * positions as well — they carry old recording timestamps but a new storage time. The
+ * bound is inclusive, so the answer overlaps what the caller already has.
+ */
+function historyQuery(since?: number, source?: HistorySource): string {
+    const query = new URLSearchParams();
+    if (source != null) query.set("source", source);
+    if (since != null) query.set("since", String(since));
+    const rendered = query.toString();
+    return rendered === "" ? "" : `?${rendered}`;
+}
+
 export const HistoryRepository = {
     /**
-     * The complete history of one of the current user's own devices. Owners are
-     * never limited, so `history_seconds` is always null here. Resolves `null` on
-     * any failure (network error, unknown device, someone else's device).
+     * The history of one of the current user's own devices. Owners are never
+     * limited, so `history_seconds` is always null here. Resolves `null` on any
+     * failure (network error, unknown device, someone else's device).
+     *
+     * [since] continues from the `cursor` of an earlier answer instead of reading the
+     * whole history — see [historyQuery].
      */
-    async forDevice(deviceId: string, source: HistorySource = "optimized"): Promise<LocationHistory | null> {
+    async forDevice(
+        deviceId: string,
+        source: HistorySource = "optimized",
+        since?: number,
+    ): Promise<LocationHistory | null> {
         let response: Response;
         try {
-            response = await fetch(`/api/v1/devices/${deviceId}/history?source=${source}`);
+            response = await fetch(`/api/v1/devices/${deviceId}/history${historyQuery(since, source)}`);
         } catch {
             return null;
         }
@@ -91,12 +118,15 @@ export const HistoryRepository = {
      * How far back the server goes is the share's decision, reported back as
      * `history_seconds`. Resolves `null` on any failure (unknown/returned share,
      * network or CORS error).
+     *
+     * [since] can only narrow that window further, never widen it — see the
+     * endpoint's documentation.
      */
-    async forShare(shareId: string, homeserver: string): Promise<LocationHistory | null> {
+    async forShare(shareId: string, homeserver: string, since?: number): Promise<LocationHistory | null> {
         const base = shareOriginBase(homeserver);
         let response: Response;
         try {
-            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history`);
+            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history${historyQuery(since)}`);
         } catch {
             return null;
         }
