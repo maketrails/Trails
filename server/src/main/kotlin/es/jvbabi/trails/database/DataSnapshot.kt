@@ -43,8 +43,9 @@ object DataSnapshots : UuidTable("data_snapshots") {
      * "everything stored since I last looked" and get the rebuilt positions too.
      *
      * Filled in by the client default, so no insert has to remember it. Rows that
-     * predate the column were backfilled with [createdAt] (see
-     * `server/migrations`), which is the closest the past can be reconstructed.
+     * predate the column were backfilled with [createdAt] — the closest the past can be
+     * reconstructed, and monotonic in the same direction, so reading from a cursor stays
+     * correct across them.
      */
     val insertedAt = timestamp("inserted_at").clientDefault { Clock.System.now() }
     val longitude = double("longitude")
