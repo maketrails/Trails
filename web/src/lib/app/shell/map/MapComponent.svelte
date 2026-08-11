@@ -86,11 +86,15 @@
     /**
      * The trail's individual positions, as their own features. They exist only to be
      * hovered — the trail itself is drawn as lines, which cannot say *which* position the
-     * cursor is over.
+     * cursor is near.
+     *
+     * They carry nothing but the position's place in the trail: everything else is read
+     * from that list, which is also where the neighbours needed to measure against a
+     * segment come from.
      */
     type TrailPointFeature = {
         type: "Feature";
-        properties: { id: string; timestamp: number; index: number; raw: boolean };
+        properties: { index: number };
         geometry: { type: "Point"; coordinates: number[] };
     };
     type TrailPointData = { type: "FeatureCollection"; features: TrailPointFeature[] };
@@ -100,7 +104,7 @@
             type: "FeatureCollection",
             features: points.map((point, index) => ({
                 type: "Feature",
-                properties: {id: point.id, timestamp: point.timestamp, index, raw: point.is_raw},
+                properties: {index},
                 geometry: {type: "Point", coordinates: [point.longitude, point.latitude]},
             })),
         };
@@ -260,69 +264,147 @@
     }
 
     /**
-     * How close to the cursor a position has to be to count as hovered, in screen
-     * pixels. Recorded positions are far too small to aim at, and a standstill draws a
-     * whole cloud of them, so the nearest one within this reach is the one meant.
+     * How close to the *trail* the cursor has to be to count as hovering it, in screen
+     * pixels — measured against the drawn segments, not only against the positions, so
+     * the stretch between two of them counts as well.
      */
-    const TRAIL_POINT_HOVER_RADIUS = 14;
+    const TRAIL_HOVER_RADIUS = 14;
 
     /**
-     * The position last reported, so moving on within the same one stays quiet instead of
-     * logging on every mouse event. Cleared when nothing is in reach, so coming back to a
-     * position reports it again.
+     * Candidates are collected from a wider box than the reach: a segment is found through
+     * its endpoints, and the cursor can be within reach of a segment whose endpoints are
+     * further away than that. Segments longer than about twice this still slip through —
+     * the dotted stretch across a recording gap can be that long.
      */
+    const TRAIL_HOVER_CANDIDATE_RADIUS = TRAIL_HOVER_RADIUS * 4;
+
+    /** Enough movement along a segment to be worth another line in the console. */
+    const TRAIL_HOVER_LOG_STEP = 0.05;
+
+    // What was last reported, so moving on within the same stretch stays quiet instead of
+    // logging on every mouse event. Cleared when nothing is in reach, so coming back to a
+    // position reports it again.
     let loggedPointId: string | null = null;
+    let loggedProgress = 0;
 
     /**
-     * Reports the recorded position nearest to the cursor. A development aid for looking
-     * data up by hand, hence `console.log` and hence dev-only — in a production build
-     * `import.meta.env.DEV` is false and this compiles away.
+     * Where on the segment [from]→[to] the cursor sits: how far along it (0–1, clamped to
+     * the segment) and how far off it, both in screen pixels.
+     */
+    function nearestOnSegment(from: mapboxgl.Point, to: mapboxgl.Point, cursor: mapboxgl.Point) {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const lengthSquared = dx * dx + dy * dy;
+        // Two positions on the same pixel are their own start rather than a division by 0.
+        const fraction = lengthSquared === 0
+            ? 0
+            : Math.min(1, Math.max(0, ((cursor.x - from.x) * dx + (cursor.y - from.y) * dy) / lengthSquared));
+
+        return {
+            fraction,
+            distance: Math.hypot(from.x + dx * fraction - cursor.x, from.y + dy * fraction - cursor.y),
+        };
+    }
+
+    /**
+     * Reports the recorded position the cursor is nearest to, and where between that
+     * position and one of its neighbours the cursor actually sits: `progress` runs from 0
+     * to 1 towards the *next* position and from 0 to -1 towards the *previous* one. The
+     * nearer end of a segment is the position reported, so in practice the value stays
+     * within half a segment either way.
+     *
+     * A development aid for looking data up by hand, hence `console.log` and hence
+     * dev-only — in a production build `import.meta.env.DEV` is false and this compiles
+     * away.
      */
     function logHoveredPoint(event: mapboxgl.MapMouseEvent) {
         if (!import.meta.env.DEV) return;
 
         const currentMap = map;
-        // Bound to the map, not to the layer, so it also fires next to a position rather
-        // than only on one. The layer is gone between style swaps and while no trail is
+        // Bound to the map, not to the layer, so it also fires beside the trail rather
+        // than only on it. The layer is gone between style swaps and while no trail is
         // shown, and then there is nothing to search.
         if (currentMap == null || currentMap.getLayer(TRAIL_POINT_LAYER) == null) return;
 
+        const trailPoints = mapTrail.points;
         const cursor = event.point;
-        const reach = TRAIL_POINT_HOVER_RADIUS;
+        const candidateReach = TRAIL_HOVER_CANDIDATE_RADIUS;
         /*
-         * A box is what the query takes; the circle it stands for is enforced below, so
-         * the corners do not reach further than the edges. The result is read as the
-         * features {@link trailPointData} wrote — mapbox-gl's own feature type resolves to
-         * nothing useful here, for the same reason {@link TrailFeature} is spelled out.
+         * A box is what the query takes. Its result is read as the features
+         * {@link trailPointData} wrote — mapbox-gl's own feature type resolves to nothing
+         * useful here, for the same reason {@link TrailFeature} is spelled out. Querying
+         * rather than walking the whole list also keeps positions on the far side of the
+         * globe out of it: they are not rendered, so they are not returned.
          */
         const candidates = currentMap.queryRenderedFeatures(
-            [[cursor.x - reach, cursor.y - reach], [cursor.x + reach, cursor.y + reach]],
+            [
+                [cursor.x - candidateReach, cursor.y - candidateReach],
+                [cursor.x + candidateReach, cursor.y + candidateReach],
+            ],
             {layers: [TRAIL_POINT_LAYER]},
         ) as unknown as TrailPointFeature[];
 
-        let nearest: {point: TrailPointFeature["properties"]; distance: number} | null = null;
-        for (const candidate of candidates) {
-            const [longitude, latitude] = candidate.geometry.coordinates;
-            const projected = currentMap.project([longitude, latitude]);
-            const distance = Math.hypot(projected.x - cursor.x, projected.y - cursor.y);
-
-            if (distance > reach) continue;
-            if (nearest == null || distance < nearest.distance) {
-                nearest = {point: candidate.properties, distance};
+        // Neighbouring candidates share endpoints, so each position is projected once.
+        const projected = new Map<number, mapboxgl.Point>();
+        const project = (index: number) => {
+            let point = projected.get(index);
+            if (point == null) {
+                point = currentMap.project([trailPoints[index].longitude, trailPoints[index].latitude]);
+                projected.set(index, point);
             }
+            return point;
+        };
+
+        // The segment that starts at `index`, or the bare position when it has no next one.
+        let nearest: {index: number; fraction: number; distance: number} | null = null;
+        const consider = (index: number) => {
+            if (trailPoints[index] == null) return;
+
+            const from = project(index);
+            const {fraction, distance} = trailPoints[index + 1] == null
+                ? {fraction: 0, distance: Math.hypot(from.x - cursor.x, from.y - cursor.y)}
+                : nearestOnSegment(from, project(index + 1), cursor);
+
+            if (distance > TRAIL_HOVER_RADIUS) return;
+            if (nearest == null || distance < nearest.distance) nearest = {index, fraction, distance};
+        };
+
+        for (const candidate of candidates) {
+            const index = candidate.properties.index;
+            // The trail may have been replaced since the query — an index is only an index.
+            if (trailPoints[index] == null) continue;
+
+            consider(index - 1);
+            consider(index);
         }
 
         if (nearest == null) {
             loggedPointId = null;
             return;
         }
-        if (nearest.point.id === loggedPointId) return;
 
-        loggedPointId = nearest.point.id;
+        // Anchor on the nearer end of the segment and let the sign say which way the cursor
+        // went from it: forwards to the next position, backwards to the previous one.
+        const {index: segmentStart, fraction, distance} = nearest;
+        const forwards = fraction <= 0.5;
+        const index = forwards ? segmentStart : segmentStart + 1;
+        const progress = forwards ? fraction : fraction - 1;
+        const point = trailPoints[index];
+        const neighbour = trailPoints[forwards ? index + 1 : index - 1] ?? null;
+
+        if (point.id === loggedPointId && Math.abs(progress - loggedProgress) < TRAIL_HOVER_LOG_STEP) return;
+        loggedPointId = point.id;
+        loggedProgress = progress;
+
         console.log("trail point", {
-            ...nearest.point,
-            recordedAt: new Date(nearest.point.timestamp).toISOString(),
-            distancePx: Math.round(nearest.distance * 10) / 10,
+            id: point.id,
+            index,
+            raw: point.is_raw,
+            timestamp: point.timestamp,
+            recordedAt: new Date(point.timestamp).toISOString(),
+            progress: Math.round(progress * 1000) / 1000,
+            towards: neighbour?.id ?? null,
+            distancePx: Math.round(distance * 10) / 10,
         });
     }
 
