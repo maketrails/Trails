@@ -9,10 +9,12 @@ import es.jvbabi.trails.api.installSse
 import es.jvbabi.trails.api.installStatusPages
 import es.jvbabi.trails.api.installWebsocket
 import es.jvbabi.trails.auth.installAuthentikt
+import es.jvbabi.trails.data.TrailOptimizerScheduler
 import es.jvbabi.trails.di.installKoin
 import es.jvbabi.trails.routes.installRouting
 import io.ktor.server.application.*
 import io.ktor.server.plugins.defaultheaders.DefaultHeaders
+import org.koin.ktor.ext.inject
 import org.slf4j.LoggerFactory
 
 fun Application.rootModule(
@@ -32,4 +34,7 @@ fun Application.rootModule(
     installAuthentikt()
     installStatusPages()
     installRouting()
+
+    val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()
+    trailOptimizerScheduler.start()
 }

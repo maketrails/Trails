@@ -5,8 +5,7 @@ import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import org.jetbrains.exposed.v1.core.Min
+import org.jetbrains.exposed.v1.core.Max
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.alias
@@ -29,7 +28,10 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.time.Clock
+import kotlin.time.Duration
 import kotlin.time.Instant
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Derives a track worth drawing from the raw positions a device reported.
@@ -37,7 +39,12 @@ import kotlin.time.Instant
  * The raw positions (`is_raw = true`) are the measurements and are never
  * touched. Everything this class writes is a second, derived series
  * (`is_raw = false`) that can be thrown away and rebuilt from the raw ones at
- * any time — which is exactly what every run does for the range it covers.
+ * any time.
+ *
+ * A run only touches what is not optimized yet, plus the last
+ * [REBUILD_OVERLAP] of what is: a pause that has grown since the previous run
+ * has to be recomputed together with the positions it started with, and those
+ * were already written.
  *
  * Four stages, in this order:
  * 1. **Trust filter** — only positions below [MAX_ACCURACY_METERS] are used.
@@ -68,17 +75,27 @@ class TrailOptimizer(device: Device) : KoinComponent {
 
     /**
      * Two runs for the same device would delete and rebuild the derived series
-     * at the same time, so a device optimizes one run at a time. This only
-     * holds as long as the instance is shared per device.
+     * at the same time, so a device optimizes one run at a time. Overlapping
+     * calls are dropped rather than queued — see [optimize]. This only holds as
+     * long as the instance is shared per device.
      */
     private val runLock = Mutex()
 
     companion object {
         /**
-         * The newest positions are left alone: a pause may still be growing,
-         * and a spike is only recognisable once its successor has arrived.
+         * The most recent positions are left alone: a pause may still be
+         * growing, and a spike is only recognisable once its successor has
+         * arrived.
          */
-        const val IGNORE_LATEST_POINTS = 10L
+        val IGNORE_LATEST: Duration = 10.minutes
+
+        /**
+         * How far a run reaches back into the already optimized range. The
+         * stretch right behind the previous run's end needs its context to come
+         * out the same: a pause is only recognisable together with the
+         * positions that started it.
+         */
+        val REBUILD_OVERLAP: Duration = 30.minutes
 
         /** How many raw positions one pass reads, optimizes and writes back. */
         const val BATCH_SIZE = 500
@@ -120,36 +137,56 @@ class TrailOptimizer(device: Device) : KoinComponent {
         val batteryCharging: Boolean?
     )
 
-    suspend fun optimize(): Unit = runLock.withLock {
-        val (upperOptimizationBound, lowerOptimizationBound) = db.transaction {
-            val upperOptimizationBound = DataSnapshots
-                .select(DataSnapshots.createdAt)
-                .where { DataSnapshots.device eq deviceId }
-                .andWhere { DataSnapshots.isRaw eq true }
-                .orderBy(DataSnapshots.createdAt, SortOrder.DESC)
-                .limit(1)
-                .offset(IGNORE_LATEST_POINTS)
-                .singleOrNull()
-                ?.get(DataSnapshots.createdAt)
+    /**
+     * Rebuilds the derived series for everything that has settled.
+     *
+     * A run that is already in progress covers whatever this call would find,
+     * so an overlapping call returns immediately instead of queueing behind it.
+     */
+    suspend fun optimize() {
+        if (!runLock.tryLock()) return
 
-            val lowerOptimizationBound = DataSnapshots
-                .select(Min(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("min_created_at"))
+        try {
+            rebuild()
+        } finally {
+            runLock.unlock()
+        }
+    }
+
+    private suspend fun rebuild() {
+        // Everything younger than this may still change and is left raw.
+        val upperOptimizationBound = Clock.System.now() - IGNORE_LATEST
+
+        val (hasRawPoints, lowerOptimizationBound) = db.transaction {
+            val hasRawPoints = !DataSnapshot
+                .find {
+                    (DataSnapshots.device eq deviceId) and
+                            (DataSnapshots.isRaw eq true) and
+                            (DataSnapshots.createdAt lessEq upperOptimizationBound)
+                }
+                .limit(1)
+                .empty()
+
+            // Where the derived series currently ends. Null means nothing has
+            // been optimized yet, and the whole history is up for it.
+            val optimizedUntil = DataSnapshots
+                .select(Max(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("max_created_at"))
                 .where { DataSnapshots.device eq deviceId }
                 .andWhere { DataSnapshots.isRaw eq false }
                 .singleOrNull()
-                ?.let { it[Min(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("min_created_at")] }
+                ?.let { it[Max(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("max_created_at")] }
 
-            upperOptimizationBound to lowerOptimizationBound
+            hasRawPoints to optimizedUntil?.minus(REBUILD_OVERLAP)
         }
 
-        // No raw points old enough to be worth optimizing.
-        if (upperOptimizationBound == null) return@withLock
+        // Nothing has settled yet, so the derived series stays as it is - it
+        // must not be deleted without being rebuilt right after.
+        if (!hasRawPoints) return
 
         /*
-         * Everything this optimizer produced from the bound onwards is
-         * discarded before the range is rebuilt, so a run is idempotent and a
-         * changed threshold takes effect on the whole range instead of only on
-         * what arrived since the last run.
+         * Whatever this optimizer produced from the bound onwards is discarded
+         * before that range is derived again, so a run stays idempotent and the
+         * seam between two runs cannot end up with both results in it.
          */
         db.transaction {
             DataSnapshots.deleteWhere {
