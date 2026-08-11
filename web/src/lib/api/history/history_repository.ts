@@ -64,16 +64,36 @@ async function readHistory(response: Response): Promise<LocationHistory | null> 
  * History is a one-shot read, deliberately not part of the snapshot sockets:
  * it is fetched when a detail view opens and does not update live.
  */
+/**
+ * `?since=<epoch millis>` for a caller that already holds the older part of a
+ * history: the server then only reads the tail. The bound is inclusive on both
+ * endpoints, so the answer overlaps the caller's last known point.
+ */
+function historyQuery(since?: number, source?: HistorySource): string {
+    const query = new URLSearchParams();
+    if (source != null) query.set("source", source);
+    if (since != null) query.set("since", String(since));
+    const rendered = query.toString();
+    return rendered === "" ? "" : `?${rendered}`;
+}
+
 export const HistoryRepository = {
     /**
-     * The complete history of one of the current user's own devices. Owners are
-     * never limited, so `history_seconds` is always null here. Resolves `null` on
-     * any failure (network error, unknown device, someone else's device).
+     * The history of one of the current user's own devices. Owners are never
+     * limited, so `history_seconds` is always null here. Resolves `null` on any
+     * failure (network error, unknown device, someone else's device).
+     *
+     * [since] asks for the positions from that instant (epoch milliseconds,
+     * inclusive) onwards instead of the whole history — see [historyQuery].
      */
-    async forDevice(deviceId: string, source: HistorySource = "optimized"): Promise<LocationHistory | null> {
+    async forDevice(
+        deviceId: string,
+        source: HistorySource = "optimized",
+        since?: number,
+    ): Promise<LocationHistory | null> {
         let response: Response;
         try {
-            response = await fetch(`/api/v1/devices/${deviceId}/history?source=${source}`);
+            response = await fetch(`/api/v1/devices/${deviceId}/history${historyQuery(since, source)}`);
         } catch {
             return null;
         }
@@ -91,12 +111,15 @@ export const HistoryRepository = {
      * How far back the server goes is the share's decision, reported back as
      * `history_seconds`. Resolves `null` on any failure (unknown/returned share,
      * network or CORS error).
+     *
+     * [since] can only narrow that window further, never widen it — see the
+     * endpoint's documentation.
      */
-    async forShare(shareId: string, homeserver: string): Promise<LocationHistory | null> {
+    async forShare(shareId: string, homeserver: string, since?: number): Promise<LocationHistory | null> {
         const base = shareOriginBase(homeserver);
         let response: Response;
         try {
-            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history`);
+            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history${historyQuery(since)}`);
         } catch {
             return null;
         }
