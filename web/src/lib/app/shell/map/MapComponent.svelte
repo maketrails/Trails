@@ -356,9 +356,9 @@
                 slot: "middle",
                 source: TRAIL_PUCK_SOURCE,
                 paint: {
-                    "circle-radius": 12.5,
+                    "circle-radius": 10,
                     "circle-color": trailColors.line,
-                    "circle-stroke-width": 5,
+                    "circle-stroke-width": 4,
                     "circle-stroke-color": trailColors.casing
                 }
             }, beforeId);
