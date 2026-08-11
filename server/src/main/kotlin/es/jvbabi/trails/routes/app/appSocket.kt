@@ -125,6 +125,7 @@ fun Route.app() {
                                 ownDeviceSubscriptionRtUpdaters.remove(deviceId)
                             }
                             is UserSubscriptionMessage.RingState -> { }
+                            is UserSubscriptionMessage.OptimizationProgress -> { }
                             is UserSubscriptionMessage.SharesChanged -> { }
                             is UserSubscriptionMessage.EmittedSharesChanged -> { }
                         }

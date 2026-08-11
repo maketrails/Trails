@@ -5,6 +5,7 @@ import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.exposed.v1.core.Max
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -19,6 +20,7 @@ import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.select
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.math.atan2
@@ -67,11 +69,21 @@ class TrailOptimizer(device: Device) : KoinComponent {
 
     private val db by inject<DatabaseManager>()
 
+    private val userSubscriptions by inject<UserSubscriptionRepository>()
+
     /**
      * Captured once at construction: an Exposed entity belongs to the
-     * transaction it was read in, while this instance outlives it.
+     * transaction it was read in, while this instance outlives it. Reading the
+     * owner means the constructor has to run inside a transaction.
      */
     private val deviceId = device.id
+    private val ownerId = device.owner.id.value
+
+    /** The measurements of this device — the input, never written to. */
+    private val raw get() = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true)
+
+    /** The series this optimizer produced — the output, freely disposable. */
+    private val derived get() = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq false)
 
     /**
      * Two runs for the same device would delete and rebuild the derived series
@@ -119,7 +131,34 @@ class TrailOptimizer(device: Device) : KoinComponent {
         const val STATIONARY_MIN_POINTS = 3
 
         private const val EARTH_RADIUS_METERS = 6_371_000.0
+
+        private val MAX_CREATED_AT = Max(
+            DataSnapshots.createdAt,
+            columnType = KotlinInstantColumnType()
+        ).alias("max_created_at")
     }
+
+    /**
+     * What the device details view shows about the optimization.
+     *
+     * The point counts are disjoint: [optimizedPoints] counts the derived
+     * series, [unoptimizedPoints] the raw positions behind the point the
+     * optimizer has reached. The two are not expected to match — the pipeline
+     * drops roughly two thirds of what it reads.
+     *
+     * Both distances skip steps across a recording pause longer than
+     * [SEGMENT_GAP_SECONDS]; without that, a gap of days between two positions
+     * would count as a straight line of hundreds of kilometres.
+     */
+    data class OptimizationState(
+        val optimizedPoints: Long,
+        val unoptimizedPoints: Long,
+        val optimizedDistanceMeters: Double,
+        val unoptimizedDistanceMeters: Double,
+        /** Share of the settled raw positions the optimizer has covered, 0..1. */
+        val progress: Double,
+        val isRunning: Boolean
+    )
 
     /**
      * One position on its way through the pipeline. Carries the columns that
@@ -153,6 +192,38 @@ class TrailOptimizer(device: Device) : KoinComponent {
         }
     }
 
+    /**
+     * Throws the whole derived series away and derives it again.
+     *
+     * Unlike [optimize] this waits for a run in progress instead of dropping
+     * the call: it is a deliberate request, not a tick that the running pass
+     * already covers.
+     */
+    suspend fun reoptimize() = runLock.withLock {
+        db.transaction {
+            DataSnapshots.deleteWhere { derived }
+        }
+
+        rebuild()
+    }
+
+    /** The numbers the device details view shows about this device. */
+    suspend fun state(): OptimizationState = db.transaction {
+        val optimizedUntil = derivedEnd()
+
+        val unoptimized = if (optimizedUntil == null) raw
+        else raw and (DataSnapshots.createdAt greater optimizedUntil)
+
+        OptimizationState(
+            optimizedPoints = DataSnapshots.selectAll().where(derived).count(),
+            unoptimizedPoints = DataSnapshots.selectAll().where(unoptimized).count(),
+            optimizedDistanceMeters = pathLength(derived),
+            unoptimizedDistanceMeters = pathLength(unoptimized),
+            progress = progress(optimizedUntil),
+            isRunning = runLock.isLocked
+        )
+    }
+
     private suspend fun rebuild() {
         // Everything younger than this may still change and is left raw.
         val upperOptimizationBound = Clock.System.now() - IGNORE_LATEST
@@ -167,16 +238,9 @@ class TrailOptimizer(device: Device) : KoinComponent {
                 .limit(1)
                 .empty()
 
-            // Where the derived series currently ends. Null means nothing has
-            // been optimized yet, and the whole history is up for it.
-            val optimizedUntil = DataSnapshots
-                .select(Max(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("max_created_at"))
-                .where { DataSnapshots.device eq deviceId }
-                .andWhere { DataSnapshots.isRaw eq false }
-                .singleOrNull()
-                ?.let { it[Max(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("max_created_at")] }
-
-            hasRawPoints to optimizedUntil?.minus(REBUILD_OVERLAP)
+            // Null means nothing has been optimized yet, and the whole history
+            // is up for it.
+            hasRawPoints to derivedEnd()?.minus(REBUILD_OVERLAP)
         }
 
         // Nothing has settled yet, so the derived series stays as it is - it
@@ -190,12 +254,12 @@ class TrailOptimizer(device: Device) : KoinComponent {
          */
         db.transaction {
             DataSnapshots.deleteWhere {
-                val derived = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq false)
-
                 if (lowerOptimizationBound == null) derived
                 else derived and (DataSnapshots.createdAt greaterEq lowerOptimizationBound)
             }
         }
+
+        publishProgress(isRunning = true)
 
         /*
          * Read, optimize and write one batch at a time: the whole history of a
@@ -220,8 +284,94 @@ class TrailOptimizer(device: Device) : KoinComponent {
 
             cursor = batch.last().timestamp
 
+            publishProgress(isRunning = true)
+
             if (batch.size < BATCH_SIZE) break
         }
+
+        publishProgress(isRunning = false)
+    }
+
+    /**
+     * Tells the owner's sessions how far along the device is. Deliberately
+     * cheap — two counts over the `(device, timestamp)` index — because it runs
+     * after every batch. The distances of [state] are a full scan and are only
+     * read when a view asks for them.
+     */
+    private suspend fun publishProgress(isRunning: Boolean) {
+        val progress = db.transaction { progress(derivedEnd()) }
+
+        userSubscriptions.getFlowForUser(ownerId).emit(
+            UserSubscriptionMessage.OptimizationProgress(
+                deviceId = deviceId.value,
+                progress = progress,
+                isRunning = isRunning
+            )
+        )
+    }
+
+    /**
+     * Share of the settled raw positions that the derived series covers.
+     *
+     * Only settled positions count: the newest [IGNORE_LATEST] are skipped on
+     * purpose, so counting them would make the progress stick below 100 % for
+     * a device that is fully optimized.
+     */
+    private fun progress(optimizedUntil: Instant?): Double {
+        val settled = DataSnapshots
+            .selectAll()
+            .where(raw and (DataSnapshots.createdAt lessEq Clock.System.now() - IGNORE_LATEST))
+            .count()
+
+        if (settled == 0L) return 1.0
+
+        val covered = optimizedUntil
+            ?.let { DataSnapshots.selectAll().where(raw and (DataSnapshots.createdAt lessEq it)).count() }
+            ?: 0L
+
+        return (covered.toDouble() / settled).coerceIn(0.0, 1.0)
+    }
+
+    /** Where the derived series currently ends, or null if it is empty. */
+    private fun derivedEnd(): Instant? = DataSnapshots
+        .select(MAX_CREATED_AT)
+        .where(derived)
+        .singleOrNull()
+        ?.get(MAX_CREATED_AT)
+
+    /**
+     * Distance along the selected positions, oldest first. Steps across a
+     * recording pause longer than [SEGMENT_GAP_SECONDS] are skipped: the device
+     * did travel in between, but not in a straight line we know anything about.
+     */
+    private fun pathLength(condition: Op<Boolean>): Double {
+        var total = 0.0
+
+        var previousTimestamp: Instant? = null
+        var previousLatitude = 0.0
+        var previousLongitude = 0.0
+
+        DataSnapshots
+            .select(DataSnapshots.createdAt, DataSnapshots.latitude, DataSnapshots.longitude)
+            .where(condition)
+            .orderBy(DataSnapshots.createdAt, SortOrder.ASC)
+            .forEach { row ->
+                val timestamp = row[DataSnapshots.createdAt]
+                val latitude = row[DataSnapshots.latitude]
+                val longitude = row[DataSnapshots.longitude]
+
+                val gap = previousTimestamp?.let { (timestamp - it).inWholeMilliseconds / 1000.0 }
+
+                if (gap != null && gap <= SEGMENT_GAP_SECONDS) {
+                    total += distance(previousLatitude, previousLongitude, latitude, longitude)
+                }
+
+                previousTimestamp = timestamp
+                previousLatitude = latitude
+                previousLongitude = longitude
+            }
+
+        return total
     }
 
     private fun readRawBatch(

@@ -17,6 +17,7 @@ import org.koin.core.component.inject
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 /**
@@ -36,10 +37,11 @@ class TrailOptimizerScheduler : KoinComponent {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
-     * One optimizer per device, so its run lock spans ticks. Only ever touched
-     * from the ticker coroutine.
+     * One optimizer per device, so its run lock spans ticks and is shared with
+     * whoever triggers a run by hand. Concurrent because request handlers reach
+     * it through [optimizerFor] while the ticker walks it.
      */
-    private val optimizers = mutableMapOf<Uuid, TrailOptimizer>()
+    private val optimizers = ConcurrentHashMap<Uuid, TrailOptimizer>()
 
     private var ticker: Job? = null
 
@@ -75,6 +77,16 @@ class TrailOptimizerScheduler : KoinComponent {
     }
 
     /**
+     * The one optimizer of a device. Going through here rather than
+     * constructing one is what keeps a device's runs from overlapping.
+     *
+     * Has to be called inside a transaction — the optimizer reads the owner of
+     * the device it is given.
+     */
+    fun optimizerFor(device: Device): TrailOptimizer =
+        optimizers.computeIfAbsent(device.id.value) { TrailOptimizer(device) }
+
+    /**
      * Optimizes the devices one after another. Sequential on purpose: a pass
      * runs in the background and there is no deadline, while all devices at
      * once would fight over the database.
@@ -83,7 +95,7 @@ class TrailOptimizerScheduler : KoinComponent {
         val devices = db.transaction {
             Device
                 .find { Devices.deletion.isNull() }
-                .associate { device -> device.id.value to optimizers.getOrPut(device.id.value) { TrailOptimizer(device) } }
+                .associate { device -> device.id.value to optimizerFor(device) }
         }
 
         // Deleted devices take their optimizer with them.

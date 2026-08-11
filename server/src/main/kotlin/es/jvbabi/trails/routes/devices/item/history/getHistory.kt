@@ -1,10 +1,9 @@
 package es.jvbabi.trails.routes.devices.item.history
 
-import database.DataSnapshot
-import database.DataSnapshots
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
+import es.jvbabi.trails.data.deviceTrack
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
 import es.jvbabi.trails.database.mapper.toHistoryPoint
@@ -14,8 +13,6 @@ import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.eq
 import org.koin.ktor.ext.inject
 import kotlin.uuid.Uuid
 
@@ -27,6 +24,9 @@ import kotlin.uuid.Uuid
  * Owners are never limited: unlike the share history endpoint there is no
  * retention window (`history_seconds` is always null) and the battery state is
  * always included.
+ *
+ * The track is the optimized series plus the raw tail behind it — see
+ * [deviceTrack].
  */
 fun Route.getDeviceHistory() {
     val db by inject<DatabaseManager>()
@@ -46,10 +46,7 @@ fun Route.getDeviceHistory() {
                 if (device.owner.id.value != actor.userId) return@transaction null
                 if (device.deletion != null) return@transaction null
 
-                DataSnapshot
-                    .find { DataSnapshots.device eq device.id }
-                    .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
-                    .map { it.toHistoryPoint(includeBattery = true) }
+                deviceTrack(device).map { it.toHistoryPoint(includeBattery = true) }
             } ?: return@get call.respond(HttpStatusCode.Forbidden)
 
             call.respond(LocationHistoryResponse(historySeconds = null, points = points))

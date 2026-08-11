@@ -17,6 +17,8 @@ import es.jvbabi.trails.routes.devices.image.deviceImage
 import es.jvbabi.trails.routes.devices.item.deleteDevice
 import es.jvbabi.trails.routes.devices.item.getDevice
 import es.jvbabi.trails.routes.devices.item.history.getDeviceHistory
+import es.jvbabi.trails.routes.devices.item.optimization.getDeviceOptimization
+import es.jvbabi.trails.routes.devices.item.optimization.reoptimizeDevice
 import es.jvbabi.trails.routes.devices.item.pingDevice
 import es.jvbabi.trails.routes.devices.item.ringDevice
 import es.jvbabi.trails.routes.devices.item.stopRingDevice
@@ -91,6 +93,14 @@ fun Application.installRouting() {
 
                     route("/history") {
                         getDeviceHistory()
+                    }
+
+                    route("/optimization") {
+                        getDeviceOptimization()
+
+                        route("/reoptimize") {
+                            reoptimizeDevice()
+                        }
                     }
 
                     route("/ping") {

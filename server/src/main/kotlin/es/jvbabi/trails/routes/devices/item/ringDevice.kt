@@ -67,8 +67,3 @@ fun Route.stopRingDevice() {
  * Resolves the `{deviceId}` path parameter to a device owned by [userId], or
  * `null` if the id is missing/invalid or the device is not owned by the user.
  */
-private suspend fun ApplicationCall.ownDevice(db: DatabaseManager, userId: Uuid): Device? {
-    val deviceId = parameters["deviceId"]?.let(Uuid::parseOrNull) ?: return null
-    val device = db.transaction { Device.findById(deviceId) } ?: return null
-    return if (db.transaction { device.owner.id.value == userId }) device else null
-}

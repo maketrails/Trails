@@ -1,8 +1,7 @@
 package es.jvbabi.trails.routes.active_share.item.history
 
-import database.DataSnapshot
-import database.DataSnapshots
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
+import es.jvbabi.trails.data.deviceTrack
 import es.jvbabi.trails.database.ActiveShare
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.mapper.toHistoryPoint
@@ -10,10 +9,8 @@ import es.jvbabi.trails.routes.EntityNotFoundException
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greaterEq
 import org.koin.ktor.ext.inject
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
@@ -60,19 +57,11 @@ fun Route.getActiveShareHistory() {
                 return@transaction LocationHistoryResponse(historySeconds = 0, points = emptyList())
             }
 
-            val snapshots = if (historySeconds < 0) {
-                DataSnapshot.find { DataSnapshots.device eq device.id }
-            } else {
-                val cutoff = Clock.System.now() - historySeconds.seconds
-                DataSnapshot.find {
-                    (DataSnapshots.device eq device.id) and (DataSnapshots.createdAt greaterEq cutoff)
-                }
-            }
+            val since = if (historySeconds < 0) null else Clock.System.now() - historySeconds.seconds
 
             LocationHistoryResponse(
                 historySeconds = historySeconds.takeIf { it > 0 },
-                points = snapshots
-                    .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
+                points = deviceTrack(device, since = since)
                     .map { it.toHistoryPoint(includeBattery = share.shareBatteryState) },
             )
         }
