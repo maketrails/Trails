@@ -10,6 +10,7 @@
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import MapPin from "./MapPin.svelte";
+    import TrailPointPopover from "./TrailPointPopover.svelte";
     import mapDark from "$lib/assets/map-dark.png";
     import mapLight from "$lib/assets/map-light.png";
 
@@ -504,13 +505,9 @@
 
         if (!import.meta.env.DEV) return;
 
-        // Anchor on the nearer end of the segment and let the sign say which way the cursor
-        // went from it: forwards to the next position, backwards to the previous one.
-        const forwards = fraction <= 0.5;
-        const index = forwards ? segmentStart : segmentStart + 1;
-        const progress = forwards ? fraction : fraction - 1;
+        const {index, progress} = anchorOf({index: segmentStart, fraction});
         const point = trailPoints[index];
-        const neighbour = trailPoints[forwards ? index + 1 : index - 1] ?? null;
+        const neighbour = trailPoints[progress >= 0 ? index + 1 : index - 1] ?? null;
 
         if (point.id === loggedPointId && Math.abs(progress - loggedProgress) < TRAIL_HOVER_LOG_STEP) return;
         loggedPointId = point.id;
@@ -577,7 +574,32 @@
         };
     }
 
-    /** Puts the indicator on [position], or takes it off the map for null. */
+    /**
+     * What the popover above the puck describes. A container that is mutated rather than a
+     * prop that is passed: the popover is mounted imperatively, so this is what carries a
+     * change into it.
+     */
+    const popoverState = $state<{point: HistoryPoint | null}>({point: null});
+    let popover: {marker: mapboxgl.Marker; component: Record<string, any>} | null = null;
+
+    /**
+     * The recorded position a hover is anchored on: the nearer end of the segment it landed
+     * on, plus how far the cursor sits from it — forwards to the next position as a positive
+     * fraction, backwards to the previous one as a negative one.
+     */
+    function anchorOf(position: TrailPosition): {index: number; progress: number} {
+        const forwards = position.fraction <= 0.5;
+        return {
+            index: forwards ? position.index : position.index + 1,
+            progress: forwards ? position.fraction : position.fraction - 1,
+        };
+    }
+
+    /**
+     * Puts the indicator on [position] and the popover above it, or takes both off the map
+     * for null. The popover reports the recorded position nearest the cursor, which the puck
+     * itself may sit a little way from — it follows the line, not the data.
+     */
     function setTrailPuck(currentMap: mapboxgl.Map, position: TrailPosition | null) {
         const source = currentMap.getSource(TRAIL_PUCK_SOURCE);
         if (source?.type !== "geojson") return;
@@ -588,15 +610,41 @@
 
         if (from == null) {
             source.setData(trailPuckData(null));
+            popoverState.point = null;
             return;
         }
 
         // Interpolated in coordinates, the same way the line between the two is drawn, so
         // the puck sits on it rather than beside it.
         const start = [from.longitude, from.latitude];
-        source.setData(trailPuckData(
-            to == null ? start : interpolate(start, [to.longitude, to.latitude], position!.fraction)
-        ));
+        const at = to == null ? start : interpolate(start, [to.longitude, to.latitude], position!.fraction);
+
+        source.setData(trailPuckData(at));
+        popoverState.point = points[anchorOf(position!).index] ?? from;
+        trailPopover(currentMap).setLngLat(at as [number, number]);
+    }
+
+    /**
+     * The popover's marker, mounted on first use. A marker rather than a box positioned by
+     * hand, so it stays glued to its coordinate while the map is panned or zoomed — and it
+     * survives a style swap, which drops layers but not markers.
+     */
+    function trailPopover(currentMap: mapboxgl.Map): mapboxgl.Marker {
+        if (popover != null) return popover.marker;
+
+        const element = document.createElement("div");
+        // Mapbox positions the element; anything the cursor could catch on it would break
+        // the hover that produced it.
+        element.style.pointerEvents = "none";
+
+        const component = mount(TrailPointPopover, {target: element, props: {state: popoverState}});
+        // Clear of the puck: its outer edge is the radius plus its ring.
+        const marker = new mapboxgl.Marker({element, anchor: "bottom", offset: [0, -16]})
+            .setLngLat([0, 0])
+            .addTo(currentMap);
+
+        popover = {marker, component};
+        return marker;
     }
 
     /** The hit targets for {@link logHoveredPoint}; see {@link TRAIL_POINT_SOURCE}. */
@@ -756,6 +804,11 @@
         return () => {
             cancelTrailAnimation();
             for (const id of [...pins.keys()]) removePin(id);
+            if (popover != null) {
+                popover.marker.remove();
+                unmount(popover.component);
+                popover = null;
+            }
             map?.remove();
         };
     });

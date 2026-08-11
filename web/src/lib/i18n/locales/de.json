@@ -183,6 +183,10 @@
       "days": "{count, plural, one {Letzter Tag} other {Letzte # Tage}}",
       "hours": "{count, plural, one {Letzte Stunde} other {Letzte # Stunden}}",
       "minutes": "Letzte {count} min"
+    },
+    "point": {
+      "location_accuracy": "±{meters} m",
+      "bearing": "{degrees}° ±{accuracy}°"
     }
   },
   "map": {
