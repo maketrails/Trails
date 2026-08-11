@@ -233,10 +233,14 @@
             }, beforeId);
 
             /*
-             * Invisible hit targets over the trail's positions, so hovering can report
-             * which one the cursor is on. Its own source: the line's data is rewritten on
+             * The trail's positions as invisible features, so hovering can report which
+             * one the cursor is near. Its own source: the line's data is rewritten on
              * every frame of the grow-in animation, and rebuilding tens of thousands of
              * point features at that rate would stall the map.
+             *
+             * The radius is deliberately tiny — what counts as "near" is decided in
+             * {@link logHoveredPoint} by measuring against the cursor, not by how big
+             * these are.
              */
             currentMap.addSource(TRAIL_POINT_SOURCE, {
                 type: "geojson",
@@ -247,7 +251,7 @@
                 type: "circle",
                 slot: "middle",
                 source: TRAIL_POINT_SOURCE,
-                paint: {"circle-radius": 6, "circle-opacity": 0, "circle-stroke-width": 0}
+                paint: {"circle-radius": 1, "circle-opacity": 0, "circle-stroke-width": 0}
             }, beforeId);
             return true;
         } catch {
@@ -256,30 +260,69 @@
     }
 
     /**
-     * The position last reported, so moving within one hit target stays quiet instead of
-     * logging on every mouse event.
+     * How close to the cursor a position has to be to count as hovered, in screen
+     * pixels. Recorded positions are far too small to aim at, and a standstill draws a
+     * whole cloud of them, so the nearest one within this reach is the one meant.
+     */
+    const TRAIL_POINT_HOVER_RADIUS = 14;
+
+    /**
+     * The position last reported, so moving on within the same one stays quiet instead of
+     * logging on every mouse event. Cleared when nothing is in reach, so coming back to a
+     * position reports it again.
      */
     let loggedPointId: string | null = null;
 
     /**
-     * Reports which recorded position the cursor is over. A development aid for looking
+     * Reports the recorded position nearest to the cursor. A development aid for looking
      * data up by hand, hence `console.log` and hence dev-only — in a production build
      * `import.meta.env.DEV` is false and this compiles away.
      */
-    function logHoveredPoint(event: mapboxgl.MapMouseEvent & {features?: {properties?: Record<string, unknown>}[]}) {
+    function logHoveredPoint(event: mapboxgl.MapMouseEvent) {
         if (!import.meta.env.DEV) return;
 
-        const properties = event.features?.[0]?.properties;
-        const id = properties?.id;
-        if (typeof id !== "string" || id === loggedPointId) return;
+        const currentMap = map;
+        // Bound to the map, not to the layer, so it also fires next to a position rather
+        // than only on one. The layer is gone between style swaps and while no trail is
+        // shown, and then there is nothing to search.
+        if (currentMap == null || currentMap.getLayer(TRAIL_POINT_LAYER) == null) return;
 
-        loggedPointId = id;
+        const cursor = event.point;
+        const reach = TRAIL_POINT_HOVER_RADIUS;
+        /*
+         * A box is what the query takes; the circle it stands for is enforced below, so
+         * the corners do not reach further than the edges. The result is read as the
+         * features {@link trailPointData} wrote — mapbox-gl's own feature type resolves to
+         * nothing useful here, for the same reason {@link TrailFeature} is spelled out.
+         */
+        const candidates = currentMap.queryRenderedFeatures(
+            [[cursor.x - reach, cursor.y - reach], [cursor.x + reach, cursor.y + reach]],
+            {layers: [TRAIL_POINT_LAYER]},
+        ) as unknown as TrailPointFeature[];
+
+        let nearest: {point: TrailPointFeature["properties"]; distance: number} | null = null;
+        for (const candidate of candidates) {
+            const [longitude, latitude] = candidate.geometry.coordinates;
+            const projected = currentMap.project([longitude, latitude]);
+            const distance = Math.hypot(projected.x - cursor.x, projected.y - cursor.y);
+
+            if (distance > reach) continue;
+            if (nearest == null || distance < nearest.distance) {
+                nearest = {point: candidate.properties, distance};
+            }
+        }
+
+        if (nearest == null) {
+            loggedPointId = null;
+            return;
+        }
+        if (nearest.point.id === loggedPointId) return;
+
+        loggedPointId = nearest.point.id;
         console.log("trail point", {
-            id,
-            index: properties?.index,
-            raw: properties?.raw,
-            timestamp: properties?.timestamp,
-            recordedAt: new Date(Number(properties?.timestamp)).toISOString(),
+            ...nearest.point,
+            recordedAt: new Date(nearest.point.timestamp).toISOString(),
+            distancePx: Math.round(nearest.distance * 10) / 10,
         });
     }
 
@@ -438,9 +481,8 @@
             map.on("pitchstart", onUserInteraction);
 
             // Registered once for the map's whole life, not with the layer: the layer is
-            // added again after every style swap, and so would the listener be. A
-            // layer-scoped listener simply stays quiet while its layer is absent.
-            map.on("mousemove", TRAIL_POINT_LAYER, logHoveredPoint);
+            // added again after every style swap, and so would the listener be.
+            map.on("mousemove", logHoveredPoint);
 
             // Fires for the initial style and again after every setStyle.
             map.on("style.load", () => styleEpoch++);
