@@ -265,18 +265,21 @@
 
     /**
      * How close to the *trail* the cursor has to be to count as hovering it, in screen
-     * pixels — measured against the drawn segments, not only against the positions, so
-     * the stretch between two of them counts as well.
+     * pixels. It applies to the segments between the positions exactly as it does to the
+     * positions themselves — the line is what is visible, so that is what is aimed at.
      */
-    const TRAIL_HOVER_RADIUS = 14;
+    const TRAIL_HOVER_RADIUS = 6;
 
     /**
-     * Candidates are collected from a wider box than the reach: a segment is found through
-     * its endpoints, and the cursor can be within reach of a segment whose endpoints are
-     * further away than that. Segments longer than about twice this still slip through —
-     * the dotted stretch across a recording gap can be that long.
+     * How far out to look for the endpoints of a segment when nothing is within reach.
+     *
+     * A segment is found through its endpoints, and the cursor can be a few pixels from a
+     * long one whose ends are nowhere near it. Searching this wide from the start would
+     * mean projecting thousands of positions on every mouse move wherever the trail is
+     * dense (a standstill draws a whole cloud of them), so it is only the fallback for
+     * having found nothing close — where, by definition, there is little to project.
      */
-    const TRAIL_HOVER_CANDIDATE_RADIUS = TRAIL_HOVER_RADIUS * 4;
+    const TRAIL_HOVER_SEGMENT_SEARCH = 250;
 
     /** Enough movement along a segment to be worth another line in the console. */
     const TRAIL_HOVER_LOG_STEP = 0.05;
@@ -328,7 +331,7 @@
 
         const trailPoints = mapTrail.points;
         const cursor = event.point;
-        const candidateReach = TRAIL_HOVER_CANDIDATE_RADIUS;
+
         /*
          * A box is what the query takes. Its result is read as the features
          * {@link trailPointData} wrote — mapbox-gl's own feature type resolves to nothing
@@ -336,13 +339,15 @@
          * rather than walking the whole list also keeps positions on the far side of the
          * globe out of it: they are not rendered, so they are not returned.
          */
-        const candidates = currentMap.queryRenderedFeatures(
-            [
-                [cursor.x - candidateReach, cursor.y - candidateReach],
-                [cursor.x + candidateReach, cursor.y + candidateReach],
-            ],
+        const positionsWithin = (radius: number) => currentMap.queryRenderedFeatures(
+            [[cursor.x - radius, cursor.y - radius], [cursor.x + radius, cursor.y + radius]],
             {layers: [TRAIL_POINT_LAYER]},
         ) as unknown as TrailPointFeature[];
+
+        // Close by first; only if the cursor is near no position at all is it worth looking
+        // for the far-apart ends of a long segment. See TRAIL_HOVER_SEGMENT_SEARCH.
+        const candidates = positionsWithin(TRAIL_HOVER_RADIUS);
+        const searched = candidates.length > 0 ? candidates : positionsWithin(TRAIL_HOVER_SEGMENT_SEARCH);
 
         // Neighbouring candidates share endpoints, so each position is projected once.
         const projected = new Map<number, mapboxgl.Point>();
@@ -369,7 +374,7 @@
             if (nearest == null || distance < nearest.distance) nearest = {index, fraction, distance};
         };
 
-        for (const candidate of candidates) {
+        for (const candidate of searched) {
             const index = candidate.properties.index;
             // The trail may have been replaced since the query — an index is only an index.
             if (trailPoints[index] == null) continue;
