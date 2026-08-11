@@ -31,17 +31,21 @@ import kotlin.uuid.Uuid
  * detail view offers both. Anything else (including no value) means the
  * optimized track, which is what a map should normally draw. See [deviceTrack].
  *
- * `?since=<epoch millis>` limits the answer to the positions recorded at or after
- * that instant, so a client that already holds the older part of the history only
- * asks for the tail and the query stays on the `(device, timestamp, is_raw)` index
- * instead of reading years of positions. The bound is **inclusive**, so the point
- * a caller last saw comes back with it — that is what lets the caller tell an
- * up-to-date history apart from one that was wiped behind its back. An
- * unparseable value is ignored, exactly like an unknown `source`.
+ * `?since=<epoch millis>` limits the answer to the rows **stored** at or after that
+ * instant — the `cursor` of an earlier response, not a recording time. A client that
+ * already holds everything written before it only asks for the rest, and the query
+ * stays a range scan on the `(device, inserted_at)` index instead of reading years of
+ * positions. An unparseable value is ignored, exactly like an unknown `source`.
  *
- * Only the raw series is append-only and therefore safe to continue from a cache;
- * the optimized one is rebuilt as the optimizer catches up, so an incremental read
- * of it would mix positions from two generations.
+ * Because the storage time is what is filtered, this works for the optimized series
+ * too, not just the append-only raw one: a rebuilt stretch carries the timestamps of
+ * the measurements it came from but a fresh `inserted_at`, so it comes back as the new
+ * data it is. What the caller must do with it is replace, not append — see
+ * [LocationHistoryResponse].
+ *
+ * The bound is **inclusive**, so the rows a caller last saw come back with it. That
+ * redundancy is deliberate: it lets a caller tell a history that has merely not grown
+ * apart from one that was wiped behind its back (an empty answer).
  */
 fun Route.getDeviceHistory() {
     val db by inject<DatabaseManager>()
@@ -65,16 +69,23 @@ fun Route.getDeviceHistory() {
             // Resolve + ownership-check + read in one transaction; null means the
             // device is missing, already deleted, or not the caller's — all
             // answered as Forbidden so foreign device ids cannot be probed for.
-            val points = db.transaction {
+            val response = db.transaction {
                 val device = Device.findById(deviceId) ?: return@transaction null
                 if (device.owner.id.value != actor.userId) return@transaction null
                 if (device.deletion != null) return@transaction null
 
-                deviceTrack(device, since = since, source = source)
-                    .map { it.toHistoryPoint(includeBattery = true) }
+                val track = deviceTrack(device, storedSince = since, source = source)
+
+                LocationHistoryResponse(
+                    historySeconds = null,
+                    // Null when nothing came back: there is no new cursor to report, and
+                    // the caller keeps the one it already has.
+                    cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
+                    points = track.map { it.toHistoryPoint(includeBattery = true) },
+                )
             } ?: return@get call.respond(HttpStatusCode.Forbidden)
 
-            call.respond(LocationHistoryResponse(historySeconds = null, points = points))
+            call.respond(response)
         }
     }
 }

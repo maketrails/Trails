@@ -33,12 +33,13 @@ import kotlin.uuid.Uuid
  *   and `history_seconds` is reported as null.
  * - otherwise — only points recorded within that many seconds of now.
  *
- * `?since=<epoch millis>` lets a caller that already holds the older part of the
- * history ask for the tail only, which keeps the query on the
- * `(device, timestamp, is_raw)` index. It may only *narrow* what the share
- * reveals: the share's own window always wins, so a `since` older than it changes
- * nothing. `history_seconds` keeps reporting the share's window either way — it
- * describes the share, not this one request. An unparseable value is ignored.
+ * `?since=<epoch millis>` lets a caller that already holds part of the history ask for
+ * the rest: it is the `cursor` of an earlier response and filters on when a row was
+ * **stored**, not on when its position was recorded. The two cut along different axes
+ * and both apply, so this can only ever *narrow* what the share reveals — the
+ * retention window above is untouched by it. `history_seconds` keeps reporting the
+ * share's window either way, since it describes the share and not one request. An
+ * unparseable value is ignored.
  *
  * The battery state is withheld unless the share opted in, mirroring the snapshot
  * endpoints.
@@ -70,14 +71,14 @@ fun Route.getActiveShareHistory() {
             }
 
             val window = if (historySeconds < 0) null else Clock.System.now() - historySeconds.seconds
-            // The later of the two bounds: the caller may skip what it already has,
-            // but never reach further back than the share allows.
-            val since = listOfNotNull(window, requestedSince).maxOrNull()
+            val track = deviceTrack(device, notOlderThan = window, storedSince = requestedSince)
 
             LocationHistoryResponse(
                 historySeconds = historySeconds.takeIf { it > 0 },
-                points = deviceTrack(device, since = since)
-                    .map { it.toHistoryPoint(includeBattery = share.shareBatteryState) },
+                // Null when nothing came back: there is no new cursor to report, and the
+                // caller keeps the one it already has.
+                cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
+                points = track.map { it.toHistoryPoint(includeBattery = share.shareBatteryState) },
             )
         }
 
