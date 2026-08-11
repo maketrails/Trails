@@ -40,8 +40,10 @@ fun Route.getDeviceOptimization() {
                 DeviceOptimizationResponse(
                     optimizedPoints = state.optimizedPoints,
                     unoptimizedPoints = state.unoptimizedPoints,
+                    rawPoints = state.rawPoints,
                     optimizedDistanceMeters = state.optimizedDistanceMeters,
                     unoptimizedDistanceMeters = state.unoptimizedDistanceMeters,
+                    rawDistanceMeters = state.rawDistanceMeters,
                     progress = state.progress,
                     isRunning = state.isRunning,
                 )

@@ -162,12 +162,17 @@ class TrailOptimizer(device: Device) : KoinComponent {
     data class OptimizationState(
         val optimizedPoints: Long,
         val unoptimizedPoints: Long,
+        val rawPoints: Long,
         val optimizedDistanceMeters: Double,
         val unoptimizedDistanceMeters: Double,
+        val rawDistanceMeters: Double,
         /** Share of the settled raw positions the optimizer has covered, 0..1. */
         val progress: Double,
         val isRunning: Boolean
     )
+
+    /** How many positions a series holds and how far it runs. */
+    private data class Measurement(val points: Long, val distanceMeters: Double)
 
     /**
      * What one run set out to do, measured once at its start.
@@ -239,11 +244,17 @@ class TrailOptimizer(device: Device) : KoinComponent {
         val unoptimized = if (optimizedUntil == null) raw
         else raw and (DataSnapshots.createdAt greater optimizedUntil)
 
+        val optimizedSeries = measure(derived)
+        val unoptimizedSeries = measure(unoptimized)
+        val rawSeries = measure(raw)
+
         OptimizationState(
-            optimizedPoints = DataSnapshots.selectAll().where(derived).count(),
-            unoptimizedPoints = DataSnapshots.selectAll().where(unoptimized).count(),
-            optimizedDistanceMeters = pathLength(derived),
-            unoptimizedDistanceMeters = pathLength(unoptimized),
+            optimizedPoints = optimizedSeries.points,
+            unoptimizedPoints = unoptimizedSeries.points,
+            rawPoints = rawSeries.points,
+            optimizedDistanceMeters = optimizedSeries.distanceMeters,
+            unoptimizedDistanceMeters = unoptimizedSeries.distanceMeters,
+            rawDistanceMeters = rawSeries.distanceMeters,
             progress = progress(optimizedUntil),
             isRunning = runLock.isLocked
         )
@@ -381,11 +392,15 @@ class TrailOptimizer(device: Device) : KoinComponent {
         ?.get(MAX_CREATED_AT)
 
     /**
-     * Distance along the selected positions, oldest first. Steps across a
-     * recording pause longer than [SEGMENT_GAP_SECONDS] are skipped: the device
-     * did travel in between, but not in a straight line we know anything about.
+     * Counts the selected positions and adds up the distance along them in one
+     * pass, oldest first.
+     *
+     * Steps across a recording pause longer than [SEGMENT_GAP_SECONDS] are
+     * skipped: the device did travel in between, but not in a straight line we
+     * know anything about.
      */
-    private fun pathLength(condition: Op<Boolean>): Double {
+    private fun measure(condition: Op<Boolean>): Measurement {
+        var points = 0L
         var total = 0.0
 
         var previousTimestamp: Instant? = null
@@ -401,6 +416,8 @@ class TrailOptimizer(device: Device) : KoinComponent {
                 val latitude = row[DataSnapshots.latitude]
                 val longitude = row[DataSnapshots.longitude]
 
+                points++
+
                 val gap = previousTimestamp?.let { (timestamp - it).inWholeMilliseconds / 1000.0 }
 
                 if (gap != null && gap <= SEGMENT_GAP_SECONDS) {
@@ -412,7 +429,7 @@ class TrailOptimizer(device: Device) : KoinComponent {
                 previousLongitude = longitude
             }
 
-        return total
+        return Measurement(points = points, distanceMeters = total)
     }
 
     private fun readRawBatch(
