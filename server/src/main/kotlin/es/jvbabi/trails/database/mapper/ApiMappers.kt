@@ -54,6 +54,7 @@ fun ActiveShare.toApi() = ActiveShareEntity(
  * only when the share opted in via `share_battery_state`.
  */
 fun DataSnapshot.toHistoryPoint(includeBattery: Boolean) = LocationHistoryPoint(
+    id = id.value,
     timestamp = createdAt.toEpochMilliseconds(),
     latitude = latitude,
     longitude = longitude,

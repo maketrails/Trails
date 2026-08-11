@@ -2,6 +2,7 @@ package es.jvbabi.trails.api.v1.history
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.uuid.Uuid
 
 /**
  * A device's recorded location history, oldest point first.
@@ -32,6 +33,12 @@ data class LocationHistoryResponse(
  * One recorded position. [timestamp] is epoch **milliseconds**, matching the
  * `found_at` field of the snapshot endpoints.
  *
+ * [id] is the stored row's own id, for pointing at exactly this position when
+ * inspecting the data. It identifies a *measurement* for good, but an optimized
+ * position only until the next rebuild — the optimizer throws its derived rows away and
+ * writes new ones — so anything that needs a stable identity uses [timestamp], which is
+ * unique per device and series.
+ *
  * [battery] is only present when the caller is allowed to see the battery state
  * (always for the device owner, for a share only when it opted in) *and* the
  * device actually reported it.
@@ -43,6 +50,7 @@ data class LocationHistoryResponse(
  */
 @Serializable
 data class LocationHistoryPoint(
+    @SerialName("id") val id: Uuid,
     @SerialName("timestamp") val timestamp: Long,
     @SerialName("latitude") val latitude: Double,
     @SerialName("longitude") val longitude: Double,
