@@ -22,6 +22,7 @@ class DataSnapshot(id: EntityID<Uuid>) : UuidEntity(id) {
     var bearingAccuracy by DataSnapshots.bearingAccuracy
     var batteryLevel by DataSnapshots.batteryLevel
     var batteryCharging by DataSnapshots.batteryCharging
+    var isRaw by DataSnapshots.isRaw
 }
 
 object DataSnapshots : UuidTable("data_snapshots") {
@@ -34,8 +35,15 @@ object DataSnapshots : UuidTable("data_snapshots") {
     val bearingAccuracy = double("bearing_accuracy").nullable()
     val batteryLevel = float("battery_level").nullable()
     val batteryCharging = bool("battery_charging").nullable()
+    val isRaw = bool("is_raw").default(true)
 
     init {
-        index(true, device, createdAt)
+        /*
+         * The optimized track is derived from the raw positions and keeps their
+         * timestamps, so a device can hold two snapshots for the same instant:
+         * the measurement and the optimized position. `is_raw` is therefore
+         * part of a snapshot's identity.
+         */
+        index(true, device, createdAt, isRaw)
     }
 }
