@@ -4,6 +4,8 @@ import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.exposed.v1.core.Min
 import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.SortOrder
@@ -54,9 +56,22 @@ import kotlin.time.Instant
  * `optimizer/` Python playground, where 40 % of the positions failed the trust
  * filter, 0.8 % were spikes and 29 % belonged to a pause.
  */
-class TrailOptimizer : KoinComponent {
+class TrailOptimizer(device: Device) : KoinComponent {
 
     private val db by inject<DatabaseManager>()
+
+    /**
+     * Captured once at construction: an Exposed entity belongs to the
+     * transaction it was read in, while this instance outlives it.
+     */
+    private val deviceId = device.id
+
+    /**
+     * Two runs for the same device would delete and rebuild the derived series
+     * at the same time, so a device optimizes one run at a time. This only
+     * holds as long as the instance is shared per device.
+     */
+    private val runLock = Mutex()
 
     companion object {
         /**
@@ -105,11 +120,11 @@ class TrailOptimizer : KoinComponent {
         val batteryCharging: Boolean?
     )
 
-    suspend fun optimize(device: Device) {
+    suspend fun optimize(): Unit = runLock.withLock {
         val (upperOptimizationBound, lowerOptimizationBound) = db.transaction {
             val upperOptimizationBound = DataSnapshots
                 .select(DataSnapshots.createdAt)
-                .where { DataSnapshots.device eq device.id }
+                .where { DataSnapshots.device eq deviceId }
                 .andWhere { DataSnapshots.isRaw eq true }
                 .orderBy(DataSnapshots.createdAt, SortOrder.DESC)
                 .limit(1)
@@ -119,7 +134,7 @@ class TrailOptimizer : KoinComponent {
 
             val lowerOptimizationBound = DataSnapshots
                 .select(Min(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("min_created_at"))
-                .where { DataSnapshots.device eq device.id }
+                .where { DataSnapshots.device eq deviceId }
                 .andWhere { DataSnapshots.isRaw eq false }
                 .singleOrNull()
                 ?.let { it[Min(DataSnapshots.createdAt, columnType = KotlinInstantColumnType()).alias("min_created_at")] }
@@ -127,7 +142,8 @@ class TrailOptimizer : KoinComponent {
             upperOptimizationBound to lowerOptimizationBound
         }
 
-        if (upperOptimizationBound == null) return // No raw points to optimize
+        // No raw points old enough to be worth optimizing.
+        if (upperOptimizationBound == null) return@withLock
 
         /*
          * Everything this optimizer produced from the bound onwards is
@@ -137,7 +153,7 @@ class TrailOptimizer : KoinComponent {
          */
         db.transaction {
             DataSnapshots.deleteWhere {
-                val derived = (DataSnapshots.device eq device.id) and (DataSnapshots.isRaw eq false)
+                val derived = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq false)
 
                 if (lowerOptimizationBound == null) derived
                 else derived and (DataSnapshots.createdAt greaterEq lowerOptimizationBound)
@@ -154,7 +170,7 @@ class TrailOptimizer : KoinComponent {
 
         while (true) {
             val batch = db.transaction {
-                readRawBatch(device, lowerOptimizationBound, upperOptimizationBound, cursor)
+                readRawBatch(lowerOptimizationBound, upperOptimizationBound, cursor)
             }
 
             if (batch.isEmpty()) break
@@ -162,7 +178,7 @@ class TrailOptimizer : KoinComponent {
             val optimized = optimize(batch)
 
             if (optimized.isNotEmpty()) {
-                db.transaction { write(device, optimized) }
+                db.transaction { write(optimized) }
             }
 
             cursor = batch.last().timestamp
@@ -172,7 +188,6 @@ class TrailOptimizer : KoinComponent {
     }
 
     private fun readRawBatch(
-        device: Device,
         lowerOptimizationBound: Instant?,
         upperOptimizationBound: Instant,
         cursor: Instant?
@@ -184,7 +199,7 @@ class TrailOptimizer : KoinComponent {
                 else -> Op.TRUE
             }
 
-            (DataSnapshots.device eq device.id) and
+            (DataSnapshots.device eq deviceId) and
                     (DataSnapshots.isRaw eq true) and
                     (DataSnapshots.createdAt lessEq upperOptimizationBound) and
                     window
@@ -204,9 +219,9 @@ class TrailOptimizer : KoinComponent {
             )
         }
 
-    private fun write(device: Device, positions: List<Position>) {
+    private fun write(positions: List<Position>) {
         DataSnapshots.batchInsert(positions) { position ->
-            this[DataSnapshots.device] = device.id
+            this[DataSnapshots.device] = deviceId
             this[DataSnapshots.createdAt] = position.timestamp
             this[DataSnapshots.latitude] = position.latitude
             this[DataSnapshots.longitude] = position.longitude
