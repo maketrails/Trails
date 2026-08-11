@@ -57,6 +57,14 @@
             : { line: "#0f172a", casing: "#ffffff" }
     );
 
+    /**
+     * Stretches the optimizer has not reached yet are drawn violet: they are raw
+     * measurements, still carrying the jitter and the standstill clouds that the
+     * optimized part has had removed. Own hex values for the same reason as
+     * {@link trailColors} — mapbox-gl cannot read the theme's oklch() tokens.
+     */
+    const trailRawColor = $derived(darkMode.current ? "#a78bfa" : "#7c3aed");
+
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
@@ -68,7 +76,7 @@
     // mapbox-gl's own typings reference is unavailable here.
     type TrailFeature = {
         type: "Feature";
-        properties: { gap: boolean };
+        properties: { gap: boolean; raw: boolean };
         geometry: { type: "LineString"; coordinates: number[][] };
     };
     type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
@@ -90,22 +98,35 @@
     }
 
     /**
+     * Per-point flag in the same "incoming segment" convention as
+     * {@link gapFlags}: `raws[i]` marks the segment from point `i - 1` to `i` as
+     * unoptimized. The changeover segment counts as unoptimized — it is the one
+     * connection no optimizer has looked at.
+     */
+    function rawFlags(points: HistoryPoint[]): boolean[] {
+        return points.map((point, i) => i > 0 && point.is_raw);
+    }
+
+    /**
      * Splits the coordinates into one LineString per run of same-kind segments, so
      * the solid and the dotted layer can each filter for their own features. Runs
      * share their boundary point, which keeps the line visually continuous.
      */
-    function trailData(coordinates: number[][], gaps: boolean[]): TrailData {
+    function trailData(coordinates: number[][], gaps: boolean[], raws: boolean[] = []): TrailData {
         const features: TrailFeature[] = [];
         // A LineString needs at least two positions; fewer means nothing to draw.
         let runStart = 1;
         for (let segment = 1; segment < coordinates.length; segment++) {
             const gap = gaps[segment] ?? false;
+            const raw = raws[segment] ?? false;
             const isLast = segment === coordinates.length - 1;
-            if (!isLast && (gaps[segment + 1] ?? false) === gap) continue;
+            const sameKind =
+                (gaps[segment + 1] ?? false) === gap && (raws[segment + 1] ?? false) === raw;
+            if (!isLast && sameKind) continue;
 
             features.push({
                 type: "Feature",
-                properties: { gap },
+                properties: { gap, raw },
                 geometry: { type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1) }
             });
             runStart = segment + 1;
@@ -132,7 +153,16 @@
         if (currentMap.getSource(TRAIL_SOURCE) != null) return true;
 
         try {
-            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], []) });
+            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], []) });
+
+            // Violet where the track is still raw, the theme colour where it is
+            // optimized. One expression, so a stretch cannot end up in both.
+            const lineColor: mapboxgl.ExpressionSpecification = [
+                "case",
+                ["get", "raw"],
+                trailRawColor,
+                trailColors.line
+            ];
 
             // `slot` positions the layers in the v3 "standard" style (which imports
             // its basemap, so it exposes no symbol layers to sort against); the
@@ -156,7 +186,7 @@
                 source: TRAIL_SOURCE,
                 filter: ["!", ["get", "gap"]],
                 layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": trailColors.line, "line-width": 3.5, "line-opacity": 0.9 }
+                paint: { "line-color": lineColor, "line-width": 3.5, "line-opacity": 0.9 }
             }, beforeId);
             // Recording gaps: round caps plus a zero-length dash renders as dots.
             // Dash lengths are multiples of the line width, so 2 = one dot diameter
@@ -170,7 +200,7 @@
                 filter: ["get", "gap"],
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: {
-                    "line-color": trailColors.line,
+                    "line-color": lineColor,
                     "line-width": 3.5,
                     "line-opacity": 0.45,
                     "line-dasharray": [0, 2]
@@ -182,9 +212,14 @@
         }
     }
 
-    function setTrailCoordinates(currentMap: mapboxgl.Map, coordinates: number[][], gaps: boolean[] = []) {
+    function setTrailCoordinates(
+        currentMap: mapboxgl.Map,
+        coordinates: number[][],
+        gaps: boolean[] = [],
+        raws: boolean[] = []
+    ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps));
+        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws));
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -254,8 +289,9 @@
 
         const coordinates = toCoordinates(points);
         const gaps = gapFlags(points);
+        const raws = rawFlags(points);
         if (!animate || coordinates.length < 2) {
-            setTrailCoordinates(currentMap, coordinates, gaps);
+            setTrailCoordinates(currentMap, coordinates, gaps, raws);
             return;
         }
 
@@ -265,7 +301,7 @@
             const t = Math.min(1, (now - start) / TRAIL_ANIMATION_MS);
             // The truncated head keeps the original point indices (its interpolated
             // tip sits in the segment it replaces), so `gaps` still lines up.
-            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps);
+            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws);
             trailFrame = t < 1 ? requestAnimationFrame(step) : null;
         };
         // Start from nothing so the first frame doesn't flash the full line.

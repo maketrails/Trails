@@ -3,6 +3,7 @@ package es.jvbabi.trails.routes.devices.item
 import es.jvbabi.trails.api.TrailsAppUserPrincipal
 import es.jvbabi.trails.api.TrailsWebappPrincipal
 import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.database.Device
 import es.jvbabi.trails.shared.dto.websocket.PingSource
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.principal
@@ -42,4 +43,15 @@ suspend fun ApplicationCall.deviceActor(db: DatabaseManager): DeviceActor? {
         )
     }
     return null
+}
+
+/**
+ * Resolves the `deviceId` path parameter to a device the given user owns, or
+ * `null` when it is missing, unknown or somebody else's. Callers answer `null`
+ * as Forbidden either way, so a foreign device id cannot be probed for.
+ */
+suspend fun ApplicationCall.ownDevice(db: DatabaseManager, userId: Uuid): Device? {
+    val deviceId = parameters["deviceId"]?.let(Uuid::parseOrNull) ?: return null
+    val device = db.transaction { Device.findById(deviceId) } ?: return null
+    return if (db.transaction { device.owner.id.value == userId }) device else null
 }

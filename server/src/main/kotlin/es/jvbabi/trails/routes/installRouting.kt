@@ -17,6 +17,8 @@ import es.jvbabi.trails.routes.devices.image.deviceImage
 import es.jvbabi.trails.routes.devices.item.deleteDevice
 import es.jvbabi.trails.routes.devices.item.getDevice
 import es.jvbabi.trails.routes.devices.item.history.getDeviceHistory
+import es.jvbabi.trails.routes.devices.item.optimization.getDeviceOptimization
+import es.jvbabi.trails.routes.devices.item.optimization.reoptimizeDevice
 import es.jvbabi.trails.routes.devices.item.pingDevice
 import es.jvbabi.trails.routes.devices.item.ringDevice
 import es.jvbabi.trails.routes.devices.item.stopRingDevice
@@ -35,6 +37,7 @@ import es.jvbabi.trails.routes.share.item.updateShare
 import es.jvbabi.trails.routes.user.item.getUser
 import es.jvbabi.trails.routes.webapp.mapbox.webappMapbox
 import es.jvbabi.trails.routes.webapp.me.webappMe
+import es.jvbabi.trails.routes.webapp.optimization.webappOptimizationSocket
 import es.jvbabi.trails.routes.webapp.webappSocket
 import io.ktor.server.application.*
 import io.ktor.server.response.respond
@@ -91,6 +94,14 @@ fun Application.installRouting() {
 
                     route("/history") {
                         getDeviceHistory()
+                    }
+
+                    route("/optimization") {
+                        getDeviceOptimization()
+
+                        route("/reoptimize") {
+                            reoptimizeDevice()
+                        }
                     }
 
                     route("/ping") {
@@ -182,6 +193,12 @@ fun Application.installRouting() {
 
                 route("/me") {
                     webappMe()
+                }
+
+                route("/optimization") {
+                    route("/ws") {
+                        webappOptimizationSocket()
+                    }
                 }
 
                 route("/mapbox") {

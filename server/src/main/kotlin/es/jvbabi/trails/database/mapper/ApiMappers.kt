@@ -67,4 +67,5 @@ fun DataSnapshot.toHistoryPoint(includeBattery: Boolean) = LocationHistoryPoint(
             LocationHistoryPoint.Battery((level * 100).roundToInt(), charging)
         } else null
     } else null,
+    isRaw = isRaw,
 )

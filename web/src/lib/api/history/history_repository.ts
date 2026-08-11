@@ -9,6 +9,10 @@ import type {Battery} from "$lib/state/webapp_socket.svelte";
  * `battery` is only present when the caller may see the battery state (always for
  * the user's own devices, for a share only when it opted in) and the device
  * actually reported it.
+ *
+ * `is_raw` marks a measurement the optimizer has not reached yet. The trail draws
+ * those stretches apart from the optimized ones rather than presenting the whole
+ * line as equally clean.
  */
 export interface HistoryPoint {
     timestamp: number;
@@ -18,7 +22,15 @@ export interface HistoryPoint {
     bearing: number;
     bearing_accuracy: number | null;
     battery: Battery | null;
+    is_raw: boolean;
 }
+
+/**
+ * Which of a device's two series to read: the optimized track (optimized
+ * positions as far as they reach, then the raw tail behind them), or only the
+ * measurements as the device reported them.
+ */
+export type HistorySource = "optimized" | "raw";
 
 /** A device's recorded location history, oldest point first. */
 export interface LocationHistory {
@@ -31,21 +43,15 @@ export interface LocationHistory {
 }
 
 /**
- * A reported bearing accuracy of exactly 0 means the device had no real fix on its
- * direction of travel, and such points sit off the actual route often enough to
- * bend the drawn trail. They are dropped here, at the boundary, so every consumer
- * (trail, camera, detail views) works off the same cleaned list. A missing accuracy
- * (`null`) is unknown, not zero, and stays.
+ * Hands the history through as the server sent it. Cleaning up positions is the
+ * optimizer's job now — dropping some of them here as well would mean the
+ * raw view shows fewer positions than the statistics count, and the optimized
+ * track would get thinned out a second time on the way to the map.
  */
-function isUsable(point: HistoryPoint): boolean {
-    return point.bearing_accuracy !== 0;
-}
-
 async function readHistory(response: Response): Promise<LocationHistory | null> {
     if (!response.ok) return null;
     try {
-        const history = await response.json() as LocationHistory;
-        return {...history, points: history.points.filter(isUsable)};
+        return await response.json() as LocationHistory;
     } catch {
         return null;
     }
@@ -64,10 +70,10 @@ export const HistoryRepository = {
      * never limited, so `history_seconds` is always null here. Resolves `null` on
      * any failure (network error, unknown device, someone else's device).
      */
-    async forDevice(deviceId: string): Promise<LocationHistory | null> {
+    async forDevice(deviceId: string, source: HistorySource = "optimized"): Promise<LocationHistory | null> {
         let response: Response;
         try {
-            response = await fetch(`/api/v1/devices/${deviceId}/history`);
+            response = await fetch(`/api/v1/devices/${deviceId}/history?source=${source}`);
         } catch {
             return null;
         }

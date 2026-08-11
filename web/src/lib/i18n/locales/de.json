@@ -75,6 +75,22 @@
     "just_now": "gerade eben",
     "place_and_time": "{place} · {time}",
     "history_unavailable": "Verlauf nicht verfügbar",
+    "optimization": {
+      "title": "Streckenoptimierung",
+      "optimized_points": "Optimierte Punkte",
+      "unoptimized_points": "Unoptimierte Punkte",
+      "optimized_distance": "Optimierte Distanz",
+      "unoptimized_distance": "Unoptimierte Distanz",
+      "progress": "Fortschritt",
+      "reoptimize": "Neu optimieren",
+      "running": "Optimiert…",
+      "unavailable": "Optimierungsstatus nicht verfügbar",
+      "meters": "{value} m",
+      "kilometers": "{value} km",
+      "raw_title": "Rohdaten",
+      "raw_points": "Aufgezeichnete Punkte",
+      "raw_distance": "Aufgezeichnete Distanz"
+    },
     "dialogs": {
       "rename": {
         "title": "Gerät umbenennen",
@@ -158,6 +174,10 @@
         "day": "Letzter Tag",
         "week": "Letzte Woche"
       }
+    },
+    "source": {
+      "optimized": "Optimiert",
+      "raw": "Rohdaten"
     },
     "custom": {
       "days": "{count, plural, one {Letzter Tag} other {Letzte # Tage}}",

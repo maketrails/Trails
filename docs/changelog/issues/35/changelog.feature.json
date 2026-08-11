@@ -1,0 +1,10 @@
+{
+  "title": "Cleaned up location tracks",
+  "description": "Recorded tracks are now tidied up on their own: positions that are too inaccurate are left out, GPS jumps are removed, and standing in one place no longer draws a cloud of points but a single one. Your measurements are always kept, so a device's details let you switch its history between the tidy track and the raw data, show you how many positions and how much distance each of them holds, and let you rebuild the track whenever you want. Stretches that have not been tidied up yet are drawn in violet.",
+  "localized": {
+    "de": {
+      "title": "Aufgeräumte Standortverläufe",
+      "description": "Aufgezeichnete Strecken werden jetzt von selbst aufgeräumt: zu ungenaue Positionen bleiben außen vor, GPS-Sprünge fliegen raus, und aus einer Standzeit wird ein Punkt statt einer Punktewolke. Die Messwerte bleiben dabei immer erhalten — in den Gerätedetails kannst du den Verlauf zwischen aufgeräumter Strecke und Rohdaten umschalten, siehst zu beiden die Anzahl der Punkte und die Streckenlänge und kannst die Strecke jederzeit neu aufbauen lassen. Noch nicht aufgeräumte Abschnitte werden violett gezeichnet."
+    }
+  }
+}

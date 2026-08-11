@@ -46,6 +46,14 @@ sealed class UserSubscriptionMessage: KoinComponent {
         val isRinging: Boolean,
         val ringedByDeviceName: String,
     ): UserSubscriptionMessage()
+    /** How far the [es.jvbabi.trails.data.TrailOptimizer] of one of the user's
+     * own devices has got. Sent while a run progresses and once when it ends, so
+     * the device detail view can follow along. Only the webapp shows it. */
+    data class OptimizationProgress(
+        val deviceId: Uuid,
+        val progress: Double,
+        val isRunning: Boolean,
+    ): UserSubscriptionMessage()
 
     private val db by inject<DatabaseManager>()
     suspend fun toAppSocketMessage(
@@ -81,6 +89,8 @@ sealed class UserSubscriptionMessage: KoinComponent {
             // Emitted shares are not part of the app's socket state — it reads them
             // via `GET /me/emitted-shares` when it needs them.
             is EmittedSharesChanged -> return null
+            // The app draws no tracks, so optimization progress means nothing to it.
+            is OptimizationProgress -> return null
             is RingState -> {
                 return AppSocketMessage(TrailsWebSocketServerMessage.RingState(
                     deviceId = this.deviceId.toString(),

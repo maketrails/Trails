@@ -125,6 +125,7 @@ fun Route.app() {
                                 ownDeviceSubscriptionRtUpdaters.remove(deviceId)
                             }
                             is UserSubscriptionMessage.RingState -> { }
+                            is UserSubscriptionMessage.OptimizationProgress -> { }
                             is UserSubscriptionMessage.SharesChanged -> { }
                             is UserSubscriptionMessage.EmittedSharesChanged -> { }
                         }
@@ -154,7 +155,8 @@ fun Route.app() {
                                         DataSnapshot.findById(message.snapshotId) != null ||
                                                 !DataSnapshot.find {
                                                     (DataSnapshots.device eq principal.device.id) and
-                                                            (DataSnapshots.createdAt eq createdAt)
+                                                            (DataSnapshots.createdAt eq createdAt) and
+                                                            (DataSnapshots.isRaw eq true)
                                                 }.empty()
                                     }
 
@@ -178,6 +180,7 @@ fun Route.app() {
                                                 this.batteryLevel = message.batteryLevel
                                                 this.batteryCharging = message.batteryCharging
                                                 this.createdAt = createdAt
+                                                this.isRaw = true
                                             }
                                         }
                                     }.getOrElse { error ->

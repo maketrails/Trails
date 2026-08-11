@@ -6,6 +6,7 @@ import es.jvbabi.trails.data.DeviceInformationRepository
 import es.jvbabi.trails.data.DeviceSubscriptionRepository
 import es.jvbabi.trails.data.NominatimService
 import es.jvbabi.trails.data.ReverseGeocoding
+import es.jvbabi.trails.data.TrailOptimizerScheduler
 import es.jvbabi.trails.data.UserSubscriptionRepository
 import es.jvbabi.trails.database.DatabaseManager
 import io.ktor.server.application.*
@@ -19,6 +20,7 @@ private val coreModule = module {
     single { DeviceSubscriptionRepository() }
     single { UserSubscriptionRepository() }
     single<ReverseGeocoding> { NominatimService() }
+    single { TrailOptimizerScheduler() }
 }
 
 fun Application.installKoin(
@@ -39,5 +41,8 @@ fun Application.installKoin(
 
         val reverseGeocoding by inject<ReverseGeocoding>()
         reverseGeocoding.close()
+
+        val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()
+        trailOptimizerScheduler.close()
     }
 }

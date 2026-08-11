@@ -24,6 +24,11 @@ data class LocationHistoryResponse(
  * [battery] is only present when the caller is allowed to see the battery state
  * (always for the device owner, for a share only when it opted in) *and* the
  * device actually reported it.
+ *
+ * [isRaw] tells the two halves of a track apart: the optimized positions the
+ * server derived, and the raw measurements behind them that no optimizer has
+ * reached yet. Consumers draw the raw tail differently instead of pretending the
+ * whole track is equally trustworthy.
  */
 @Serializable
 data class LocationHistoryPoint(
@@ -34,6 +39,7 @@ data class LocationHistoryPoint(
     @SerialName("bearing") val bearing: Double,
     @SerialName("bearing_accuracy") val bearingAccuracy: Double?,
     @SerialName("battery") val battery: Battery?,
+    @SerialName("is_raw") val isRaw: Boolean = true,
 ) {
     @Serializable
     data class Battery(

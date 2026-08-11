@@ -5,6 +5,9 @@
     import DeviceActions from "$lib/app/devices/DeviceActions.svelte";
     import DeviceDetails, {type HistoryState} from "$lib/app/devices/DeviceDetails.svelte";
     import DeviceHeader from "$lib/app/devices/DeviceHeader.svelte";
+    import DeviceOptimization from "$lib/app/devices/DeviceOptimization.svelte";
+    import HistorySourceTabs from "$lib/app/devices/HistorySourceTabs.svelte";
+    import type {HistorySource} from "$lib/api/history/history_repository";
     import {loadHistory} from "$lib/state/history.svelte";
     import {setMapTrail} from "$lib/state/map_trail.svelte";
     import {_} from "svelte-i18n";
@@ -12,9 +15,13 @@
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
 
-    // The device's full location history, read once on open. Owned devices are
+    // Which of the two series the view shows. Switching it reloads the history
+    // and with it the line on the map.
+    let historySource = $state<HistorySource>("optimized");
+
+    // The device's full location history, read once per source. Owned devices are
     // never limited, so this is everything the server has recorded.
-    let history = loadHistory(() => (deviceId ? {kind: "device", deviceId} : null));
+    let history = loadHistory(() => (deviceId ? {kind: "device", deviceId, source: historySource} : null));
 
     // The ping/ring actions only make sense for the user's own devices. The
     // device list only carries owned devices, so membership doubles as the
@@ -66,6 +73,13 @@
                     battery={device.battery}
                     actions={isOwnDevice ? deviceActions : undefined}
             />
+
+            <!-- The optimization is only readable for own devices: a share hands
+                 out a track, not the state of the machinery behind it. -->
+            {#if isOwnDevice}
+                <HistorySourceTabs bind:source={historySource} />
+                <DeviceOptimization deviceId={device.id} />
+            {/if}
         </div>
     {:else}
         <p class="px-2 mt-4 text-sm text-muted-foreground">{$_("devices.not_found")}</p>
