@@ -9,6 +9,10 @@ import type {Battery} from "$lib/state/webapp_socket.svelte";
  * `battery` is only present when the caller may see the battery state (always for
  * the user's own devices, for a share only when it opted in) and the device
  * actually reported it.
+ *
+ * `is_raw` marks a measurement the optimizer has not reached yet. The trail draws
+ * those stretches apart from the optimized ones rather than presenting the whole
+ * line as equally clean.
  */
 export interface HistoryPoint {
     timestamp: number;
@@ -18,6 +22,7 @@ export interface HistoryPoint {
     bearing: number;
     bearing_accuracy: number | null;
     battery: Battery | null;
+    is_raw: boolean;
 }
 
 /** A device's recorded location history, oldest point first. */
