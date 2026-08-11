@@ -37,6 +37,7 @@ import es.jvbabi.trails.routes.share.item.updateShare
 import es.jvbabi.trails.routes.user.item.getUser
 import es.jvbabi.trails.routes.webapp.mapbox.webappMapbox
 import es.jvbabi.trails.routes.webapp.me.webappMe
+import es.jvbabi.trails.routes.webapp.optimization.webappOptimizationSocket
 import es.jvbabi.trails.routes.webapp.webappSocket
 import io.ktor.server.application.*
 import io.ktor.server.response.respond
@@ -192,6 +193,12 @@ fun Application.installRouting() {
 
                 route("/me") {
                     webappMe()
+                }
+
+                route("/optimization") {
+                    route("/ws") {
+                        webappOptimizationSocket()
+                    }
                 }
 
                 route("/mapbox") {

@@ -171,26 +171,6 @@ fun Route.webappSocket() {
                     .collect()
             }
 
-            // Follow the optimizer of the user's own devices. Sent as its own
-            // message rather than through sendDevices(): it arrives once per
-            // batch, and re-sending every device (with reverse geocoding) for a
-            // progress bar would be absurd.
-            launch {
-                userSubscriptionRepository.getFlowForUser(user.id.value)
-                    .filter { it is UserSubscriptionMessage.OptimizationProgress }
-                    .onEach { message ->
-                        val progress = message as UserSubscriptionMessage.OptimizationProgress
-                        sendSerialized<WebAppSocketServerMessage>(
-                            WebAppSocketServerMessage.OptimizationProgress(
-                                deviceId = progress.deviceId,
-                                progress = progress.progress,
-                                isRunning = progress.isRunning,
-                            )
-                        )
-                    }
-                    .collect()
-            }
-
             // Keep the connection open until the client disconnects.
             for (frame in incoming) {
                 // The webapp socket is server-push only; ignore inbound frames.
@@ -201,20 +181,6 @@ fun Route.webappSocket() {
 
 @Serializable
 sealed class WebAppSocketServerMessage {
-    /**
-     * How far the track optimization of one of the user's own devices has got.
-     * Only ever sent for own devices — a share carries a track, not the state of
-     * the machinery behind it.
-     */
-    @SerialName("optimization.progress")
-    @Serializable
-    data class OptimizationProgress(
-        @SerialName("device_id") val deviceId: Uuid,
-        /** Share of the settled positions that are optimized, 0..1. */
-        @SerialName("progress") val progress: Double,
-        @SerialName("is_running") val isRunning: Boolean,
-    ): WebAppSocketServerMessage()
-
     @SerialName("devices.update")
     @Serializable
     data class DevicesUpdate(

@@ -128,13 +128,6 @@ export interface ForeignShareRef {
     homeserver: string;
 }
 
-/** How far the optimizer has got on one of the user's own devices. */
-export interface OptimizationProgress {
-    /** Share of the settled positions that are optimized, 0..1. */
-    progress: number;
-    is_running: boolean;
-}
-
 type ServerMessage =
     | {
           type: "devices.update";
@@ -142,19 +135,12 @@ type ServerMessage =
           shares?: Share[];
           emitted_shares?: EmittedShare[];
           foreign_shares?: ForeignShareRef[];
-      }
-    | {
-          type: "optimization.progress";
-          device_id: string;
-          progress: number;
-          is_running: boolean;
       };
 
 let devices = $state<Device[]>([]);
 let shares = $state<Share[]>([]);
 let emittedShares = $state<EmittedShare[]>([]);
 let foreignShares = $state<ForeignShareRef[]>([]);
-let optimizations = $state<Record<string, OptimizationProgress>>({});
 let connected = $state(false);
 
 let socket: WebSocket | null = null;
@@ -190,13 +176,6 @@ function handleMessage(message: ServerMessage) {
             shares = message.shares ?? [];
             emittedShares = message.emitted_shares ?? [];
             foreignShares = message.foreign_shares ?? [];
-            break;
-        case "optimization.progress":
-            // Replaced rather than mutated so readers of the record react.
-            optimizations = {
-                ...optimizations,
-                [message.device_id]: {progress: message.progress, is_running: message.is_running},
-            };
             break;
         default:
             console.warn("Unknown webapp socket message", message);
@@ -249,7 +228,6 @@ function close() {
     shares = [];
     emittedShares = [];
     foreignShares = [];
-    optimizations = {};
     if (socket != null) {
         const ws = socket;
         socket = null;
@@ -283,10 +261,6 @@ export const webappSocket = {
     },
     get foreignShares() {
         return foreignShares;
-    },
-    /** Live optimization progress per own device id, as it is reported. */
-    get optimizations() {
-        return optimizations;
     },
     get connected() {
         return connected;
