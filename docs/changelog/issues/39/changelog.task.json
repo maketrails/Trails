@@ -1,0 +1,8 @@
+{
+  "description": "Cache the raw location history in the web app and only load new positions",
+  "localized": {
+    "de": {
+      "description": "Speichert den Rohdatenverlauf in der Web-App zwischen und lädt nur neue Positionen nach"
+    }
+  }
+}
