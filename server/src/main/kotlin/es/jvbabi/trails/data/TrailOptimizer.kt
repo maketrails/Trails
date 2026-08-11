@@ -4,6 +4,7 @@ import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.exposed.v1.core.Max
@@ -14,6 +15,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.lessEq
 import org.jetbrains.exposed.v1.datetime.KotlinInstantColumnType
 import org.jetbrains.exposed.v1.jdbc.andWhere
@@ -33,6 +35,7 @@ import kotlin.math.sqrt
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Instant
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -112,6 +115,12 @@ class TrailOptimizer(device: Device) : KoinComponent {
         /** How many raw positions one pass reads, optimizes and writes back. */
         const val BATCH_SIZE = 500
 
+        /**
+         * Breather between two batches, so concurrent writers are not starved by
+         * a long rebuild.
+         */
+        val BATCH_PAUSE: Duration = 50.milliseconds
+
         const val MAX_ACCURACY_METERS = 20.0
         const val SEGMENT_GAP_SECONDS = 300.0
 
@@ -159,6 +168,22 @@ class TrailOptimizer(device: Device) : KoinComponent {
         val progress: Double,
         val isRunning: Boolean
     )
+
+    /**
+     * What one run set out to do, measured once at its start.
+     *
+     * Progress is counted forward from here rather than re-queried per batch:
+     * two COUNTs after every batch is a lot of database traffic for a number
+     * that only feeds a progress bar.
+     */
+    private data class Window(
+        val lowerBound: Instant?,
+        val settledPoints: Long,
+        val previouslyProcessed: Long
+    ) {
+        fun progressAt(processed: Long): Double = if (settledPoints == 0L) 1.0
+        else ((previouslyProcessed + processed).toDouble() / settledPoints).coerceIn(0.0, 1.0)
+    }
 
     /**
      * One position on its way through the pipeline. Carries the columns that
@@ -228,24 +253,30 @@ class TrailOptimizer(device: Device) : KoinComponent {
         // Everything younger than this may still change and is left raw.
         val upperOptimizationBound = Clock.System.now() - IGNORE_LATEST
 
-        val (hasRawPoints, lowerOptimizationBound) = db.transaction {
-            val hasRawPoints = !DataSnapshot
-                .find {
-                    (DataSnapshots.device eq deviceId) and
-                            (DataSnapshots.isRaw eq true) and
-                            (DataSnapshots.createdAt lessEq upperOptimizationBound)
-                }
-                .limit(1)
-                .empty()
+        val window = db.transaction {
+            val settled = DataSnapshots
+                .selectAll()
+                .where(raw and (DataSnapshots.createdAt lessEq upperOptimizationBound))
+                .count()
 
             // Null means nothing has been optimized yet, and the whole history
             // is up for it.
-            hasRawPoints to derivedEnd()?.minus(REBUILD_OVERLAP)
+            val lowerBound = derivedEnd()?.minus(REBUILD_OVERLAP)
+
+            Window(
+                lowerBound = lowerBound,
+                settledPoints = settled,
+                // What the run inherits from earlier ones, so its progress can be
+                // counted forward from here without asking the database again.
+                previouslyProcessed = lowerBound
+                    ?.let { DataSnapshots.selectAll().where(raw and (DataSnapshots.createdAt less it)).count() }
+                    ?: 0L
+            )
         }
 
         // Nothing has settled yet, so the derived series stays as it is - it
         // must not be deleted without being rebuilt right after.
-        if (!hasRawPoints) return
+        if (window.settledPoints == 0L) return
 
         /*
          * Whatever this optimizer produced from the bound onwards is discarded
@@ -254,24 +285,27 @@ class TrailOptimizer(device: Device) : KoinComponent {
          */
         db.transaction {
             DataSnapshots.deleteWhere {
-                if (lowerOptimizationBound == null) derived
-                else derived and (DataSnapshots.createdAt greaterEq lowerOptimizationBound)
+                val lowerBound = window.lowerBound
+
+                if (lowerBound == null) derived
+                else derived and (DataSnapshots.createdAt greaterEq lowerBound)
             }
         }
 
-        publishProgress(isRunning = true)
+        publishProgress(window.progressAt(0), isRunning = true)
 
         /*
          * Read, optimize and write one batch at a time: the whole history of a
-         * device does not have to fit in memory, and a long rebuild does not
-         * hold a single transaction open. A batch boundary can cut a pause in
-         * two, which costs one extra position in the result.
+         * device does not have to fit in memory, and a long rebuild does not hold
+         * a single transaction open. A batch boundary can cut a pause in two,
+         * which costs one extra position in the result.
          */
         var cursor: Instant? = null
+        var processed = 0L
 
         while (true) {
             val batch = db.transaction {
-                readRawBatch(lowerOptimizationBound, upperOptimizationBound, cursor)
+                readRawBatch(window.lowerBound, upperOptimizationBound, cursor)
             }
 
             if (batch.isEmpty()) break
@@ -283,24 +317,31 @@ class TrailOptimizer(device: Device) : KoinComponent {
             }
 
             cursor = batch.last().timestamp
+            processed += batch.size
 
-            publishProgress(isRunning = true)
+            publishProgress(window.progressAt(processed), isRunning = true)
 
             if (batch.size < BATCH_SIZE) break
+
+            /*
+             * Let other writers in. A rebuild is a background job with no
+             * deadline, while an app catching up pushes snapshots in batches of
+             * 50 and would otherwise queue behind every batch we write - on
+             * SQLite, where there is one writer at a time, that shows up as
+             * SQLITE_BUSY.
+             */
+            delay(BATCH_PAUSE)
         }
 
-        publishProgress(isRunning = false)
+        publishProgress(window.progressAt(processed), isRunning = false)
     }
 
     /**
-     * Tells the owner's sessions how far along the device is. Deliberately
-     * cheap — two counts over the `(device, timestamp)` index — because it runs
-     * after every batch. The distances of [state] are a full scan and are only
-     * read when a view asks for them.
+     * Tells the owner's sessions how far along the device is. Runs after every
+     * batch, so it costs no query at all — see [Window]. The distances of
+     * [state] are a full scan and are only read when a view asks for them.
      */
-    private suspend fun publishProgress(isRunning: Boolean) {
-        val progress = db.transaction { progress(derivedEnd()) }
-
+    private suspend fun publishProgress(progress: Double, isRunning: Boolean) {
         userSubscriptions.getFlowForUser(ownerId).emit(
             UserSubscriptionMessage.OptimizationProgress(
                 deviceId = deviceId.value,
