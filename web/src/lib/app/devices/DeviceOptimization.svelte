@@ -1,12 +1,26 @@
-<script lang="ts">
-    import {ArrowsClockwiseIcon, CircleNotchIcon, PathIcon, XIcon} from "phosphor-svelte";
-    import {Button} from "$lib/components/ui/button";
+<script lang="ts" module>
     import {
         fetchDeviceOptimization,
         reoptimizeDevice,
         type DeviceOptimization,
     } from "$lib/api/devices/optimization";
-    import {webappSocket} from "$lib/state/webapp_socket.svelte";
+
+    /**
+     * Last known state per device, deliberately outside the component.
+     *
+     * The device list is re-sent on every incoming snapshot, and an app catching
+     * up pushes them in batches of 50 — so this component can be re-created
+     * repeatedly while the page stays open. Reading the cache first means a
+     * re-created card shows its numbers straight away instead of falling back to
+     * "loading" and flickering along with every batch.
+     */
+    const cache = new Map<string, DeviceOptimization>();
+</script>
+
+<script lang="ts">
+    import {ArrowsClockwiseIcon, CircleNotchIcon, PathIcon, XIcon} from "phosphor-svelte";
+    import {Button} from "$lib/components/ui/button";
+    import {OptimizationSocket} from "$lib/state/optimization_socket.svelte";
     import {_, locale} from "svelte-i18n";
 
     let {
@@ -15,39 +29,85 @@
         deviceId: string;
     } = $props();
 
-    let optimization = $state<DeviceOptimization | null>(null);
+    let loaded = $state<DeviceOptimization | null>(null);
+
+    /**
+     * What the card shows: the freshly read state, or the last known numbers for
+     * this device while a read is on its way. A re-created card therefore starts
+     * with data instead of flashing "loading".
+     */
+    let optimization = $derived(loaded ?? cache.get(deviceId) ?? null);
     let failed = $state(false);
     let starting = $state(false);
 
+    // The progress socket lives exactly as long as this card — no global socket
+    // for something only shown here.
+    let socket = $state<OptimizationSocket | null>(null);
+    $effect(() => {
+        const opened = new OptimizationSocket();
+        opened.open();
+        socket = opened;
+        return () => {
+            opened.close();
+            socket = null;
+        };
+    });
+
     // Progress arrives over the socket; the counts and distances are a full scan
     // on the server and only read on demand.
-    let live = $derived(webappSocket.optimizations[deviceId] ?? null);
+    let live = $derived(socket?.progress[deviceId] ?? null);
     let progress = $derived(live?.progress ?? optimization?.progress ?? 0);
     let isRunning = $derived(live?.is_running ?? optimization?.is_running ?? false);
 
-    async function load() {
-        const result = await fetchDeviceOptimization(deviceId);
+    // Guards that must not be reactive: an effect writes them, and reading a
+    // reactive value it writes would make the effect re-trigger itself.
+    let inFlight = false;
+    let requestedFor: string | null = null;
+    let wasRunning = false;
+
+    /**
+     * Reads the state without ever blanking what is already on screen — a
+     * refetch replaces the numbers, it does not remove them first.
+     */
+    async function load(device: string) {
+        if (inFlight) return;
+        inFlight = true;
+
+        const result = await fetchDeviceOptimization(device);
+
+        inFlight = false;
+
+        // The card may have moved on to another device while this was in flight.
+        if (device !== deviceId) return;
+
         if (result.type === "success") {
-            optimization = result.optimization;
+            cache.set(device, result.optimization);
+            loaded = result.optimization;
             failed = false;
         } else {
             failed = true;
         }
     }
 
+    // Only an actual device change starts a load; re-runs for any other reason
+    // find `requestedFor` unchanged and do nothing.
     $effect(() => {
-        deviceId;
-        optimization = null;
-        load();
+        const device = deviceId;
+        if (requestedFor === device) return;
+
+        requestedFor = device;
+        loaded = null;
+        load(device);
     });
 
-    // A finished run changed the counts and distances, so read them again.
-    // Deliberately not $state: the effect writes it, and a reactive value it
-    // also reads would re-trigger the effect on every run.
-    let wasRunning = false;
+    // A finished run changed the counts and distances, so read them again. Reads
+    // only the socket, never `optimization` — otherwise the load below would
+    // re-trigger this effect through it.
     $effect(() => {
-        if (wasRunning && !isRunning) load();
-        wasRunning = isRunning;
+        const running = socket?.progress[deviceId]?.is_running ?? false;
+
+        if (wasRunning && !running) load(deviceId);
+        wasRunning = running;
     });
 
     async function handleReoptimize() {
