@@ -75,6 +75,19 @@
     "just_now": "gerade eben",
     "place_and_time": "{place} · {time}",
     "history_unavailable": "Verlauf nicht verfügbar",
+    "optimization": {
+      "title": "Streckenoptimierung",
+      "optimized_points": "Optimierte Punkte",
+      "unoptimized_points": "Unoptimierte Punkte",
+      "optimized_distance": "Optimierte Distanz",
+      "unoptimized_distance": "Unoptimierte Distanz",
+      "progress": "Fortschritt",
+      "reoptimize": "Neu optimieren",
+      "running": "Optimiert…",
+      "unavailable": "Optimierungsstatus nicht verfügbar",
+      "meters": "{value} m",
+      "kilometers": "{value} km"
+    },
     "dialogs": {
       "rename": {
         "title": "Gerät umbenennen",

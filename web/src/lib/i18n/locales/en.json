@@ -75,6 +75,19 @@
     "just_now": "just now",
     "place_and_time": "{place} · {time}",
     "history_unavailable": "History unavailable",
+    "optimization": {
+      "title": "Track optimization",
+      "optimized_points": "Optimized positions",
+      "unoptimized_points": "Unoptimized positions",
+      "optimized_distance": "Optimized distance",
+      "unoptimized_distance": "Unoptimized distance",
+      "progress": "Progress",
+      "reoptimize": "Optimize again",
+      "running": "Optimizing…",
+      "unavailable": "Optimization state unavailable",
+      "meters": "{value} m",
+      "kilometers": "{value} km"
+    },
     "dialogs": {
       "rename": {
         "title": "Rename device",

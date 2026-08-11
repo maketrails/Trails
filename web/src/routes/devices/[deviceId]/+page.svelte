@@ -5,6 +5,7 @@
     import DeviceActions from "$lib/app/devices/DeviceActions.svelte";
     import DeviceDetails, {type HistoryState} from "$lib/app/devices/DeviceDetails.svelte";
     import DeviceHeader from "$lib/app/devices/DeviceHeader.svelte";
+    import DeviceOptimization from "$lib/app/devices/DeviceOptimization.svelte";
     import {loadHistory} from "$lib/state/history.svelte";
     import {setMapTrail} from "$lib/state/map_trail.svelte";
     import {_} from "svelte-i18n";
@@ -66,6 +67,12 @@
                     battery={device.battery}
                     actions={isOwnDevice ? deviceActions : undefined}
             />
+
+            <!-- The optimization is only readable for own devices: a share hands
+                 out a track, not the state of the machinery behind it. -->
+            {#if isOwnDevice}
+                <DeviceOptimization deviceId={device.id} />
+            {/if}
         </div>
     {:else}
         <p class="px-2 mt-4 text-sm text-muted-foreground">{$_("devices.not_found")}</p>
