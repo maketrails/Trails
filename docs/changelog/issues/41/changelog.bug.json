@@ -1,0 +1,8 @@
+{
+  "description": "Switching straight from one device or share to another no longer resets the map",
+  "localized": {
+    "de": {
+      "description": "Der direkte Wechsel von einem Gerät oder einer Freigabe zur nächsten setzt die Karte nicht mehr zurück"
+    }
+  }
+}
