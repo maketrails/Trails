@@ -10,6 +10,13 @@
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import MapPin from "./MapPin.svelte";
+    import MapBundle from "./MapBundle.svelte";
+    import {
+        bundleOverlappingPins,
+        PIN_HEIGHT,
+        PIN_WIDTH,
+        type PinBundle,
+    } from "./pin_bundling";
     import mapDark from "$lib/assets/map-dark.png";
     import mapLight from "$lib/assets/map-light.png";
 
@@ -17,23 +24,32 @@
     let showPlaceholder = $state(false);
     let map: mapboxgl.Map | undefined = $state();
 
-    // One mapbox marker + mounted MapPin per device/share that has a location.
+    // One mapbox marker + mounted component per drawn pin, keyed by what it draws
+    // (see pinKey / bundleKey) — a lone device or share, or a bundle of them.
     type PinEntry = { marker: mapboxgl.Marker; component: Record<string, any> };
     const pins = new Map<string, PinEntry>();
 
-    // MapPin's rendered SVG size. The marker is anchored at its bottom tip,
-    // so a pin overhangs its coordinate by the full height upwards and half its
-    // width to each side (and nothing below). Used to pad fitBounds so the whole
-    // pin stays visible, not just its anchor point.
-    const PIN_WIDTH = 60;
-    const PIN_HEIGHT = 67;
-
-    function removePin(id: string) {
-        const entry = pins.get(id);
+    /**
+     * Takes a drawn pin off the map, playing its shrink-back-in outro first (see
+     * pinPop) — pins and their bundle trade places at the same spot and in the same
+     * instant, and cutting either of them would read as a flicker. The marker is
+     * only dropped once the outro is through, so the outgoing pin stays put while
+     * it plays.
+     *
+     * [animated] is off for the teardown, where the whole map is going anyway.
+     */
+    function removePin(key: string, animated = true) {
+        const entry = pins.get(key);
         if (entry == null) return;
-        entry.marker.remove();
-        unmount(entry.component);
-        pins.delete(id);
+        pins.delete(key);
+
+        if (!animated) {
+            entry.marker.remove();
+            void unmount(entry.component);
+            return;
+        }
+
+        void unmount(entry.component, {outro: true}).then(() => entry.marker.remove());
     }
 
     const darkMode = new MediaQuery("(prefers-color-scheme: dark)");
@@ -70,6 +86,11 @@
     // know when to (re)add them. A counter rather than a boolean, so a *second*
     // load is also a change the effect can see.
     let styleEpoch = $state(0);
+
+    // Counts camera changes. Whether two pins cover each other is decided in screen
+    // space, so panning, zooming, rotating or tilting alone can bundle them or pull
+    // them apart again — this is what tells the pin effect to look anew.
+    let cameraEpoch = $state(0);
 
     // Minimal GeoJSON shape for the trail. Spelled out locally because
     // @types/geojson isn't a dependency, so the global `GeoJSON` namespace that
@@ -361,11 +382,15 @@
 
             // Fires for the initial style and again after every setStyle.
             map.on("style.load", () => styleEpoch++);
+
+            // Fires for every camera change, including each frame of an animated one,
+            // so the bundling keeps up with a flyTo instead of snapping at its end.
+            map.on("move", () => cameraEpoch++);
         });
 
         return () => {
             cancelTrailAnimation();
-            for (const id of [...pins.keys()]) removePin(id);
+            for (const key of [...pins.keys()]) removePin(key, false);
             map?.remove();
         };
     });
@@ -440,16 +465,69 @@
         };
     });
 
-    // Add or move the marker for one entity (own device or share). The pin id
-    // is the entity's own id; each kind renders its own pin component.
+    /** One entity the map draws a pin for: an own device, or a share of either origin. */
+    type PinTarget = {
+        id: string;
+        label: string;
+        imageUrl: string;
+        href: string;
+        location: { longitude: number; latitude: number };
+    };
+
+    /** Every own device, same-server share and foreign share that has a location. */
+    function pinTargets(): PinTarget[] {
+        const targets: PinTarget[] = [];
+
+        for (const device of webappSocket.devices) {
+            const location = device.last_location;
+            if (location == null) continue;
+            targets.push({
+                id: device.id,
+                label: device.name,
+                imageUrl: `/api/v1/devices/image/${device.manufacturer}-${device.model}`,
+                href: `/devices/${device.id}`,
+                location
+            });
+        }
+
+        for (const share of webappSocket.shares) {
+            const location = share.last_location;
+            if (location == null) continue;
+            targets.push({
+                id: share.id,
+                label: shareMainText(share),
+                imageUrl: `/api/v1/devices/image/${share.manufacturer}-${share.model}`,
+                href: `/share/${share.id}`,
+                location
+            });
+        }
+
+        for (const entry of foreignShares.entries) {
+            const snapshot = entry.subscription.snapshot;
+            const location = snapshot?.last_location;
+            if (snapshot == null || location == null) continue;
+            const base = shareOriginBase(entry.homeserver);
+            targets.push({
+                id: entry.activeShareId,
+                label: shareMainText(snapshot),
+                imageUrl: `${base}/api/v1/devices/image/${snapshot.manufacturer}-${snapshot.model}`,
+                href: `/share/${entry.activeShareId}?homeserver=${encodeURIComponent(entry.homeserver)}`,
+                location
+            });
+        }
+
+        return targets;
+    }
+
+    // Add or move the marker for one drawn pin, kept under [key]: whatever the key
+    // stands for is mounted once and only moved afterwards.
     function upsertPin(
         currentMap: mapboxgl.Map,
-        id: string,
-        location: { longitude: number; latitude: number },
+        key: string,
+        lngLat: [number, number],
         makeComponent: (target: HTMLElement) => Record<string, any>
     ) {
-        const lngLat: [number, number] = [location.longitude, location.latitude];
-        const existing = pins.get(id);
+        const existing = pins.get(key);
         if (existing != null) {
             existing.marker.setLngLat(lngLat);
             return;
@@ -460,72 +538,75 @@
         const marker = new mapboxgl.Marker({ element, anchor: "bottom" })
             .setLngLat(lngLat)
             .addTo(currentMap);
-        pins.set(id, { marker, component });
+        pins.set(key, { marker, component });
     }
 
-    // Keep a pin on the map for every own device and share that has a location.
+    function drawPin(currentMap: mapboxgl.Map, target: PinTarget): string {
+        const key = `pin:${target.id}`;
+        upsertPin(currentMap, key, [target.location.longitude, target.location.latitude], (element) =>
+            // `intro` so a pin leaving a bundle grows in rather than popping up.
+            mount(MapPin, {
+                target: element,
+                intro: true,
+                props: {
+                    id: target.id,
+                    label: target.label,
+                    imageUrl: target.imageUrl,
+                    href: target.href
+                }
+            })
+        );
+        return key;
+    }
+
+    function drawBundle(currentMap: mapboxgl.Map, bundle: PinBundle<PinTarget>): string {
+        // Keyed by its members, so a bundle that gains or loses one is a different
+        // bundle and is drawn anew — which is also what keeps the mounted props right.
+        const key = `bundle:${bundle.items.map((target) => target.id).sort().join("|")}`;
+        // Unprojecting the screen centre the bundling worked out (rather than
+        // averaging coordinates) puts the pill exactly where it was measured.
+        const center = currentMap.unproject([bundle.position.x, bundle.position.y]);
+        upsertPin(currentMap, key, [center.lng, center.lat], (element) =>
+            mount(MapBundle, { target: element, intro: true, props: { items: bundle.items } })
+        );
+        return key;
+    }
+
+    // Keep a pin on the map for every own device and share that has a location, with
+    // the ones lying on top of each other drawn as a single bundle.
     $effect(() => {
         const currentMap = map;
+        const targets = pinTargets();
+        const opened = mapCamera.targetId;
+        // A real read, not a bare reference: the bundling is worked out in screen
+        // space, so it has to be redone whenever the camera moved.
+        void cameraEpoch;
+
         if (currentMap == null) return;
 
         const seen = new Set<string>();
 
-        for (const device of webappSocket.devices) {
-            const location = device.last_location;
-            if (location == null) continue;
-            seen.add(device.id);
-            upsertPin(currentMap, device.id, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: device.id,
-                        label: device.name,
-                        imageUrl: `/api/v1/devices/image/${device.manufacturer}-${device.model}`,
-                        href: `/devices/${device.id}`
-                    }
-                })
+        // The opened device or share is never bundled away: it is what the camera
+        // frames and what the map draws highlighted, so it keeps a pin of its own.
+        const openedTarget = targets.find((target) => target.id === opened);
+        if (openedTarget != null) seen.add(drawPin(currentMap, openedTarget));
+
+        const bundles = bundleOverlappingPins(
+            targets.filter((target) => target.id !== opened),
+            (target) => currentMap.project([target.location.longitude, target.location.latitude])
+        );
+        for (const bundle of bundles) {
+            seen.add(
+                bundle.items.length === 1
+                    ? drawPin(currentMap, bundle.items[0])
+                    : drawBundle(currentMap, bundle)
             );
         }
 
-        for (const share of webappSocket.shares) {
-            const location = share.last_location;
-            if (location == null) continue;
-            seen.add(share.id);
-            upsertPin(currentMap, share.id, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: share.id,
-                        label: shareMainText(share),
-                        imageUrl: `/api/v1/devices/image/${share.manufacturer}-${share.model}`,
-                        href: `/share/${share.id}`
-                    }
-                })
-            );
-        }
-
-        for (const entry of foreignShares.entries) {
-            const snapshot = entry.subscription.snapshot;
-            const location = snapshot?.last_location;
-            if (snapshot == null || location == null) continue;
-            seen.add(entry.activeShareId);
-            const base = shareOriginBase(entry.homeserver);
-            upsertPin(currentMap, entry.activeShareId, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: entry.activeShareId,
-                        label: shareMainText(snapshot),
-                        imageUrl: `${base}/api/v1/devices/image/${snapshot.manufacturer}-${snapshot.model}`,
-                        href: `/share/${entry.activeShareId}?homeserver=${encodeURIComponent(entry.homeserver)}`
-                    }
-                })
-            );
-        }
-
-        // Drop pins for entities that vanished or lost their location.
-        for (const id of [...pins.keys()]) {
-            if (!seen.has(id)) removePin(id);
+        // Drop what is no longer drawn: entities that vanished or lost their location,
+        // and bundles whose members went their separate ways.
+        for (const key of [...pins.keys()]) {
+            if (!seen.has(key)) removePin(key);
         }
     });
 

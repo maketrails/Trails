@@ -194,6 +194,9 @@
         "keep_trail_in_view": "Verlauf im Blick behalten",
         "move_manually": "Karte selbst bewegen"
       }
+    },
+    "bundle": {
+      "label": "{count} Geräte an dieser Stelle"
     }
   }
 }
