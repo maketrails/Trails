@@ -26,6 +26,29 @@ enum class TrackSource {
 }
 
 /**
+ * Where the server last saw [device], or null when it has never reported — or has
+ * reported nothing since [notOlderThan].
+ *
+ * Both series are searched, exactly like the snapshot endpoints do: an optimized row is
+ * a rewrite of a raw one and carries its recording time, so the newest row is the newest
+ * position either way.
+ *
+ * Must be called inside a transaction.
+ *
+ * @param notOlderThan Only positions recorded at or after this instant, for the
+ *   retention window of a share. Null means no limit on the recording time.
+ */
+fun latestSnapshot(device: Device, notOlderThan: Instant? = null): DataSnapshot? {
+    val recorded = notOlderThan?.let { DataSnapshots.createdAt greaterEq it } ?: Op.TRUE
+
+    return DataSnapshot
+        .find { (DataSnapshots.device eq device.id) and recorded }
+        .orderBy(DataSnapshots.createdAt to SortOrder.DESC)
+        .limit(1)
+        .firstOrNull()
+}
+
+/**
  * The recorded positions of a device the way a track should show them.
  *
  * For [TrackSource.Optimized] that is the optimized series as far as it reaches,
