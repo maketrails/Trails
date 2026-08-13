@@ -47,8 +47,9 @@ export const BUNDLE_TAIL_HEIGHT = 8;
 export const BUNDLE_COLUMNS = 4;
 
 /**
- * How much of a pin another one has to cover for the two to be bundled: more than
- * half of its width or more than half of its height.
+ * How much of a pin another one has to cover, in each dimension, for the two to be
+ * bundled. Read as a distance: at 0.5 two pins are bundled once they stand less
+ * than half a pin apart both horizontally and vertically.
  */
 const BUNDLE_COVERAGE = 0.5;
 
@@ -89,22 +90,20 @@ function boxOf(position: PinPoint, size: PinSize): PinBox {
 }
 
 /**
- * Whether two pins lie on top of each other: they have to overlap at all, and that
- * overlap has to cover more than {@link BUNDLE_COVERAGE} of the smaller one in at
- * least one dimension — the smaller one, because a bundle pill is wider than the
- * single pin it may be covering.
+ * Whether two pins lie on top of each other: their overlap has to cover more than
+ * {@link BUNDLE_COVERAGE} of the smaller one in *both* dimensions — the smaller
+ * one, because a bundle pill is wider than the single pin it may be covering.
  *
- * Demanding a real intersection is what keeps "one dimension is enough" from being
- * trivially true: two pins at the same height share their whole vertical range no
- * matter how far apart they sit horizontally.
+ * Both, not either. Two pins at the same height share their whole vertical range
+ * however far apart they stand, so one dimension is already satisfied by pins that
+ * merely touch at the edges — which is bundling long before anything is hidden.
  */
 function coversEnough(a: PinBox, b: PinBox): boolean {
     const x = Math.min(a.right, b.right) - Math.max(a.left, b.left);
     const y = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-    if (x <= 0 || y <= 0) return false;
 
     return (
-        x > Math.min(a.width, b.width) * BUNDLE_COVERAGE ||
+        x > Math.min(a.width, b.width) * BUNDLE_COVERAGE &&
         y > Math.min(a.height, b.height) * BUNDLE_COVERAGE
     );
 }
