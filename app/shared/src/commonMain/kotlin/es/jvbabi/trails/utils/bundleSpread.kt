@@ -81,6 +81,21 @@ private fun destination(from: Location, bearing: Double, distanceMeters: Double)
 }
 
 /**
+ * The middle of [points] — where a bundle too tight for a circle is anchored.
+ *
+ * Deliberately geographic: a bundle's position must not be read off the screen, or it
+ * would only be true for the camera that was up when it was read. Bundles this tight
+ * span a few hundred metres, so plain averaging is exact enough; it is wrong only for a
+ * group straddling the antimeridian, which no bundle of one household's devices does.
+ *
+ * [points] must not be empty.
+ */
+fun averageLocation(points: List<Location>): Location = Location(
+    latitude = points.sumOf { it.latitude } / points.size,
+    longitude = points.sumOf { it.longitude } / points.size,
+)
+
+/**
  * The circle [points] lie in, or `null` when they sit closer together than
  * [minDistanceMeters] and there is nothing to point out.
  *

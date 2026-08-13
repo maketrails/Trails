@@ -2,9 +2,18 @@
 
 package es.jvbabi.trails.page.home.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,7 +35,6 @@ import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +90,7 @@ import es.jvbabi.trails.utils.Location
 import es.jvbabi.trails.utils.PinBundle
 import es.jvbabi.trails.utils.PinPoint
 import es.jvbabi.trails.utils.PinSize
+import es.jvbabi.trails.utils.averageLocation
 import es.jvbabi.trails.utils.bundleOverlappingPins
 import es.jvbabi.trails.utils.bundleSpread
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
@@ -270,70 +279,34 @@ fun DeviceBundleMarker(
 }
 
 /**
- * Grows a marker out of the coordinate it marks when it first appears. A bundle and the
- * pins it is made of trade places at the same spot and in the same instant, and cutting
- * either of them would read as a flicker.
- *
- * Unlike the web app there is no matching shrink-out: Compose drops the marker that is
- * leaving straight away, so only the arriving end can be animated.
- */
-@Composable
-private fun GrowIn(content: @Composable () -> Unit) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-
-    val progress by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = BUNDLE_ANIMATION_MS, easing = FastOutSlowInEasing),
-        label = "marker grow-in",
-    )
-
-    Box(
-        modifier = Modifier.graphicsLayer {
-            val scale = 0.55f + 0.45f * progress
-            scaleX = scale
-            scaleY = scale
-            alpha = progress
-            // Pivots on the tip, so the marker grows out of its coordinate rather than
-            // out of its own middle.
-            transformOrigin = TransformOrigin(0.5f, 1f)
-        }
-    ) {
-        content()
-    }
-}
-
-/**
  * The ground a bundle covers, for the ones whose members are genuinely far apart: a full
  * border around a translucent body. Drawn in real distances rather than in pixels, so it
  * keeps covering the same ground at every zoom.
  */
 @Composable
 private fun BundleSpreadCircle(spread: BundleSpread, darkMap: Boolean) {
-    var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { shown = true }
-
-    val progress by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(durationMillis = BUNDLE_ANIMATION_MS, easing = FastOutSlowInEasing),
-        label = "bundle spread",
-    )
-    if (progress <= 0f) return
+    // The target is set as the state is created, so the circle is on its way in from the
+    // very first frame. Nothing has to fire afterwards for it to get there.
+    val appearance = remember { MutableTransitionState(false).apply { targetState = true } }
+    val transition = rememberTransition(appearance, label = "bundle spread")
+    val scale by transition.animateFloat(
+        transitionSpec = { tween(durationMillis = BUNDLE_ANIMATION_MS, easing = FastOutSlowInEasing) },
+        label = "bundle spread scale",
+    ) { shown -> if (shown) 1f else 0.6f }
 
     val color = if (darkMap) SPREAD_COLOR_DARK else SPREAD_COLOR_LIGHT
-    // Grows out of its centre rather than fading in on the spot, so it reads as the
-    // bundle taking up its ground.
-    val ring = spread.ring(scale = 0.6 + 0.4 * progress)
+    // It grows out of its centre; the opacity is left alone on purpose, so an animation
+    // that never runs leaves a slightly small circle rather than no circle at all.
+    val ring = spread.ring(scale = scale.toDouble())
         .map { point -> Point.fromLngLat(point.longitude, point.latitude) }
 
     PolygonAnnotation(points = listOf(ring)) {
         fillColor = color
-        fillOpacity = SPREAD_FILL_OPACITY * progress
+        fillOpacity = SPREAD_FILL_OPACITY
     }
     PolylineAnnotation(points = ring) {
         lineColor = color
         lineWidth = SPREAD_LINE_WIDTH
-        lineOpacity = progress.toDouble()
     }
 }
 
@@ -458,94 +431,129 @@ actual fun Map(
 
             // Which pins cover each other is decided in screen space, so the answer changes
             // with the camera — reading the viewport's camera state is what redoes the
-            // bundling on every pan, zoom, rotation and tilt.
+            // bundling on every pan, zoom, rotation and tilt. Worked out anew on every
+            // composition rather than kept in a remember: a cache here could go on
+            // describing a grouping the camera has long moved past.
             val camera = mapViewportState.cameraState
             val currentMap = mapboxMap
-            val bundles = remember(pinnedDevices, camera, currentMap, density) {
-                if (currentMap == null) {
-                    // Nothing to project against yet; every device stands on its own.
-                    pinnedDevices.map { device -> PinBundle(listOf(device), PinPoint(0.0, 0.0)) }
-                } else {
-                    bundleOverlappingPins(
-                        items = pinnedDevices,
-                        sizeOf = { count -> bundleSizePx(count, density) },
-                        positionOf = { device ->
-                            val location = device.snapshot!!.location
-                            val pixel = currentMap.pixelForCoordinate(
-                                Point.fromLngLat(location.longitude, location.latitude)
-                            )
-                            PinPoint(pixel.x, pixel.y)
-                        },
-                    )
-                }
+            val bundles = if (currentMap == null || camera == null) {
+                // Nothing to project against yet; every device stands on its own.
+                pinnedDevices.map { device -> PinBundle(listOf(device), PinPoint(0.0, 0.0)) }
+            } else {
+                bundleOverlappingPins(
+                    items = pinnedDevices,
+                    sizeOf = { count -> bundleSizePx(count, density) },
+                    positionOf = { device ->
+                        val location = device.snapshot!!.location
+                        val pixel = currentMap.pixelForCoordinate(
+                            Point.fromLngLat(location.longitude, location.latitude)
+                        )
+                        PinPoint(pixel.x, pixel.y)
+                    },
+                )
             }
+            val bundleOf = bundles
+                .flatMap { bundle -> bundle.items.map { member -> member.device.id to bundle } }
+                .toMap()
 
-            bundles.forEach { bundle ->
-                // Keyed by its members, so a bundle that gains or loses one is a different
-                // bundle and is drawn anew — which is what plays its grow-in.
-                key(bundle.items.joinToString("|") { it.device.id.toString() }) {
-                    if (bundle.items.size == 1) {
-                        val device = bundle.items.first()
-                        val position = device.snapshot!!.location
+            /*
+             * One annotation per device, for as long as that device exists. Bundling only
+             * decides what an annotation shows and where it sits — never whether it is
+             * there. Nothing about the drawn state is stored: it is worked out from the
+             * devices and the camera on every composition, so no camera move, no
+             * navigation and no reordering can leave a device without a marker.
+             */
+            pinnedDevices.forEach { device ->
+                key(device.device.id) {
+                    val members = bundleOf[device.device.id]?.items ?: listOf(device)
+                    val locations = members.map { member ->
+                        val location = member.snapshot!!.location
+                        Location(latitude = location.latitude, longitude = location.longitude)
+                    }
 
-                        ViewAnnotation(
-                            options = viewAnnotationOptions {
-                                geometry(Point.fromLngLat(position.longitude, position.latitude))
-                                allowOverlap(true)
-                                allowOverlapWithPuck(true)
-                                annotationAnchor {
-                                    anchor(ViewAnnotationAnchor.BOTTOM)
-                                }
-                            }
-                        ) {
-                            GrowIn {
-                                DeviceMarker(
-                                    imageBytes = device.image,
-                                    onClick = {
-                                        onDeviceClick(device)
-                                    },
-                                )
+                    // A bundle is drawn by exactly one of its members, chosen by id so the
+                    // choice can't wander with the order the devices arrive in. The others
+                    // stay where they are, hidden.
+                    val drawsMarker = members.minOf { it.device.id.toString() } == device.device.id.toString()
+
+                    // Only bundles standing for far-apart devices get a circle; a ring
+                    // around pins that sit on the same spot says nothing.
+                    val spread = if (members.size > 1) bundleSpread(locations) else null
+
+                    // Anchored geographically, never at a projected pixel: a coordinate read
+                    // off the screen is only true for the camera that was up when it was
+                    // read, and would strand the marker the moment the camera moves on.
+                    val anchor = when {
+                        members.size == 1 -> locations.first()
+                        spread != null -> spread.top
+                        else -> averageLocation(locations)
+                    }
+
+                    ViewAnnotation(
+                        options = viewAnnotationOptions {
+                            geometry(Point.fromLngLat(anchor.longitude, anchor.latitude))
+                            allowOverlap(true)
+                            allowOverlapWithPuck(true)
+                            visible(drawsMarker)
+                            annotationAnchor {
+                                anchor(ViewAnnotationAnchor.BOTTOM)
                             }
                         }
-                    } else {
-                        // Only bundles that stand for far-apart devices get a circle; the
-                        // rest are pins on the same spot, and a ring around those says
-                        // nothing.
-                        val spread = bundleSpread(
-                            bundle.items.map { device ->
-                                val location = device.snapshot!!.location
-                                Location(latitude = location.latitude, longitude = location.longitude)
-                            }
+                    ) {
+                        // Grows in when this device takes over the drawing — on its own or
+                        // for its bundle — and shrinks back as it hands it on. The scale is
+                        // derived from that, and nothing here touches opacity: a marker can
+                        // come out a little small, never invisible.
+                        val appearance by animateFloatAsState(
+                            targetValue = if (drawsMarker) 1f else 0.6f,
+                            animationSpec = tween(durationMillis = BUNDLE_ANIMATION_MS, easing = FastOutSlowInEasing),
+                            label = "marker appearance",
                         )
 
-                        // A bundle standing for ground rather than for a spot is anchored at
-                        // the top of its circle, so it points at what it covers instead of
-                        // hiding the middle of it.
-                        val anchor = spread?.top ?: currentMap
-                            ?.coordinateForPixel(ScreenCoordinate(bundle.position.x, bundle.position.y))
-                            ?.let { point -> Location(latitude = point.latitude(), longitude = point.longitude()) }
-
-                        if (anchor != null) {
-                            ViewAnnotation(
-                                options = viewAnnotationOptions {
-                                    geometry(Point.fromLngLat(anchor.longitude, anchor.latitude))
-                                    allowOverlap(true)
-                                    allowOverlapWithPuck(true)
-                                    annotationAnchor {
-                                        anchor(ViewAnnotationAnchor.BOTTOM)
-                                    }
-                                }
-                            ) {
-                                GrowIn {
+                        Box(
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = appearance
+                                scaleY = appearance
+                                // Pivots on the tip, so a marker grows out of its coordinate
+                                // rather than out of its own middle.
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                            }
+                        ) {
+                            // Pin and bundle trade places inside one and the same annotation,
+                            // so the swap is a crossfade rather than one marker vanishing and
+                            // another appearing somewhere.
+                            AnimatedContent(
+                                targetState = drawsMarker && members.size > 1,
+                                transitionSpec = {
+                                    val spec = tween<Float>(
+                                        durationMillis = BUNDLE_ANIMATION_MS,
+                                        easing = FastOutSlowInEasing,
+                                    )
+                                    val origin = TransformOrigin(0.5f, 1f)
+                                    (fadeIn(spec) + scaleIn(spec, initialScale = 0.6f, transformOrigin = origin))
+                                        .togetherWith(
+                                            fadeOut(spec) + scaleOut(spec, targetScale = 0.6f, transformOrigin = origin)
+                                        )
+                                },
+                                label = "pin or bundle",
+                            ) { drawsBundle ->
+                                if (drawsBundle) {
                                     DeviceBundleMarker(
-                                        devices = bundle.items,
+                                        devices = members,
                                         onDeviceClick = onDeviceClick,
+                                    )
+                                } else {
+                                    DeviceMarker(
+                                        imageBytes = device.image,
+                                        onClick = { onDeviceClick(device) },
                                     )
                                 }
                             }
                         }
+                    }
 
-                        if (spread != null) BundleSpreadCircle(spread = spread, darkMap = darkMap)
+                    if (drawsMarker && spread != null) {
+                        BundleSpreadCircle(spread = spread, darkMap = darkMap)
                     }
                 }
             }
