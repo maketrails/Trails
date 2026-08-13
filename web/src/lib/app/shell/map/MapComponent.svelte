@@ -9,7 +9,16 @@
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
+    import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
+    import MapBundle from "./MapBundle.svelte";
+    import {bundleSpread, spreadRing, type BundleSpread} from "./bundle_spread";
+    import {
+        bundleOverlappingPins,
+        PIN_HEIGHT,
+        PIN_WIDTH,
+        type PinBundle,
+    } from "./pin_bundling";
     import mapDark from "$lib/assets/map-dark.png";
     import mapLight from "$lib/assets/map-light.png";
 
@@ -17,23 +26,32 @@
     let showPlaceholder = $state(false);
     let map: mapboxgl.Map | undefined = $state();
 
-    // One mapbox marker + mounted MapPin per device/share that has a location.
+    // One mapbox marker + mounted component per drawn pin, keyed by what it draws
+    // (see pinKey / bundleKey) — a lone device or share, or a bundle of them.
     type PinEntry = { marker: mapboxgl.Marker; component: Record<string, any> };
     const pins = new Map<string, PinEntry>();
 
-    // MapPin's rendered SVG size. The marker is anchored at its bottom tip,
-    // so a pin overhangs its coordinate by the full height upwards and half its
-    // width to each side (and nothing below). Used to pad fitBounds so the whole
-    // pin stays visible, not just its anchor point.
-    const PIN_WIDTH = 60;
-    const PIN_HEIGHT = 67;
-
-    function removePin(id: string) {
-        const entry = pins.get(id);
+    /**
+     * Takes a drawn pin off the map, playing its shrink-back-in outro first (see
+     * pinPop) — pins and their bundle trade places at the same spot and in the same
+     * instant, and cutting either of them would read as a flicker. The marker is
+     * only dropped once the outro is through, so the outgoing pin stays put while
+     * it plays.
+     *
+     * [animated] is off for the teardown, where the whole map is going anyway.
+     */
+    function removePin(key: string, animated = true) {
+        const entry = pins.get(key);
         if (entry == null) return;
-        entry.marker.remove();
-        unmount(entry.component);
-        pins.delete(id);
+        pins.delete(key);
+
+        if (!animated) {
+            entry.marker.remove();
+            void unmount(entry.component);
+            return;
+        }
+
+        void unmount(entry.component, {outro: true}).then(() => entry.marker.remove());
     }
 
     const darkMode = new MediaQuery("(prefers-color-scheme: dark)");
@@ -70,6 +88,11 @@
     // know when to (re)add them. A counter rather than a boolean, so a *second*
     // load is also a change the effect can see.
     let styleEpoch = $state(0);
+
+    // Counts camera changes. Whether two pins cover each other is decided in screen
+    // space, so panning, zooming, rotating or tilting alone can bundle them or pull
+    // them apart again — this is what tells the pin effect to look anew.
+    let cameraEpoch = $state(0);
 
     // Minimal GeoJSON shape for the trail. Spelled out locally because
     // @types/geojson isn't a dependency, so the global `GeoJSON` namespace that
@@ -361,11 +384,16 @@
 
             // Fires for the initial style and again after every setStyle.
             map.on("style.load", () => styleEpoch++);
+
+            // Fires for every camera change, including each frame of an animated one,
+            // so the bundling keeps up with a flyTo instead of snapping at its end.
+            map.on("move", () => cameraEpoch++);
         });
 
         return () => {
             cancelTrailAnimation();
-            for (const id of [...pins.keys()]) removePin(id);
+            cancelSpreadAnimation();
+            for (const key of [...pins.keys()]) removePin(key, false);
             map?.remove();
         };
     });
@@ -440,16 +468,260 @@
         };
     });
 
-    // Add or move the marker for one entity (own device or share). The pin id
-    // is the entity's own id; each kind renders its own pin component.
+    /*
+     * The ground a bundle covers, drawn for the ones whose members are genuinely far
+     * apart (see bundle_spread): a full border around a translucent body, in a blue
+     * of its own so it doesn't read as part of the trail. Real distances, so the
+     * circle keeps covering the same ground at every zoom.
+     */
+    const SPREAD_SOURCE = "bundle-spread";
+    const SPREAD_FILL_LAYER = "bundle-spread-fill";
+    const SPREAD_LINE_LAYER = "bundle-spread-line";
+    const SPREAD_FILL_OPACITY = 0.18;
+    const spreadColor = $derived(darkMode.current ? "#60a5fa" : "#2563eb");
+
+    type SpreadFeature = {
+        type: "Feature";
+        // How far the circle is faded in; the layers read it per feature, so several
+        // bundles can be at different points of their animation at the same time.
+        properties: { opacity: number };
+        geometry: { type: "Polygon"; coordinates: number[][][] };
+    };
+    type SpreadData = { type: "FeatureCollection"; features: SpreadFeature[] };
+
+    /** Adds the circle's source and layers if they aren't there yet, see addTrailLayers. */
+    function addSpreadLayers(currentMap: mapboxgl.Map): boolean {
+        if (currentMap.getSource(SPREAD_SOURCE) != null) return true;
+
+        try {
+            currentMap.addSource(SPREAD_SOURCE, {
+                type: "geojson",
+                data: {type: "FeatureCollection", features: []}
+            });
+
+            const beforeId = firstSymbolLayerId(currentMap);
+            currentMap.addLayer({
+                id: SPREAD_FILL_LAYER,
+                type: "fill",
+                slot: "middle",
+                source: SPREAD_SOURCE,
+                paint: {
+                    // Without this the fill draws its own soft edge right under the
+                    // border, and the two together read as a blurred outline.
+                    "fill-antialias": false,
+                    "fill-color": spreadColor,
+                    "fill-opacity": ["*", ["get", "opacity"], SPREAD_FILL_OPACITY]
+                }
+            }, beforeId);
+            currentMap.addLayer({
+                id: SPREAD_LINE_LAYER,
+                type: "line",
+                slot: "middle",
+                source: SPREAD_SOURCE,
+                layout: {"line-join": "round"},
+                paint: {
+                    "line-color": spreadColor,
+                    "line-width": 2.5,
+                    "line-opacity": ["get", "opacity"]
+                }
+            }, beforeId);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * The circles currently on the map, keyed by the bundle they belong to.
+     * [target] is where the circle is headed — 1 while its bundle is drawn, 0 once it
+     * is gone; [progress] is where it has got to.
+     */
+    type SpreadState = { spread: BundleSpread; progress: number; target: 0 | 1 };
+    const spreadStates = new Map<string, SpreadState>();
+
+    // Same length and easing as the pins' grow-in (see pinPop), so a bundle and its
+    // circle arrive together.
+    const SPREAD_ANIMATION_MS = 220;
+
+    let spreadFrame: number | null = null;
+    let spreadFrameTime: number | null = null;
+
+    function cancelSpreadAnimation() {
+        if (spreadFrame != null) cancelAnimationFrame(spreadFrame);
+        spreadFrame = null;
+        spreadFrameTime = null;
+    }
+
+    function spreadData(): SpreadData {
+        const features: SpreadFeature[] = [];
+        for (const state of spreadStates.values()) {
+            const shown = cubicOut(state.progress);
+            if (shown <= 0) continue;
+            features.push({
+                type: "Feature",
+                properties: {opacity: shown},
+                // Grows out of its centre rather than fading in on the spot, so it
+                // reads as the bundle taking up its ground.
+                geometry: {type: "Polygon", coordinates: [spreadRing(state.spread, 0.6 + 0.4 * shown)]}
+            });
+        }
+        return {type: "FeatureCollection", features};
+    }
+
+    function drawSpreads(currentMap: mapboxgl.Map) {
+        const source = currentMap.getSource(SPREAD_SOURCE);
+        if (source?.type === "geojson") source.setData(spreadData());
+    }
+
+    /** Moves every circle towards its target; returns whether any is still on its way. */
+    function stepSpreads(now: number): boolean {
+        const elapsed = spreadFrameTime == null ? 0 : now - spreadFrameTime;
+        spreadFrameTime = now;
+        const step = reducedMotion.current ? 1 : elapsed / SPREAD_ANIMATION_MS;
+
+        let moving = false;
+        for (const [key, state] of [...spreadStates]) {
+            state.progress =
+                state.target > state.progress
+                    ? Math.min(state.target, state.progress + step)
+                    : Math.max(state.target, state.progress - step);
+
+            if (state.progress !== state.target) moving = true;
+            else if (state.target === 0) spreadStates.delete(key);
+        }
+        return moving;
+    }
+
+    function animateSpreads(currentMap: mapboxgl.Map) {
+        cancelSpreadAnimation();
+        if (![...spreadStates.values()].some((state) => state.progress !== state.target)) return;
+
+        spreadFrameTime = performance.now();
+        const frame = (now: number) => {
+            const moving = stepSpreads(now);
+            drawSpreads(currentMap);
+            if (!moving) {
+                cancelSpreadAnimation();
+                return;
+            }
+            spreadFrame = requestAnimationFrame(frame);
+        };
+        spreadFrame = requestAnimationFrame(frame);
+    }
+
+    // Bumped whenever a circle is added, dropped or has moved — the pin effect runs on
+    // every camera frame, and only the rare run that changes something has to redraw.
+    let spreadEpoch = $state(0);
+
+    /** Hands the circles of the bundles that were just drawn over to the map. */
+    function publishSpreads(spreads: Map<string, BundleSpread>) {
+        let changed = false;
+
+        for (const [key, spread] of spreads) {
+            const state = spreadStates.get(key);
+            if (state == null) {
+                spreadStates.set(key, {spread, progress: 0, target: 1});
+                changed = true;
+                continue;
+            }
+            if (state.target === 0) changed = true;
+            state.target = 1;
+            // The members move, so the circle they lie in does too.
+            if (state.spread.radius !== spread.radius || state.spread.center.lng !== spread.center.lng) {
+                changed = true;
+            }
+            state.spread = spread;
+        }
+
+        for (const [key, state] of spreadStates) {
+            if (spreads.has(key) || state.target === 0) continue;
+            state.target = 0;
+            changed = true;
+        }
+
+        if (changed) spreadEpoch++;
+    }
+
+    // Draw the circles, and keep them drawn across a style swap — that drops every
+    // custom source and layer, which is what styleEpoch reports.
+    $effect(() => {
+        const currentMap = map;
+        const epoch = styleEpoch;
+        // A real read, like styleEpoch above: this is what a changed set of circles
+        // reports, and it must not be optimised away.
+        void spreadEpoch;
+        if (currentMap == null || epoch === 0) return;
+        if (!addSpreadLayers(currentMap)) return;
+
+        drawSpreads(currentMap);
+        animateSpreads(currentMap);
+
+        return () => cancelSpreadAnimation();
+    });
+
+    /** One entity the map draws a pin for: an own device, or a share of either origin. */
+    type PinTarget = {
+        id: string;
+        label: string;
+        imageUrl: string;
+        href: string;
+        location: { longitude: number; latitude: number };
+    };
+
+    /** Every own device, same-server share and foreign share that has a location. */
+    function pinTargets(): PinTarget[] {
+        const targets: PinTarget[] = [];
+
+        for (const device of webappSocket.devices) {
+            const location = device.last_location;
+            if (location == null) continue;
+            targets.push({
+                id: device.id,
+                label: device.name,
+                imageUrl: `/api/v1/devices/image/${device.manufacturer}-${device.model}`,
+                href: `/devices/${device.id}`,
+                location
+            });
+        }
+
+        for (const share of webappSocket.shares) {
+            const location = share.last_location;
+            if (location == null) continue;
+            targets.push({
+                id: share.id,
+                label: shareMainText(share),
+                imageUrl: `/api/v1/devices/image/${share.manufacturer}-${share.model}`,
+                href: `/share/${share.id}`,
+                location
+            });
+        }
+
+        for (const entry of foreignShares.entries) {
+            const snapshot = entry.subscription.snapshot;
+            const location = snapshot?.last_location;
+            if (snapshot == null || location == null) continue;
+            const base = shareOriginBase(entry.homeserver);
+            targets.push({
+                id: entry.activeShareId,
+                label: shareMainText(snapshot),
+                imageUrl: `${base}/api/v1/devices/image/${snapshot.manufacturer}-${snapshot.model}`,
+                href: `/share/${entry.activeShareId}?homeserver=${encodeURIComponent(entry.homeserver)}`,
+                location
+            });
+        }
+
+        return targets;
+    }
+
+    // Add or move the marker for one drawn pin, kept under [key]: whatever the key
+    // stands for is mounted once and only moved afterwards.
     function upsertPin(
         currentMap: mapboxgl.Map,
-        id: string,
-        location: { longitude: number; latitude: number },
+        key: string,
+        lngLat: [number, number],
         makeComponent: (target: HTMLElement) => Record<string, any>
     ) {
-        const lngLat: [number, number] = [location.longitude, location.latitude];
-        const existing = pins.get(id);
+        const existing = pins.get(key);
         if (existing != null) {
             existing.marker.setLngLat(lngLat);
             return;
@@ -460,72 +732,97 @@
         const marker = new mapboxgl.Marker({ element, anchor: "bottom" })
             .setLngLat(lngLat)
             .addTo(currentMap);
-        pins.set(id, { marker, component });
+        pins.set(key, { marker, component });
     }
 
-    // Keep a pin on the map for every own device and share that has a location.
+    function drawPin(currentMap: mapboxgl.Map, target: PinTarget): string {
+        const key = `pin:${target.id}`;
+        upsertPin(currentMap, key, [target.location.longitude, target.location.latitude], (element) =>
+            // `intro` so a pin leaving a bundle grows in rather than popping up.
+            mount(MapPin, {
+                target: element,
+                intro: true,
+                props: {
+                    id: target.id,
+                    label: target.label,
+                    imageUrl: target.imageUrl,
+                    href: target.href
+                }
+            })
+        );
+        return key;
+    }
+
+    function bundleKey(bundle: PinBundle<PinTarget>): string {
+        // Keyed by its members, so a bundle that gains or loses one is a different
+        // bundle and is drawn anew — which is also what keeps the mounted props right.
+        return `bundle:${bundle.items.map((target) => target.id).sort().join("|")}`;
+    }
+
+    function drawBundle(
+        currentMap: mapboxgl.Map,
+        bundle: PinBundle<PinTarget>,
+        spread: BundleSpread | null
+    ): string {
+        const key = bundleKey(bundle);
+        // A bundle standing for ground rather than for a spot is anchored at the top of
+        // its circle, so it points at what it covers instead of hiding the middle of it.
+        // Without one, unprojecting the screen centre the bundling worked out (rather
+        // than averaging coordinates) puts the pill exactly where it was measured.
+        const anchor = spread?.top ?? currentMap.unproject([bundle.position.x, bundle.position.y]);
+        upsertPin(currentMap, key, [anchor.lng, anchor.lat], (element) =>
+            mount(MapBundle, { target: element, intro: true, props: { items: bundle.items } })
+        );
+        return key;
+    }
+
+    // Keep a pin on the map for every own device and share that has a location, with
+    // the ones lying on top of each other drawn as a single bundle.
     $effect(() => {
         const currentMap = map;
+        const targets = pinTargets();
+        const opened = mapCamera.targetId;
+        // A real read, not a bare reference: the bundling is worked out in screen
+        // space, so it has to be redone whenever the camera moved.
+        void cameraEpoch;
+
         if (currentMap == null) return;
 
         const seen = new Set<string>();
 
-        for (const device of webappSocket.devices) {
-            const location = device.last_location;
-            if (location == null) continue;
-            seen.add(device.id);
-            upsertPin(currentMap, device.id, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: device.id,
-                        label: device.name,
-                        imageUrl: `/api/v1/devices/image/${device.manufacturer}-${device.model}`,
-                        href: `/devices/${device.id}`
-                    }
-                })
-            );
-        }
+        // The opened device or share is never bundled away: it is what the camera
+        // frames and what the map draws highlighted, so it keeps a pin of its own.
+        const openedTarget = targets.find((target) => target.id === opened);
+        if (openedTarget != null) seen.add(drawPin(currentMap, openedTarget));
 
-        for (const share of webappSocket.shares) {
-            const location = share.last_location;
-            if (location == null) continue;
-            seen.add(share.id);
-            upsertPin(currentMap, share.id, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: share.id,
-                        label: shareMainText(share),
-                        imageUrl: `/api/v1/devices/image/${share.manufacturer}-${share.model}`,
-                        href: `/share/${share.id}`
-                    }
-                })
-            );
-        }
+        const bundles = bundleOverlappingPins(
+            targets.filter((target) => target.id !== opened),
+            (target) => currentMap.project([target.location.longitude, target.location.latitude])
+        );
+        const spreads = new Map<string, BundleSpread>();
+        for (const bundle of bundles) {
+            if (bundle.items.length === 1) {
+                seen.add(drawPin(currentMap, bundle.items[0]));
+                continue;
+            }
 
-        for (const entry of foreignShares.entries) {
-            const snapshot = entry.subscription.snapshot;
-            const location = snapshot?.last_location;
-            if (snapshot == null || location == null) continue;
-            seen.add(entry.activeShareId);
-            const base = shareOriginBase(entry.homeserver);
-            upsertPin(currentMap, entry.activeShareId, location, (target) =>
-                mount(MapPin, {
-                    target,
-                    props: {
-                        id: entry.activeShareId,
-                        label: shareMainText(snapshot),
-                        imageUrl: `${base}/api/v1/devices/image/${snapshot.manufacturer}-${snapshot.model}`,
-                        href: `/share/${entry.activeShareId}?homeserver=${encodeURIComponent(entry.homeserver)}`
-                    }
-                })
+            // Only bundles that stand for far-apart devices get a circle; the rest are
+            // pins on the same spot, and drawing a ring around those says nothing.
+            const spread = bundleSpread(
+                bundle.items.map((target) => ({
+                    lng: target.location.longitude,
+                    lat: target.location.latitude
+                }))
             );
+            if (spread != null) spreads.set(bundleKey(bundle), spread);
+            seen.add(drawBundle(currentMap, bundle, spread));
         }
+        publishSpreads(spreads);
 
-        // Drop pins for entities that vanished or lost their location.
-        for (const id of [...pins.keys()]) {
-            if (!seen.has(id)) removePin(id);
+        // Drop what is no longer drawn: entities that vanished or lost their location,
+        // and bundles whose members went their separate ways.
+        for (const key of [...pins.keys()]) {
+            if (!seen.has(key)) removePin(key);
         }
     });
 

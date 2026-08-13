@@ -194,6 +194,9 @@
         "keep_trail_in_view": "Keep the trail in view",
         "move_manually": "Move the map yourself"
       }
+    },
+    "bundle": {
+      "label": "{count} devices at this spot"
     }
   }
 }

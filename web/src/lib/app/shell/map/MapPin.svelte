@@ -1,6 +1,7 @@
 <script lang="ts">
     import {DeviceMobileIcon} from "phosphor-svelte";
     import {mapCamera} from "$lib/state/map_camera.svelte";
+    import {pinPop} from "./pin_transition";
 
     let {
         id,
@@ -88,12 +89,14 @@
     </div>
 {/snippet}
 
+<!-- The transition pivots on the tip, like the wiggle above, so the pin grows out
+     of the coordinate it marks — see pinPop for why it is on the outermost node. -->
 {#if href != null}
-    <a {href} aria-label={label} class="group block cursor-pointer">
+    <a {href} aria-label={label} class="group block cursor-pointer origin-[50%_96.4%]" transition:pinPop>
         {@render pin()}
     </a>
 {:else}
-    <div aria-label={label} class="group block">
+    <div aria-label={label} class="group block origin-[50%_96.4%]" transition:pinPop>
         {@render pin()}
     </div>
 {/if}
