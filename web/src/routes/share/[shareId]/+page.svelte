@@ -1,12 +1,12 @@
 <script lang="ts">
     import {page} from "$app/state";
     import {webappSocket} from "$lib/state/webapp_socket.svelte";
-    import {setCameraTarget} from "$lib/state/map_camera.svelte";
+    import {claimCameraTarget} from "$lib/state/map_camera.svelte";
     import DeviceDetails, { type HistoryState } from "$lib/app/devices/DeviceDetails.svelte";
     import DeviceHeader from "$lib/app/devices/DeviceHeader.svelte";
     import {ShareSubscription, shareOriginBase} from "$lib/state/share_socket.svelte";
     import {loadHistory} from "$lib/state/history.svelte";
-    import {setMapTrail} from "$lib/state/map_trail.svelte";
+    import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {_} from "svelte-i18n";
 
     let shareId = $derived(page.params.shareId);
@@ -60,17 +60,23 @@
         return webappSocket.connected ? null : undefined;
     });
 
+    // Camera and trail are claimed for the page as a whole, not per effect run: while
+    // a navigation slides, this page and the one being opened are alive at the same
+    // time, and only the claim keeps this one from taking the map back on teardown.
+    const cameraTarget = claimCameraTarget();
+    const mapTrail = claimMapTrail();
+
     // Hand the camera to the detail scope (and highlight the pin, present for
     // same-server shares) while the page is open.
     $effect(() => {
-        setCameraTarget(shareId ?? null);
-        return () => setCameraTarget(null);
+        cameraTarget.set(shareId ?? null);
+        return () => cameraTarget.release();
     });
 
     // Draw the history as a line on the map while the page is open.
     $effect(() => {
-        setMapTrail(history.points, shareId ? `share:${shareId}` : null);
-        return () => setMapTrail(null, null);
+        mapTrail.set(history.points, shareId ? `share:${shareId}` : null);
+        return () => mapTrail.release();
     });
 
     let historyState: HistoryState = $derived.by(() => {
