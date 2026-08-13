@@ -51,17 +51,54 @@ export function setContentRect(rect: ContentRect | null) {
 }
 
 /**
- * Opens the detail scope for a device or share (highlighting its pin), or closes
- * it again with `null`. Opening a *different* target resets the detail camera to
- * {@link DETAIL_DEFAULT_MODE} — a freshly opened device should always frame
- * itself, rather than inheriting a `manual` choice made on some earlier one.
+ * The detail view the camera currently belongs to. Switching between two detail
+ * views has both of them alive at the same time — the layout keeps the page being
+ * left around for its slide-out while the page being opened is already mounted —
+ * so the two would otherwise write over each other: the outgoing view's teardown
+ * would take the camera away from the target the incoming one just set.
+ *
+ * The newest claim wins. Everything an older view still does — a late update, its
+ * teardown at the end of the transition — is ignored.
  */
-export function setCameraTarget(id: string | null) {
-    // The comparison is untracked on purpose: the detail pages call this from an
-    // $effect, and a *tracked* read of `targetId` here would make that effect
-    // depend on the very state it writes — an endless update loop.
-    if (id != null && id !== untrack(() => targetId)) detailMode = DETAIL_DEFAULT_MODE;
-    targetId = id;
+let owner = 0;
+let claims = 0;
+
+/** A single detail view's hold on the camera, see {@link claimCameraTarget}. */
+export interface CameraTargetClaim {
+    /**
+     * Opens the detail scope for a device or share (highlighting its pin), or
+     * closes it again with `null`. Opening a *different* target resets the detail
+     * camera to {@link DETAIL_DEFAULT_MODE} — a freshly opened device should always
+     * frame itself, rather than inheriting a `manual` choice made on some earlier one.
+     */
+    set(id: string | null): void;
+    /** Hands the camera back to the overview. */
+    release(): void;
+}
+
+/**
+ * Takes over the detail scope for one view. Call this once while the view is
+ * being created, not from an $effect: the claim is what marks this view as the
+ * newer one, and it has to be taken before the view being left tears down.
+ */
+export function claimCameraTarget(): CameraTargetClaim {
+    const claim = ++claims;
+    owner = claim;
+
+    return {
+        set(id: string | null) {
+            if (owner !== claim) return;
+            // The comparison is untracked on purpose: the detail pages call this from
+            // an $effect, and a *tracked* read of `targetId` here would make that
+            // effect depend on the very state it writes — an endless update loop.
+            if (id != null && id !== untrack(() => targetId)) detailMode = DETAIL_DEFAULT_MODE;
+            targetId = id;
+        },
+        release() {
+            if (owner !== claim) return;
+            targetId = null;
+        },
+    };
 }
 
 export function setGeneralCameraMode(mode: GeneralCameraMode) {

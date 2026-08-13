@@ -12,7 +12,7 @@
         UsersIcon,
     } from "phosphor-svelte"
     import {webappSocket} from "$lib/state/webapp_socket.svelte";
-    import {setCameraTarget} from "$lib/state/map_camera.svelte";
+    import {claimCameraTarget} from "$lib/state/map_camera.svelte";
     import {ShareRepository} from "$lib/api/shares/share_repository";
     import {locationHistoryLabel, locationHistoryOptionsFor} from "$lib/app/emitted-shares/location_history";
     import {Checkbox} from "$lib/components/ui/checkbox";
@@ -59,11 +59,16 @@
         if (pendingBatteryState === share.share_battery_state) pendingBatteryState = null;
     });
 
+    // The camera is claimed for the page as a whole, not per effect run: while a
+    // navigation slides, this page and the one being opened are alive at the same
+    // time, and only the claim keeps this one from taking the camera back on teardown.
+    const cameraTarget = claimCameraTarget();
+
     // Highlight the shared device's pin and hand the camera to the detail scope
     // while the page is open.
     $effect(() => {
-        setCameraTarget(share?.device_id ?? null);
-        return () => setCameraTarget(null);
+        cameraTarget.set(share?.device_id ?? null);
+        return () => cameraTarget.release();
     });
 
     async function saveHistorySeconds(seconds: number) {

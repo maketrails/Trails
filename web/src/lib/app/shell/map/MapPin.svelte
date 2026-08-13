@@ -15,7 +15,7 @@
         href?: string | null;
     } = $props();
 
-    // Highlighted while its device's detail page is open (see setCameraTarget).
+    // Highlighted while its device's detail page is open (see claimCameraTarget).
     let highlighted = $derived(mapCamera.targetId === id);
 
     let imageAvailable = $state(true);
