@@ -1,0 +1,8 @@
+{
+  "description": "Devices now show the position the server last saw as soon as the app asks for it, instead of staying on what the app happened to know until the device reports again",
+  "localized": {
+    "de": {
+      "description": "Geräte zeigen jetzt die zuletzt vom Server gesehene Position, sobald die App danach fragt, statt bis zur nächsten Meldung des Geräts auf dem Stand der App zu bleiben"
+    }
+  }
+}

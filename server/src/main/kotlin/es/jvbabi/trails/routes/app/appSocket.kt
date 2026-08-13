@@ -8,6 +8,7 @@ import es.jvbabi.trails.data.DeviceSubscriptionMessage
 import es.jvbabi.trails.data.DeviceSubscriptionRepository
 import es.jvbabi.trails.data.UserSubscriptionMessage
 import es.jvbabi.trails.data.UserSubscriptionRepository
+import es.jvbabi.trails.data.latestSnapshot
 import es.jvbabi.trails.database.ActiveShare
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
@@ -23,6 +24,7 @@ import io.ktor.util.logging.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
@@ -62,10 +64,64 @@ fun Route.app() {
 
             val emitRtUpdates = MutableStateFlow(true)
 
+            /**
+             * Sends where the server last saw [device], right as the client subscribes.
+             *
+             * Without this a client only learns a position once the device reports one,
+             * so a device that is offline — the very case where its whereabouts matter —
+             * leaves the app showing whatever it happened to know from last time instead
+             * of what the server knows.
+             *
+             * What a share may reveal stays the share's decision, on the same window its
+             * history uses (see getActiveShareHistory): nothing at all at `0`, everything
+             * at a negative (unbounded) one, otherwise only a position recorded inside the
+             * window. An own device carries no such limit.
+             *
+             * Sent before the live subscription starts, so a position that arrives while
+             * this is on its way is the one the client keeps. A client that has asked not
+             * to be sent positions at all is left alone, on the same footing as the live
+             * updates below.
+             */
+            suspend fun sendLastKnownPosition(device: Device, share: ActiveShare?) {
+                if (!emitRtUpdates.value) return
+                // A removed device gives nothing away, exactly as its snapshot and history
+                // endpoints answer a plain 404. The subscription reports the removal itself.
+                if (db.transaction { device.deletion } != null) return
+
+                val historySeconds = share?.let { db.transaction { it.share.locationHistorySeconds } }
+                if (historySeconds == 0) return
+
+                val notOlderThan = historySeconds
+                    ?.takeIf { it > 0 }
+                    ?.let { Clock.System.now() - it.seconds }
+
+                val snapshot = db.transaction { latestSnapshot(device, notOlderThan) } ?: return
+                val message = DeviceSubscriptionMessage.Snapshot(snapshot)
+                    .toAppSocketMessage(principal, share)
+                    ?: return
+
+                sendSerialized<TrailsWebSocketServerMessage>(message.message)
+            }
+
+            /** The same for everything this connection is subscribed to. */
+            suspend fun sendLastKnownPositions() {
+                ownDeviceSubscriptionRtUpdaters.keys.toList().forEach { deviceId ->
+                    val device = db.transaction { Device.findById(deviceId) } ?: return@forEach
+                    sendLastKnownPosition(device, share = null)
+                }
+
+                shareSubscriptionRtUpdaters.keys.toList().forEach { shareId ->
+                    val share = db.transaction { ActiveShare.findById(shareId) } ?: return@forEach
+                    sendLastKnownPosition(db.transaction { share.share.device }, share)
+                }
+            }
+
             suspend fun startShareSubscription(shareId: ActiveShareId) {
                 if (shareSubscriptionRtUpdaters[shareId]?.isActive == true) return
                 val share = db.transaction { ActiveShare.findById(shareId) } ?: return
                 val device = db.transaction { share.share.device }
+
+                sendLastKnownPosition(device, share)
 
                 shareSubscriptionRtUpdaters[shareId] = launch {
                     deviceSubscriptionRepository.getFlowForDeviceSubscription(device.id.value)
@@ -88,6 +144,8 @@ fun Route.app() {
                 val device = db.transaction { Device.findById(deviceId) } ?: return
 
                 if (ownDeviceSubscriptionRtUpdaters[device.id.value]?.isActive == true) return
+
+                sendLastKnownPosition(device, share = null)
 
                 ownDeviceSubscriptionRtUpdaters[device.id.value] = launch {
                     deviceSubscriptionRepository.getFlowForDeviceSubscription(device.id.value)
@@ -220,7 +278,15 @@ fun Route.app() {
                                 shareSubscriptionRtUpdaters.filterKeys { it in unsubscribeIds }.forEach { it.value.cancel() }
                             }
 
-                            is TrailsWebSocketAppMessage.StartRtUpdates -> emitRtUpdates.value = true
+                            is TrailsWebSocketAppMessage.StartRtUpdates -> {
+                                emitRtUpdates.value = true
+                                // The other moment the client asks for positions, and the
+                                // one the user actually notices: the app coming back to
+                                // the foreground. Its subscriptions outlive that, so
+                                // nothing else would tell it what stood still while it was
+                                // away.
+                                launch { sendLastKnownPositions() }
+                            }
                             is TrailsWebSocketAppMessage.StopRtUpdates -> emitRtUpdates.value = false
 
                             is TrailsWebSocketAppMessage.Pong -> {
