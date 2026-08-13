@@ -48,10 +48,11 @@ export const BUNDLE_COLUMNS = 4;
 
 /**
  * How much of a pin another one has to cover, in each dimension, for the two to be
- * bundled. Read as a distance: at 0.5 two pins are bundled once they stand less
- * than half a pin apart both horizontally and vertically.
+ * bundled. Read as a distance: at 0.65 two pins are bundled once barely a third of
+ * a pin is left between their anchors, both horizontally and vertically — pins that
+ * clearly overlap keep standing on their own for a while yet.
  */
-const BUNDLE_COVERAGE = 0.5;
+const BUNDLE_COVERAGE = 0.65;
 
 /** The screen size a bundle of [count] pins is drawn at. */
 export function bundleSize(count: number): PinSize {
