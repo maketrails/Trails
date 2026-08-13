@@ -1,0 +1,10 @@
+{
+  "title": "Bundled device pins",
+  "description": "Devices whose pins cover each other on the map are now drawn as a single bundle, their images side by side — tap one to open that device, or zoom in to let the bundle fall apart again. A bundle standing for devices that are more than ten kilometres apart also draws the circle they are actually spread over, and points at the top of it.",
+  "localized": {
+    "de": {
+      "title": "Gebündelte Geräte-Pins",
+      "description": "Geräte, deren Pins sich auf der Karte überdecken, werden jetzt als ein Bündel gezeichnet — die Bilder nebeneinander. Ein Tippen öffnet das jeweilige Gerät, beim Hineinzoomen fällt das Bündel wieder auseinander. Steht ein Bündel für Geräte, die mehr als zehn Kilometer auseinander liegen, zeichnet es zusätzlich den Kreis, über den sie tatsächlich verteilt sind, und zeigt auf dessen oberen Rand."
+    }
+  }
+}
