@@ -81,7 +81,6 @@ sealed class TrailsWebSocketServerMessage {
         )
     }
 
-    @Serializable
     /**
      * Whether a device is reachable, and since when.
      *
@@ -92,6 +91,14 @@ sealed class TrailsWebSocketServerMessage {
      * known: presence is held in memory on the server, so a device that has not
      * connected since the server started is offline without a since.
      */
+    @Serializable
+    @SerialName("device.online_state")
+    data class OnlineState(
+        @SerialName("target") val target: Snapshot.Target,
+        @SerialName("is_online") val isOnline: Boolean,
+        @SerialName("since") val since: Long?,
+    ) : TrailsWebSocketServerMessage()
+
     /**
      * Asks the device whether it is still there, answered with
      * [TrailsWebSocketAppMessage.HeartbeatAck].
@@ -104,16 +111,11 @@ sealed class TrailsWebSocketServerMessage {
      * and shows a notification. This one is invisible and is only about the
      * connection.
      */
+    @Serializable
     @SerialName("connection.heartbeat")
     data object Heartbeat : TrailsWebSocketServerMessage()
 
-    @SerialName("device.online_state")
-    data class OnlineState(
-        @SerialName("target") val target: Snapshot.Target,
-        @SerialName("is_online") val isOnline: Boolean,
-        @SerialName("since") val since: Long?,
-    ) : TrailsWebSocketServerMessage()
-
+    @Serializable
     @SerialName("device.ping")
     data class Ping(
         @SerialName("pinged_by_device_name") val pingedByDeviceName: String,
