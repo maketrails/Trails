@@ -40,7 +40,7 @@
         if (isForeign) {
             const snapshot = subscription?.snapshot;
             if (snapshot == null) return snapshot; // undefined (loading) or null (gone)
-            return { ...snapshot, base: shareOriginBase(homeserver) };
+            return { ...snapshot, base: shareOriginBase(homeserver), homeserver };
         }
 
         const local = webappSocket.shares.find((s) => s.id === shareId);
@@ -54,6 +54,7 @@
                 last_location: local.last_location,
                 battery: local.battery,
                 base: "",
+                homeserver: "",
             };
         }
         // Absent from a connected socket → genuinely gone; otherwise still loading.

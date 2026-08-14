@@ -12,6 +12,8 @@
     import {ClockCounterClockwiseIcon, ClockIcon, DeviceMobileIcon, MapPinIcon} from "phosphor-svelte";
     import BatteryIcon from "$lib/components/BatteryIcon.svelte";
     import type {Battery, LastLocation} from "$lib/state/webapp_socket.svelte";
+    import {shareOwnerHandle} from "$lib/state/share_socket.svelte";
+    import {currentUser} from "$lib/state/current_user";
     import dayjs from "$lib/dayjs";
     import {_} from "svelte-i18n";
     import {locationHistoryLabel} from "$lib/app/emitted-shares/location_history";
@@ -28,6 +30,9 @@
         battery: Battery | null;
         // URL base of the share's origin homeserver ("" = current origin).
         base: string;
+        // The origin homeserver itself ("" = this server), shown as part of the
+        // owner's handle. Kept apart from [base], which is a URL and not a name.
+        homeserver: string;
     }
 
     let {
@@ -59,8 +64,17 @@
         share ? `${share.base}/api/v1/devices/image/${share.manufacturer}-${share.model}` : imageUrl ?? null
     );
     let resolvedTitle = $derived(share ? share.device_friendly_name : title ?? "");
+
+    // A same-server share reports no homeserver of its own — its origin is this
+    // server, i.e. the homeserver of the account looking at it.
+    let ownerHandle = $derived(
+        share == null
+            ? ""
+            : shareOwnerHandle(share.owner_username, share.homeserver || ($currentUser?.homeserver ?? ""))
+    );
+
     let resolvedSubtitle = $derived(
-        share ? $_("shares.owner", {values: {owner: share.owner_username}}) : subtitle
+        share ? $_("shares.owner", {values: {owner: ownerHandle}}) : subtitle
     );
     let resolvedLastLocation = $derived(share ? share.last_location : lastLocation ?? null);
     let resolvedBattery = $derived(share ? share.battery : battery);

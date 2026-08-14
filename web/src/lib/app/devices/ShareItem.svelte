@@ -1,6 +1,7 @@
 <script lang="ts">
-    import {type Share, shareMainText} from "$lib/state/webapp_socket.svelte";
-    import {shareOriginBase} from "$lib/state/share_socket.svelte";
+    import type {Share} from "$lib/state/webapp_socket.svelte";
+    import {shareOriginBase, shareOwnerHandle} from "$lib/state/share_socket.svelte";
+    import {currentUser} from "$lib/state/current_user";
     import {DeviceMobileIcon} from "phosphor-svelte";
     import BatteryIcon from "$lib/components/BatteryIcon.svelte";
     import dayjs from "$lib/dayjs";
@@ -19,6 +20,12 @@
     let base = $derived(shareOriginBase(homeserver));
     let href = $derived(
         homeserver ? `/share/${share.id}?homeserver=${encodeURIComponent(homeserver)}` : `/share/${share.id}`
+    );
+
+    // A same-server share reports no homeserver of its own — its origin is this
+    // server, i.e. the homeserver of the account looking at it.
+    let ownerHandle = $derived(
+        shareOwnerHandle(share.owner_username, homeserver || ($currentUser?.homeserver ?? ""))
     );
 
     let imageAvailable = $state(true);
@@ -67,8 +74,14 @@
         {/if}
     </div>
 
+    <!-- Title and owner are split the same way as on the share's detail page: the
+         device on top, who it comes from underneath. The handle carries the origin
+         homeserver, which is the only thing telling two same-named owners apart. -->
     <div class="flex flex-col flex-1 min-w-0">
-        <span class="font-lg">{shareMainText(share)}</span>
+        <span class="font-medium truncate leading-tight">{share.device_friendly_name}</span>
+        <span class="text-xs font-light text-muted-foreground truncate">
+            {$_("shares.owner", {values: {owner: ownerHandle}})}
+        </span>
         <span class="text-xs font-light text-muted-foreground truncate">
             {locationText}
         </span>
