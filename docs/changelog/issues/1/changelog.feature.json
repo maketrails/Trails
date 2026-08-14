@@ -1,0 +1,10 @@
+{
+  "title": "Visible connection loss",
+  "description": "When the web app loses its connection to the server, the map fades to grey and keeps pulsing — what it shows is the last known state, not a live one — and a note tells you that the connection is being re-established. Both go away as soon as it is back.",
+  "localized": {
+    "de": {
+      "title": "Sichtbarer Verbindungsverlust",
+      "description": "Verliert die Web-App die Verbindung zum Server, wird die Karte grau und pulsiert — sie zeigt dann den letzten bekannten Stand und nicht mehr den aktuellen — und ein Hinweis zeigt, dass die Verbindung wiederhergestellt wird. Beides verschwindet, sobald sie wieder steht."
+    }
+  }
+}
