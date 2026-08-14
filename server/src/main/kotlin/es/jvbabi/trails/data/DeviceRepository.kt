@@ -139,7 +139,7 @@ class DeviceRepository : KoinComponent {
                 this.friendlyName = friendlyName
                 this.displayName = displayName
                 this.type = type
-            }.toModel()
+            }.stored().toModel()
         } ?: return null
 
         announceChange(device)
@@ -188,7 +188,7 @@ class DeviceRepository : KoinComponent {
                 this.deletedBy = deletedBySessionId?.let { Session.findById(it) }
             }
             device.deletion = deletion
-            deletion.toModel()
+            deletion.stored().toModel()
         } ?: return null
 
         publish(DeviceEvent.Deleted(deletion))

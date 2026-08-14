@@ -127,7 +127,7 @@ class ShareRepository : KoinComponent {
                 this.allowMultiuse = allowMultiuse
                 this.shareBatteryState = shareBatteryState
                 this.isLocked = false
-            }.toModel()
+            }.stored().toModel()
         } ?: return null
 
         announceChange(share)
@@ -250,7 +250,7 @@ class ShareRepository : KoinComponent {
             val activeShare = ActiveShare.new { this.share = entity }
             if (!entity.allowMultiuse) entity.isLocked = true
 
-            ShareRedeemResult.Success(activeShare.toModel()) to entity.toModel()
+            ShareRedeemResult.Success(activeShare.stored().toModel()) to entity.toModel()
         }
 
         if (result is ShareRedeemResult.Success && share != null) {

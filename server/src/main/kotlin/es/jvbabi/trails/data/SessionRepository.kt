@@ -59,6 +59,6 @@ class SessionRepository : KoinComponent {
             Session.new {
                 this.device = device
                 this.tokenHash = tokenHash
-            }.toModel()
+            }.stored().toModel()
         }
 }
