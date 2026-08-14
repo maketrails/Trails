@@ -92,6 +92,21 @@ sealed class TrailsWebSocketServerMessage {
      * known: presence is held in memory on the server, so a device that has not
      * connected since the server started is offline without a since.
      */
+    /**
+     * Asks the device whether it is still there, answered with
+     * [TrailsWebSocketAppMessage.HeartbeatAck].
+     *
+     * Deliberately an application message and not a WebSocket ping: a proxy or tunnel
+     * in front of the server answers control frames itself, so a device long gone can
+     * look perfectly alive. This one only the app can answer.
+     *
+     * Nothing to do with [Ping], which asks the *user's* device to make itself heard
+     * and shows a notification. This one is invisible and is only about the
+     * connection.
+     */
+    @SerialName("connection.heartbeat")
+    data object Heartbeat : TrailsWebSocketServerMessage()
+
     @SerialName("device.online_state")
     data class OnlineState(
         @SerialName("target") val target: Snapshot.Target,

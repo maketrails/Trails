@@ -32,6 +32,14 @@ sealed class TrailsWebSocketAppMessage {
         @SerialName("share_ids") val shareIds: List<String>,
     ) : TrailsWebSocketAppMessage()
 
+    /**
+     * The answer to [TrailsWebSocketServerMessage.Heartbeat]: proof that the app — not
+     * something in between — is still on the other end.
+     */
+    @Serializable
+    @SerialName("connection.heartbeat_ack")
+    data object HeartbeatAck : TrailsWebSocketAppMessage()
+
     @Serializable
     @SerialName("lifecycle.start-rt-updates")
     data object StartRtUpdates : TrailsWebSocketAppMessage()

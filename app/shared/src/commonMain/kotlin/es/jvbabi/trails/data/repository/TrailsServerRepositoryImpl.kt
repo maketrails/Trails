@@ -1020,6 +1020,13 @@ private abstract class WebSocketClientBase(
                         }
                     }
 
+                    // Answered straight away and nothing else: it is the answer itself
+                    // the server is waiting for, as proof that the app — not a proxy in
+                    // between — is still on the other end.
+                    is TrailsWebSocketServerMessage.Heartbeat -> {
+                        session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.HeartbeatAck)
+                    }
+
                     is TrailsWebSocketServerMessage.OnlineState -> {
                         // Addressed like a position, and resolved the same way: a share
                         // is keyed by the device behind it, so everything that draws a

@@ -34,6 +34,19 @@ import kotlin.uuid.Uuid
 private typealias ActiveShareId = Uuid
 private typealias DeviceId = Uuid
 
+/** How long a connection may go quiet before the server asks whether it is still there. */
+private val HEARTBEAT_INTERVAL = 5.seconds
+
+/**
+ * How long silence may last before the connection counts as gone.
+ *
+ * Comfortably more than [HEARTBEAT_INTERVAL], so a device on a slow link gets several
+ * chances to answer: dropping a working connection would mark the device offline and
+ * make it reconnect, and a device that flickers offline is worse than one that is a
+ * few seconds late.
+ */
+private val HEARTBEAT_TIMEOUT = 15.seconds
+
 /**
  * The app's one connection: it uploads what its device recorded and receives
  * everything the app shows — its own devices, the shares it holds, and the requests
@@ -64,6 +77,13 @@ fun Route.app() {
             // authenticated socket says which device is on the other end.
             val presentDeviceId = principal?.device?.id
             if (presentDeviceId != null) deviceRepository.connected(presentDeviceId)
+
+            /*
+             * When this connection last proved it is alive. Every inbound frame counts,
+             * not just a heartbeat answer: a device uploading positions has said all
+             * there is to say about being there.
+             */
+            val lastContact = MutableStateFlow(Clock.System.now())
 
             try {
                 val subscribedShares = mutableSetOf<ActiveShareId>()
@@ -188,7 +208,39 @@ fun Route.app() {
                     deviceRepository.listOwnedBy(principal.user.id).forEach { startOwnDeviceSubscription(it.id) }
                 }
 
-                launch(CoroutineName("SharesRtUpdates")) {
+                /*
+             * Watches the connection for silence, and ends it when the silence lasts.
+             *
+             * Deliberately not the WebSocket ping: a proxy in front of the server
+             * answers control frames itself, so a device that is long gone can keep a
+             * connection looking healthy — which is exactly how a device stayed online
+             * for hours. A heartbeat is an application message; only the app can answer
+             * it.
+             *
+             * Closing here is all that is needed: it ends the receive loop below, which
+             * runs the deregistration in the `finally` and reports the device offline.
+             */
+            launch(CoroutineName("ConnectionHeartbeat")) {
+                if (presentDeviceId == null) return@launch
+                while (isActive) {
+                    delay(HEARTBEAT_INTERVAL)
+
+                    val silence = Clock.System.now() - lastContact.value
+                    if (silence >= HEARTBEAT_TIMEOUT) {
+                        close(CloseReason(CloseReason.Codes.GOING_AWAY, "Heartbeat timed out"))
+                        return@launch
+                    }
+                    if (silence < HEARTBEAT_INTERVAL) continue
+
+                    // A write into a black-holed connection can block for as long as the
+                    // operating system lets it, and this loop is what has to notice that.
+                    withTimeoutOrNull(HEARTBEAT_INTERVAL) {
+                        sendSerialized<TrailsWebSocketServerMessage>(TrailsWebSocketServerMessage.Heartbeat)
+                    }
+                }
+            }
+
+            launch(CoroutineName("SharesRtUpdates")) {
                     subscribedShares.forEach { startShareSubscription(it) }
                 }
 
@@ -269,7 +321,10 @@ fun Route.app() {
                                         .forEach { it.value.cancel() }
                                 }
 
-                                is TrailsWebSocketAppMessage.StartRtUpdates -> {
+                                // Nothing to do: the arrival itself was the point.
+                            is TrailsWebSocketAppMessage.HeartbeatAck -> {}
+
+                            is TrailsWebSocketAppMessage.StartRtUpdates -> {
                                     emitRtUpdates.value = true
                                     // The other moment the client asks for positions, and the
                                     // one the user actually notices: the app coming back to

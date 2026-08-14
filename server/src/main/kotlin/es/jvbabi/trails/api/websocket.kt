@@ -8,17 +8,15 @@ import kotlin.time.Duration.Companion.seconds
 fun Application.installWebsocket() {
     install(WebSockets) {
         /*
-         * A connection that dies without a close frame — flight mode, a lost network —
-         * is only noticed through the ping, so these two bound how long a device is
-         * still shown online after it is gone: at worst [pingPeriod] + [timeout].
-         *
-         * Deliberately not the same number. Asking often is cheap and shortens the
-         * window; being impatient is not, because a pong that is merely slow on a bad
-         * mobile link would close a working connection and make the device flicker
-         * offline. So: ask every 5s, allow 10s to answer.
+         * The transport-level fallback, and no more than that. What decides whether a
+         * device counts as reachable is the app socket's own heartbeat (see
+         * es.jvbabi.trails.routes.app.app), because a proxy in front of the server
+         * answers these control frames itself and would keep a dead connection looking
+         * healthy. Left slow on purpose: asking more often would cost a phone's radio
+         * three times the wakeups for a signal that is not trusted with the decision.
          */
-        pingPeriod = 5.seconds
-        timeout = 10.seconds
+        pingPeriod = 15.seconds
+        timeout = 15.seconds
         maxFrameSize = Long.MAX_VALUE
         masking = false
 
