@@ -28,6 +28,7 @@ import es.jvbabi.trails.page.home.HomeState
 import es.jvbabi.trails.ui.components.BatteryIcon
 import es.jvbabi.trails.ui.components.BatteryOrientation
 import es.jvbabi.trails.ui.components.DeviceImage
+import es.jvbabi.trails.ui.components.desaturated
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
@@ -57,9 +58,12 @@ fun DeviceCard(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val bitmap = rememberBitmapFromBytes(device.image)
+        // Null until the server has said anything about this device, which is not the
+        // same as it being offline — an unknown device is drawn as usual.
+        val isOnline = device.onlineState?.isOnline != false
         DeviceImage(
             bitmap = bitmap,
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(64.dp).desaturated(!isOnline),
         )
 
         Column(Modifier.weight(1f)) {
@@ -83,6 +87,17 @@ fun DeviceCard(
             Text(
                 text = when {
                     isThisDevice -> stringResource(Res.string.devices_card_this_device)
+                    // While the device is unreachable, how long that has been is the
+                    // more useful fact than when it last reported a position — the
+                    // latter would keep counting up as if nothing had changed.
+                    device.onlineState?.isOnline == false -> {
+                        val since = device.onlineState.since
+                        if (since == null) stringResource(Res.string.devices_card_offline)
+                        else stringResource(
+                            Res.string.devices_card_offline_for,
+                            HumanReadable.duration(Clock.System.now() - since),
+                        )
+                    }
                     device.snapshot == null -> stringResource(Res.string.devices_card_never_seen)
                     else -> {
                         val instant = device.snapshot.time.toInstant(TimeZone.currentSystemDefault())

@@ -3,6 +3,7 @@ package es.jvbabi.trails.data.event
 import es.jvbabi.trails.data.model.ActiveShareModel
 import es.jvbabi.trails.data.model.ShareModel
 import es.jvbabi.trails.data.model.SnapshotModel
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /**
@@ -52,7 +53,7 @@ sealed interface ActiveShareEvent {
      * it is current or the last thing known. Unconditional — unlike the charge level,
      * this is not something a share opts into.
      */
-    data class OnlineStateChanged(val isOnline: Boolean) : ActiveShareEvent
+    data class OnlineStateChanged(val isOnline: Boolean, val since: Instant?) : ActiveShareEvent
 
     /**
      * The redemption stopped existing: it was given back, its share was deleted, or

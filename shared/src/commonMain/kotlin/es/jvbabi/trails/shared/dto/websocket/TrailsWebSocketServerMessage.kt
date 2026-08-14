@@ -82,6 +82,23 @@ sealed class TrailsWebSocketServerMessage {
     }
 
     @Serializable
+    /**
+     * Whether a device is reachable, and since when.
+     *
+     * Addressed like a position — the same device or redemption a [Snapshot] is about
+     * — so a client that already knows how to route one knows how to route this.
+     *
+     * [since] is when the state began, in epoch millis, or null when that is not
+     * known: presence is held in memory on the server, so a device that has not
+     * connected since the server started is offline without a since.
+     */
+    @SerialName("device.online_state")
+    data class OnlineState(
+        @SerialName("target") val target: Snapshot.Target,
+        @SerialName("is_online") val isOnline: Boolean,
+        @SerialName("since") val since: Long?,
+    ) : TrailsWebSocketServerMessage()
+
     @SerialName("device.ping")
     data class Ping(
         @SerialName("pinged_by_device_name") val pingedByDeviceName: String,

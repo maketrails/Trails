@@ -15,6 +15,7 @@ class GetHomeDeviceLocationsUseCase(
     private val userRepository: UserRepository,
     private val fileRepository: FileRepository,
     private val keyValueRepository: KeyValueRepository,
+    private val trailsServerRepository: TrailsServerRepository,
 ) {
     operator fun invoke(): Flow<List<HomeState.HomeDevice>> {
         return keyValueRepository.get(Key.UserId)
@@ -53,11 +54,19 @@ class GetHomeDeviceLocationsUseCase(
             }
             .distinctUntilChanged()
 
-        return combine(snapshotFlow, imageFlow) { snapshot, image ->
+        // Presence rides along as a third source rather than being looked up where it
+        // is drawn: it changes on its own schedule, and everything showing a device
+        // should re-render when it does.
+        val onlineStateFlow = trailsServerRepository.deviceOnlineStates
+            .map { states -> states[device.id] }
+            .distinctUntilChanged()
+
+        return combine(snapshotFlow, imageFlow, onlineStateFlow) { snapshot, image, onlineState ->
             HomeState.HomeDevice(
                 device = device,
                 image = image,
                 snapshot = snapshot,
+                onlineState = onlineState,
             )
         }
     }

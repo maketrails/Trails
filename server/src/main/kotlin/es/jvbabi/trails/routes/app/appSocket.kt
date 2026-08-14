@@ -113,7 +113,25 @@ fun Route.app() {
                     )
                 }
 
-                /** The same for everything this connection is subscribed to. */
+                /**
+             * Tells the client whether a device is reachable, right as it subscribes.
+             *
+             * The event stream only reports *changes*, so without this a client would
+             * have to assume one state or the other until the next one happens — and a
+             * device that stays offline for hours never produces an event at all.
+             */
+            suspend fun sendPresence(deviceId: DeviceId, target: TrailsWebSocketServerMessage.Snapshot.Target) {
+                val presence = deviceRepository.presenceOf(deviceId)
+                sendSerialized<TrailsWebSocketServerMessage>(
+                    TrailsWebSocketServerMessage.OnlineState(
+                        target = target,
+                        isOnline = presence?.isOnline == true,
+                        since = presence?.since?.toEpochMilliseconds(),
+                    )
+                )
+            }
+
+            /** The same for everything this connection is subscribed to. */
                 suspend fun sendLastKnownPositions() {
                     ownDeviceSubscriptionRtUpdaters.keys.toList().forEach { deviceId ->
                         sendLastKnownPosition(deviceId, share = null, activeShareId = null)
@@ -431,9 +449,13 @@ private fun DeviceEvent.toAppMessage(thisDeviceId: Uuid): AppSocketMessage? = wh
     // device.
     is DeviceEvent.Changed -> null
 
-    // Only the web app shows presence so far, and the app has no message for it. Its
-    // own connection is what produces this event in the first place.
-    is DeviceEvent.OnlineStateChanged -> null
+    is DeviceEvent.OnlineStateChanged -> AppSocketMessage(
+        TrailsWebSocketServerMessage.OnlineState(
+            target = TrailsWebSocketServerMessage.Snapshot.Target.Device(deviceId.toString()),
+            isOnline = isOnline,
+            since = since?.toEpochMilliseconds(),
+        )
+    )
 }
 
 /** What one held redemption sends to this connection. */
@@ -452,8 +474,11 @@ private fun ActiveShareEvent.toAppMessage(activeShareId: Uuid): TrailsWebSocketS
     // position already reflects the change.
     is ActiveShareEvent.SettingsChanged -> null
 
-    // Only the web app shows presence so far; the app has no message for it.
-    is ActiveShareEvent.OnlineStateChanged -> null
+    is ActiveShareEvent.OnlineStateChanged -> TrailsWebSocketServerMessage.OnlineState(
+        target = TrailsWebSocketServerMessage.Snapshot.Target.Share(activeShareId.toString()),
+        isOnline = isOnline,
+        since = since?.toEpochMilliseconds(),
+    )
 }
 
 /** What the account itself sends to this connection. */

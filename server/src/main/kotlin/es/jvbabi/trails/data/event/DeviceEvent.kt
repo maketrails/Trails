@@ -4,6 +4,7 @@ import es.jvbabi.trails.data.model.DeviceDeletionModel
 import es.jvbabi.trails.data.model.DeviceModel
 import es.jvbabi.trails.data.model.SnapshotModel
 import es.jvbabi.trails.shared.dto.websocket.PingSource
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 /**
@@ -48,6 +49,8 @@ sealed interface DeviceEvent {
     data class OnlineStateChanged(
         override val deviceId: Uuid,
         val isOnline: Boolean,
+        /** When this state began, or null when that is not known. */
+        val since: Instant?,
     ) : DeviceEvent
 
     /** Someone asked the device to report back once, so it can be located. */

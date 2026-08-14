@@ -8,6 +8,7 @@ import io.ktor.http.*
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 interface TrailsServerRepository {
@@ -71,6 +72,17 @@ interface TrailsServerRepository {
     suspend fun renameDevice(device: Device, customName: String?): Result<Unit>
 
     val ringStates: StateFlow<Map<Uuid, RingDeviceState>>
+
+    /**
+     * Whether each device is reachable, keyed by device id — a shared device is keyed
+     * by the device behind the share, not by the redemption, so a reader that has a
+     * device has the answer.
+     *
+     * Live state, never stored: it is fed by the server connection and starts out
+     * empty, so a device missing from the map is one nothing is known about rather
+     * than one that is offline.
+     */
+    val deviceOnlineStates: StateFlow<Map<Uuid, DeviceOnlineState>>
 }
 
 sealed class UseShareLinkResult {
@@ -98,6 +110,17 @@ sealed class PingResult {
     data object NotAllowed: PingResult()
     data class Error(val errorMessage: String): PingResult()
 }
+
+/**
+ * Whether a device is reachable, and since when.
+ *
+ * [since] is null when the server cannot say — it holds presence in memory, so a
+ * device that has not connected since the server started is offline without a since.
+ */
+data class DeviceOnlineState(
+    val isOnline: Boolean,
+    val since: Instant?,
+)
 
 data class RingDeviceState(
     val isRinging: Boolean,

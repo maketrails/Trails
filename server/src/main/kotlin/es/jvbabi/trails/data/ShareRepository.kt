@@ -423,7 +423,7 @@ class ShareRepository : KoinComponent {
                             close()
                         }
                         is DeviceEvent.OnlineStateChanged ->
-                            send(ActiveShareEvent.OnlineStateChanged(event.isOnline))
+                            send(ActiveShareEvent.OnlineStateChanged(event.isOnline, event.since))
                         // A rename, a ring, a ping: the device's own affairs, and
                         // nothing a share hands out.
                         else -> {}
