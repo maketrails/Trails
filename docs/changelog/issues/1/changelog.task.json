@@ -1,0 +1,8 @@
+{
+  "description": "The web app now shows when it has lost its connection to the server: the map fades to grey and pulses, and a note appears while the connection is being re-established.",
+  "localized": {
+    "de": {
+      "description": "Die Web-App zeigt jetzt, wenn die Verbindung zum Server abgebrochen ist: Die Karte wird grau und pulsiert, und ein Hinweis erscheint, während die Verbindung wiederhergestellt wird."
+    }
+  }
+}
