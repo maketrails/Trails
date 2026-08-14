@@ -5,7 +5,7 @@
     import {currentUser, authInitialized, updateUser} from "$lib/state/current_user";
     import {onMount} from "svelte";
     import UserIcon from "$lib/app/shell/UserIcon.svelte";
-    import {startWebappSocket} from "$lib/state/webapp_socket.svelte";
+    import {isReconnecting, startWebappSocket} from "$lib/state/webapp_socket.svelte";
     import {startForeignShareSync} from "$lib/state/share_socket.svelte";
     import {setContentRect} from "$lib/state/map_camera.svelte";
     import CameraModeSwitch from "$lib/app/shell/map/CameraModeSwitch.svelte";
@@ -14,6 +14,7 @@
     import {beforeNavigate} from "$app/navigation";
     import {cubicOut} from "svelte/easing";
     import {locale} from "svelte-i18n";
+    import { fly } from 'svelte/transition';
 
     let { children } = $props();
 
@@ -148,6 +149,18 @@
                     {@render children()}
                 </div>
             {/key}
+        {/if}
+
+        {#if $isReconnecting}
+            <div
+                    class="absolute bottom-0 left-0 w-full h-fit flex items-center justify-center gap-2 text-card-foreground text-sm p-4"
+                    transition:fly={{ y: 8, duration: 200 }}
+            >
+                <div class="flex flex-row items-center gap-2 bg-red-700 text-white px-3 py-1 rounded-full">
+                    <CircleNotchIcon class="size-3 animate-spin" />
+                    <span class="text-sm font-light">Wiederverbinden...</span>
+                </div>
+            </div>
         {/if}
     </div>
 </main>

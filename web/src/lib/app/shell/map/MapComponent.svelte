@@ -4,7 +4,7 @@
     import mapboxgl from "mapbox-gl";
     import "mapbox-gl/dist/mapbox-gl.css";
     import { getMapboxToken } from "$lib/api/mapbox/get_mapbox_token";
-    import { webappSocket, shareMainText } from "$lib/state/webapp_socket.svelte";
+    import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
@@ -999,5 +999,65 @@
         class="h-full w-full object-cover object-center"
     />
 {:else}
-    <div bind:this={mapContainer} class="h-full w-full"></div>
+    <div
+            bind:this={mapContainer}
+            class="map-surface h-full w-full"
+            class:show-reconnecting-animation={$isReconnecting}
+    ></div>
 {/if}
+
+<style>
+    /*
+     * The map is drawn in full colour while the socket is live. `none` rather than
+     * `grayscale(0%)`, so a live map costs no extra compositing pass — a filter of
+     * any strength puts the WebGL canvas on its own layer for every frame.
+     * Interpolating from `none` is well-defined: the missing function counts as its
+     * identity, i.e. `grayscale(0%)`.
+     */
+    .map-surface {
+        filter: none;
+        transition: filter 200ms ease-out;
+    }
+
+    /*
+     * While the connection is broken, the map desaturates and then keeps pulsing:
+     * what it shows is the last known state, and a still map gives no sign of that.
+     *
+     * Two animations rather than one, because the way in plays once and the pulse
+     * repeats. `desaturate` covers the first 200ms; `pulse-grayscale` comes later in
+     * the list, so it wins over the finished `forwards` fill the moment its delay is
+     * up. A running animation overrides the transition above, which is why the way in
+     * is animated at all — the way out is left to the transition, since the animations
+     * are simply gone by then.
+     */
+    .show-reconnecting-animation {
+        animation:
+            desaturate 200ms ease-out forwards,
+            pulse-grayscale 1600ms ease-in-out 200ms infinite;
+    }
+
+    @keyframes desaturate {
+        from {
+            filter: grayscale(0%);
+        }
+        to {
+            filter: grayscale(100%);
+        }
+    }
+
+    @keyframes pulse-grayscale {
+        0%, 100% {
+            filter: grayscale(100%);
+        }
+        50% {
+            filter: grayscale(50%);
+        }
+    }
+
+    /* Holding the grey says the same thing without the movement. */
+    @media (prefers-reduced-motion: reduce) {
+        .show-reconnecting-animation {
+            animation: desaturate 200ms ease-out forwards;
+        }
+    }
+</style>

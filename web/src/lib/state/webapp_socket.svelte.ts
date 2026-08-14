@@ -1,3 +1,4 @@
+import {readonly, writable} from "svelte/store";
 import {currentUser, type User} from "$lib/state/current_user";
 import {pruneCachedHistories} from "$lib/api/history/history_cache";
 import {t} from "$lib/i18n";
@@ -144,11 +145,30 @@ let emittedShares = $state<EmittedShare[]>([]);
 let foreignShares = $state<ForeignShareRef[]>([]);
 let connected = $state(false);
 
+const reconnecting = writable(false);
+
+/**
+ * `true` while an established connection is broken and a reconnect is pending or
+ * in flight. Stays `false` for a first connection attempt that hasn't succeeded
+ * yet and after signing out — use {@link webappSocket.connected} to tell those
+ * apart.
+ *
+ * A store rather than a rune, so components can read it as `$isReconnecting`;
+ * only this module writes it.
+ */
+export const isReconnecting = readonly(reconnecting);
+
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
 let shouldConnect = false;
 let started = false;
+/**
+ * Whether this session ever had an open socket. Separates "the connection broke"
+ * from "the first attempt hasn't succeeded yet" — only the former counts as
+ * reconnecting.
+ */
+let wasConnected = false;
 
 function socketUrl(): string {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -164,6 +184,9 @@ function clearReconnect() {
 
 function scheduleReconnect() {
     if (!shouldConnect) return;
+    // Covers the whole gap — the backoff wait and the attempt itself — until a
+    // socket opens again.
+    reconnecting.set(wasConnected);
     clearReconnect();
     const delay = Math.min(30_000, 1_000 * 2 ** reconnectAttempts);
     reconnectAttempts++;
@@ -201,6 +224,8 @@ function connect() {
     ws.onopen = () => {
         reconnectAttempts = 0;
         connected = true;
+        reconnecting.set(false);
+        wasConnected = true;
     };
 
     ws.onmessage = (event) => {
@@ -233,6 +258,10 @@ function close() {
     clearReconnect();
     reconnectAttempts = 0;
     connected = false;
+    // A deliberate teardown is not a broken connection, and the next sign-in
+    // starts over with a first attempt rather than a reconnect.
+    reconnecting.set(false);
+    wasConnected = false;
     devices = [];
     shares = [];
     emittedShares = [];
