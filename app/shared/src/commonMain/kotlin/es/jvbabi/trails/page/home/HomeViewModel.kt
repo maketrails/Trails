@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import co.touchlab.kermit.Logger
 import es.jvbabi.trails.domain.model.Device
+import es.jvbabi.trails.domain.repository.DeviceOnlineState
 import es.jvbabi.trails.domain.model.Snapshot
 import es.jvbabi.trails.domain.repository.*
 import es.jvbabi.trails.domain.usecase.SetupNotificationsUseCase
@@ -64,6 +65,12 @@ data class HomeState(
         val device: Device,
         val image: ByteArray?,
         val snapshot: Snapshot?,
+        /**
+         * Whether the device is reachable, or null while nothing is known about it —
+         * before the server connection has said anything, which is not the same as
+         * being offline.
+         */
+        val onlineState: DeviceOnlineState? = null,
     )
 }
 

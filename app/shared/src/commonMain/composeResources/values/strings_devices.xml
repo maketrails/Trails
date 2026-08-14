@@ -16,6 +16,12 @@
     <string name="devices_card_seen_just_now">Seen just now</string>
     <!-- %1$s is a relative time such as "5 minutes ago". -->
     <string name="devices_card_last_seen">Last seen %1$s</string>
+    <!-- Shown instead of the last seen line while the device has no connection to the
+         service. %1$s is a duration such as "5 minutes". -->
+    <string name="devices_card_offline_for">Offline for %1$s</string>
+    <!-- The same, for when the server cannot say since when: it holds the connection
+         state in memory, so a restart forgets it. -->
+    <string name="devices_card_offline">Offline</string>
 
     <string name="devices_server_connected">Connected to Trails server</string>
     <string name="devices_server_disconnected">Not connected to Trails server</string>

@@ -116,6 +116,13 @@ class TrailsServerRepositoryImpl(
         ringStates.value = ringStates.value + (deviceId to state)
     }
 
+    override val deviceOnlineStates: StateFlow<Map<Uuid, DeviceOnlineState>>
+        field = MutableStateFlow<Map<Uuid, DeviceOnlineState>>(emptyMap())
+
+    fun updateOnlineState(deviceId: Uuid, state: DeviceOnlineState) {
+        deviceOnlineStates.value = deviceOnlineStates.value + (deviceId to state)
+    }
+
     fun removeRingState(deviceId: Uuid) {
         ringStates.value = ringStates.value - deviceId
     }
@@ -1011,6 +1018,34 @@ private abstract class WebSocketClientBase(
 
                             snapshotRepository.storeSnapshot(snapshot.copy(isSynced = true))
                         }
+                    }
+
+                    // Answered straight away and nothing else: it is the answer itself
+                    // the server is waiting for, as proof that the app — not a proxy in
+                    // between — is still on the other end.
+                    is TrailsWebSocketServerMessage.Heartbeat -> {
+                        session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.HeartbeatAck)
+                    }
+
+                    is TrailsWebSocketServerMessage.OnlineState -> {
+                        // Addressed like a position, and resolved the same way: a share
+                        // is keyed by the device behind it, so everything that draws a
+                        // device can ask with the id it already has.
+                        val device = when (val target = message.target) {
+                            is TrailsWebSocketServerMessage.Snapshot.Target.Device -> runCatching { Uuid.parse(target.deviceId) }.getOrNull()?.let { devicesRepository.getDeviceById(it).firstOrNull() }
+                            is TrailsWebSocketServerMessage.Snapshot.Target.Share -> runCatching { Uuid.parse(target.shareId) }.getOrNull()?.let { shareRepository.getShareById(it).firstOrNull()?.device }
+                        }
+                        if (device == null) {
+                            logger.w { "Received online state for unknown device in WS message: $message" }
+                            continue
+                        }
+                        trailsServerRepositoryImpl.updateOnlineState(
+                            deviceId = device.id,
+                            state = DeviceOnlineState(
+                                isOnline = message.isOnline,
+                                since = message.since?.let { Instant.fromEpochMilliseconds(it) },
+                            ),
+                        )
                     }
 
                     is TrailsWebSocketServerMessage.Snapshot -> {

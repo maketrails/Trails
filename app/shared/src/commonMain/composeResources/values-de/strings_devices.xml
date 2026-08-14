@@ -13,6 +13,8 @@
     <string name="devices_card_never_seen">Noch nie gesehen</string>
     <string name="devices_card_seen_just_now">Eben gerade gesehen</string>
     <string name="devices_card_last_seen">Zuletzt %1$s gesehen</string>
+    <string name="devices_card_offline_for">Offline seit %1$s</string>
+    <string name="devices_card_offline">Offline</string>
 
     <string name="devices_server_connected">Verbunden mit Trails Server</string>
     <string name="devices_server_disconnected">Nicht verbunden mit Trails Server</string>

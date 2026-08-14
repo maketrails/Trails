@@ -1,15 +1,12 @@
 package es.jvbabi.trails.routes.active_share
 
-import database.DataSnapshot
-import database.DataSnapshots
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.ReverseGeocoding
-import es.jvbabi.trails.database.ActiveShare
-import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.data.ShareRepository
+import es.jvbabi.trails.data.TrackRepository
+import es.jvbabi.trails.data.model.forShare
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.eq
-import kotlin.math.roundToInt
 import kotlin.uuid.Uuid
 
 /**
@@ -25,6 +22,11 @@ data class ShareSnapshotResponse(
     @SerialName("owner_username") val ownerUsername: String,
     @SerialName("last_location") val lastLocation: LastLocation?,
     @SerialName("battery") val battery: Battery?,
+    /**
+     * Whether the shared device is reachable right now. Part of the position, in
+     * effect: it says whether what is shown is current or the last thing known.
+     */
+    @SerialName("is_online") val isOnline: Boolean,
 ) {
     @Serializable
     data class Battery(
@@ -55,50 +57,40 @@ data class ShareSnapshotResponse(
 
 /**
  * Builds the current snapshot for an active share, or `null` if the share (or its
- * device) no longer exists. Reverse geocoding runs outside the DB transaction so
- * the network call doesn't hold a connection.
+ * device) no longer exists.
+ *
+ * What the share may reveal is applied by [forShare], the one place that rule
+ * lives. Reverse geocoding runs on what the repositories already returned, so no
+ * network call happens while a database connection is held.
  */
 suspend fun buildShareSnapshot(
-    db: DatabaseManager,
+    shareRepository: ShareRepository,
+    trackRepository: TrackRepository,
+    deviceRepository: DeviceRepository,
     reverseGeocoding: ReverseGeocoding,
     activeShareId: Uuid,
 ): ShareSnapshotResponse? {
-    val base = db.transaction {
-        val activeShare = ActiveShare.findById(activeShareId) ?: return@transaction null
-        val share = activeShare.share
-        val device = share.device
-        if (device.deletion != null) return@transaction null
+    val shared = shareRepository.getSharedDevice(activeShareId) ?: return null
+    val snapshot = trackRepository.latestSnapshot(shared.device.id)?.forShare(shared.share)
 
-        val latestSnapshot = DataSnapshot
-            .find { DataSnapshots.device eq device.id }
-            .orderBy(DataSnapshots.createdAt to SortOrder.DESC)
-            .limit(1)
-            .firstOrNull()
-
-        val battery = if (share.shareBatteryState) {
-            val level = latestSnapshot?.batteryLevel
-            val charging = latestSnapshot?.batteryCharging
-            if (level != null && charging != null) {
-                ShareSnapshotResponse.Battery((level * 100).roundToInt(), charging)
-            } else null
-        } else null
-
-        ShareSnapshotResponse(
-            name = share.shareName,
-            manufacturer = device.manufacturer,
-            model = device.model,
-            deviceFriendlyName = device.friendlyName,
-            ownerUsername = device.owner.username,
-            lastLocation = latestSnapshot?.let {
-                ShareSnapshotResponse.LastLocation(
-                    latitude = it.latitude,
-                    longitude = it.longitude,
-                    foundAt = it.createdAt.toEpochMilliseconds(),
-                )
-            },
-            battery = battery,
-        )
-    } ?: return null
+    val base = ShareSnapshotResponse(
+        name = shared.share.shareName,
+        manufacturer = shared.device.manufacturer,
+        model = shared.device.model,
+        deviceFriendlyName = shared.device.friendlyName,
+        ownerUsername = shared.ownerUsername,
+        lastLocation = snapshot?.let {
+            ShareSnapshotResponse.LastLocation(
+                latitude = it.latitude,
+                longitude = it.longitude,
+                foundAt = it.createdAt.toEpochMilliseconds(),
+            )
+        },
+        battery = snapshot?.battery?.let {
+            ShareSnapshotResponse.Battery(percentage = it.percentage, isCharging = it.isCharging)
+        },
+        isOnline = deviceRepository.isOnline(shared.device.id),
+    )
 
     val enriched = base.lastLocation?.let { location ->
         val address = reverseGeocoding.reverseGeocode(location.latitude, location.longitude)
@@ -119,10 +111,3 @@ suspend fun buildShareSnapshot(
 
     return base.copy(lastLocation = enriched)
 }
-
-/** Resolves the device backing an active share, for live-update subscriptions. */
-suspend fun activeShareDeviceId(db: DatabaseManager, activeShareId: Uuid): Uuid? =
-    db.transaction {
-        val device = ActiveShare.findById(activeShareId)?.share?.device ?: return@transaction null
-        if (device.deletion != null) null else device.id.value
-    }

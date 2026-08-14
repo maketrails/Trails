@@ -2,8 +2,8 @@ package es.jvbabi.trails.routes.devices.item.optimization
 
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.TrailOptimizerScheduler
-import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.routes.devices.item.deviceActor
 import es.jvbabi.trails.routes.devices.item.ownDevice
 import io.ktor.http.HttpStatusCode
@@ -38,18 +38,18 @@ private val logger = LoggerFactory.getLogger("TrailOptimizer")
  * ask for twice.
  */
 fun Route.reoptimizeDevice() {
-    val db by inject<DatabaseManager>()
+    val deviceRepository by inject<DeviceRepository>()
     val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()
 
     authenticate(TRAILS_USER_REALM, TRAILS_WEBAPP_REALM) {
         post {
-            val actor = call.deviceActor(db)
+            val actor = call.deviceActor()
                 ?: return@post call.respond(HttpStatusCode.Forbidden)
-            val device = call.ownDevice(db, actor.userId)
+            val device = call.ownDevice(deviceRepository, actor.userId)
                 ?: return@post call.respond(HttpStatusCode.Forbidden)
 
-            val optimizer = db.transaction { trailOptimizerScheduler.optimizerFor(device) }
-            val deviceId = device.id.value
+            val optimizer = trailOptimizerScheduler.optimizerFor(device)
+            val deviceId = device.id
 
             reoptimizations.launch {
                 runCatching { optimizer.reoptimize() }

@@ -2,8 +2,8 @@ package es.jvbabi.trails.routes.devices.item
 
 import es.jvbabi.trails.api.TrailsAppUserPrincipal
 import es.jvbabi.trails.api.TrailsWebappPrincipal
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.model.DeviceModel
 import es.jvbabi.trails.shared.dto.websocket.PingSource
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.auth.principal
@@ -26,18 +26,18 @@ data class DeviceActor(
  * Resolves the authenticated principal (either the app or the webapp realm) into
  * a [DeviceActor], or `null` if neither realm authenticated the call.
  */
-suspend fun ApplicationCall.deviceActor(db: DatabaseManager): DeviceActor? {
+suspend fun ApplicationCall.deviceActor(): DeviceActor? {
     principal<TrailsAppUserPrincipal>()?.let { principal ->
         principal.requireValidSession()
         return DeviceActor(
-            userId = principal.user.id.value,
-            sourceName = db.transaction { principal.device.displayName },
+            userId = principal.user.id,
+            sourceName = principal.device.displayName,
             source = PingSource.DEVICE,
         )
     }
     principal<TrailsWebappPrincipal>()?.let { principal ->
         return DeviceActor(
-            userId = principal.user.id.value,
+            userId = principal.user.id,
             sourceName = "Browser",
             source = PingSource.BROWSER,
         )
@@ -50,8 +50,7 @@ suspend fun ApplicationCall.deviceActor(db: DatabaseManager): DeviceActor? {
  * `null` when it is missing, unknown or somebody else's. Callers answer `null`
  * as Forbidden either way, so a foreign device id cannot be probed for.
  */
-suspend fun ApplicationCall.ownDevice(db: DatabaseManager, userId: Uuid): Device? {
+suspend fun ApplicationCall.ownDevice(deviceRepository: DeviceRepository, userId: Uuid): DeviceModel? {
     val deviceId = parameters["deviceId"]?.let(Uuid::parseOrNull) ?: return null
-    val device = db.transaction { Device.findById(deviceId) } ?: return null
-    return if (db.transaction { device.owner.id.value == userId }) device else null
+    return deviceRepository.getOwnedById(deviceId, userId)
 }

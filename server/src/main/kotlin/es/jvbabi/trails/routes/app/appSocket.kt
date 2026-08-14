@@ -1,19 +1,20 @@
 package es.jvbabi.trails.routes.app
 
-import database.DataSnapshot
-import database.DataSnapshots
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TrailsAppUserPrincipal
-import es.jvbabi.trails.data.DeviceSubscriptionMessage
-import es.jvbabi.trails.data.DeviceSubscriptionRepository
-import es.jvbabi.trails.data.UserSubscriptionMessage
-import es.jvbabi.trails.data.UserSubscriptionRepository
-import es.jvbabi.trails.data.latestSnapshot
-import es.jvbabi.trails.database.ActiveShare
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.routes.devices.PingResult
-import es.jvbabi.trails.routes.devices.pendingPings
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.ShareRepository
+import es.jvbabi.trails.data.SnapshotWriteResult
+import es.jvbabi.trails.data.TrackRepository
+import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.event.ActiveShareEvent
+import es.jvbabi.trails.data.event.DeviceEvent
+import es.jvbabi.trails.data.event.UserEvent
+import es.jvbabi.trails.data.model.ShareModel
+import es.jvbabi.trails.data.model.SnapshotModel
+import es.jvbabi.trails.data.model.forShare
+import es.jvbabi.trails.shared.dto.DeviceResponse
+import es.jvbabi.trails.shared.dto.websocket.PingSource
 import es.jvbabi.trails.shared.dto.websocket.TrailsWebSocketAppMessage
 import es.jvbabi.trails.shared.dto.websocket.TrailsWebSocketServerMessage
 import io.ktor.serialization.*
@@ -24,29 +25,45 @@ import io.ktor.util.logging.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import org.koin.ktor.ext.inject
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
-import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.core.eq
-import org.koin.ktor.ext.inject
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
 private typealias ActiveShareId = Uuid
 private typealias DeviceId = Uuid
 
-val deviceRingInfo = mutableMapOf<Uuid, String>()
+/** How long a connection may go quiet before the server asks whether it is still there. */
+private val HEARTBEAT_INTERVAL = 5.seconds
 
+/**
+ * How long silence may last before the connection counts as gone.
+ *
+ * Comfortably more than [HEARTBEAT_INTERVAL], so a device on a slow link gets several
+ * chances to answer: dropping a working connection would mark the device offline and
+ * make it reconnect, and a device that flickers offline is worse than one that is a
+ * few seconds late.
+ */
+private val HEARTBEAT_TIMEOUT = 15.seconds
+
+/**
+ * The app's one connection: it uploads what its device recorded and receives
+ * everything the app shows — its own devices, the shares it holds, and the requests
+ * aimed at it (ping, ring).
+ *
+ * Every subscription here is a repository event stream, and which stream is
+ * subscribed to *is* the authorization: an own device's stream is only reachable
+ * with a session that owns it, and a redemption is served by
+ * [ShareRepository.activeShareEvents], which has already applied what the share
+ * reveals. Nothing in this file decides what a caller may see.
+ */
 fun Route.app() {
 
-    val db by inject<DatabaseManager>()
-    val deviceSubscriptionRepository by inject<DeviceSubscriptionRepository>()
-    val userSubscriptionRepository by inject<UserSubscriptionRepository>()
+    val deviceRepository by inject<DeviceRepository>()
+    val trackRepository by inject<TrackRepository>()
+    val shareRepository by inject<ShareRepository>()
+    val userRepository by inject<UserRepository>()
 
     authenticate(TRAILS_USER_REALM, optional = true) {
         webSocket("/ws") {
@@ -55,349 +72,500 @@ fun Route.app() {
 
             val appSocketLogger = KtorSimpleLogger("AppWebSocket")
 
-            val subscribedShares = mutableSetOf<ActiveShareId>()
-            val shareSubscriptionRtUpdaters = mutableMapOf<ActiveShareId, Job>()
-            val ownDeviceSubscriptionRtUpdaters = mutableMapOf<DeviceId, Job>()
+            // This socket *is* the device's connection to the service, so the device
+            // counts as online for exactly as long as this block runs. Only an
+            // authenticated socket says which device is on the other end.
+            val presentDeviceId = principal?.device?.id
+            if (presentDeviceId != null) deviceRepository.connected(presentDeviceId)
 
-            val selfFlow =
-                if (principal != null) deviceSubscriptionRepository.getFlowForDeviceSubscription(db.transaction { principal.device.id.value }) else null
-
-            val emitRtUpdates = MutableStateFlow(true)
-
-            /**
-             * Sends where the server last saw [device], right as the client subscribes.
-             *
-             * Without this a client only learns a position once the device reports one,
-             * so a device that is offline — the very case where its whereabouts matter —
-             * leaves the app showing whatever it happened to know from last time instead
-             * of what the server knows.
-             *
-             * What a share may reveal stays the share's decision, on the same window its
-             * history uses (see getActiveShareHistory): nothing at all at `0`, everything
-             * at a negative (unbounded) one, otherwise only a position recorded inside the
-             * window. An own device carries no such limit.
-             *
-             * Sent before the live subscription starts, so a position that arrives while
-             * this is on its way is the one the client keeps. A client that has asked not
-             * to be sent positions at all is left alone, on the same footing as the live
-             * updates below.
+            /*
+             * When this connection last proved it is alive. Every inbound frame counts,
+             * not just a heartbeat answer: a device uploading positions has said all
+             * there is to say about being there.
              */
-            suspend fun sendLastKnownPosition(device: Device, share: ActiveShare?) {
-                if (!emitRtUpdates.value) return
-                // A removed device gives nothing away, exactly as its snapshot and history
-                // endpoints answer a plain 404. The subscription reports the removal itself.
-                if (db.transaction { device.deletion } != null) return
+            val lastContact = MutableStateFlow(Clock.System.now())
 
-                val historySeconds = share?.let { db.transaction { it.share.locationHistorySeconds } }
-                if (historySeconds == 0) return
+            try {
+                val subscribedShares = mutableSetOf<ActiveShareId>()
+                val shareSubscriptionRtUpdaters = mutableMapOf<ActiveShareId, Job>()
+                val ownDeviceSubscriptionRtUpdaters = mutableMapOf<DeviceId, Job>()
 
-                val notOlderThan = historySeconds
-                    ?.takeIf { it > 0 }
-                    ?.let { Clock.System.now() - it.seconds }
+                val emitRtUpdates = MutableStateFlow(true)
 
-                val snapshot = db.transaction { latestSnapshot(device, notOlderThan) } ?: return
-                val message = DeviceSubscriptionMessage.Snapshot(snapshot)
-                    .toAppSocketMessage(principal, share)
-                    ?: return
+                /**
+                 * Sends where the server last saw a device, right as the client subscribes.
+                 *
+                 * Without this a client only learns a position once the device reports one,
+                 * so a device that is offline — the very case where its whereabouts matter —
+                 * leaves the app showing whatever it happened to know from last time instead
+                 * of what the server knows.
+                 *
+                 * What a share may reveal stays the share's decision, on the same window its
+                 * history uses: nothing at all at `0`, everything at an unbounded one,
+                 * otherwise only a position recorded inside the window. An own device carries
+                 * no such limit.
+                 *
+                 * Sent before the live subscription starts, so a position that arrives while
+                 * this is on its way is the one the client keeps. A client that has asked not
+                 * to be sent positions at all is left alone, on the same footing as the live
+                 * updates below.
+                 */
+                suspend fun sendLastKnownPosition(deviceId: DeviceId, share: ShareModel?, activeShareId: ActiveShareId?) {
+                    if (!emitRtUpdates.value) return
+                    // A removed device gives nothing away, exactly as its snapshot and history
+                    // endpoints answer a plain 404. The subscription reports the removal itself.
+                    val device = deviceRepository.getById(deviceId) ?: return
+                    if (device.isDeleted) return
 
-                sendSerialized<TrailsWebSocketServerMessage>(message.message)
+                    if (share != null && !share.revealsHistory) return
+                    val notOlderThan = share?.historySeconds?.let { Clock.System.now() - it.seconds }
+
+                    val snapshot = trackRepository.latestSnapshot(deviceId, notOlderThan) ?: return
+                    sendSerialized<TrailsWebSocketServerMessage>(
+                        snapshotMessage(
+                            snapshot = if (share != null) snapshot.forShare(share) else snapshot,
+                            target = if (activeShareId != null) {
+                                TrailsWebSocketServerMessage.Snapshot.Target.Share(activeShareId.toString())
+                            } else {
+                                TrailsWebSocketServerMessage.Snapshot.Target.Device(deviceId.toString())
+                            },
+                        )
+                    )
+                }
+
+                /**
+             * Tells the client whether a device is reachable, right as it subscribes.
+             *
+             * The event stream only reports *changes*, so without this a client would
+             * have to assume one state or the other until the next one happens — and a
+             * device that stays offline for hours never produces an event at all.
+             */
+            suspend fun sendPresence(deviceId: DeviceId, target: TrailsWebSocketServerMessage.Snapshot.Target) {
+                val presence = deviceRepository.presenceOf(deviceId)
+                sendSerialized<TrailsWebSocketServerMessage>(
+                    TrailsWebSocketServerMessage.OnlineState(
+                        target = target,
+                        isOnline = presence?.isOnline == true,
+                        since = presence?.since?.toEpochMilliseconds(),
+                    )
+                )
             }
 
             /** The same for everything this connection is subscribed to. */
-            suspend fun sendLastKnownPositions() {
-                ownDeviceSubscriptionRtUpdaters.keys.toList().forEach { deviceId ->
-                    val device = db.transaction { Device.findById(deviceId) } ?: return@forEach
-                    sendLastKnownPosition(device, share = null)
+                suspend fun sendLastKnownPositions() {
+                    ownDeviceSubscriptionRtUpdaters.keys.toList().forEach { deviceId ->
+                        sendLastKnownPosition(deviceId, share = null, activeShareId = null)
+                    }
+
+                    shareSubscriptionRtUpdaters.keys.toList().forEach { activeShareId ->
+                        val shared = shareRepository.getSharedDevice(activeShareId) ?: return@forEach
+                        sendLastKnownPosition(shared.device.id, shared.share, activeShareId)
+                    }
                 }
 
-                shareSubscriptionRtUpdaters.keys.toList().forEach { shareId ->
-                    val share = db.transaction { ActiveShare.findById(shareId) } ?: return@forEach
-                    sendLastKnownPosition(db.transaction { share.share.device }, share)
+                suspend fun startShareSubscription(activeShareId: ActiveShareId) {
+                    if (shareSubscriptionRtUpdaters[activeShareId]?.isActive == true) return
+                    val shared = shareRepository.getSharedDevice(activeShareId) ?: return
+
+                    sendLastKnownPosition(shared.device.id, shared.share, activeShareId)
+
+                    shareSubscriptionRtUpdaters[activeShareId] = launch {
+                        // The share's own stream, already filtered down to what this
+                        // redemption reveals. It ends of its own accord once the share is
+                        // gone — one share ending is not a reason to drop the connection,
+                        // which serves the app's own devices too.
+                        shareRepository.activeShareEvents(activeShareId)
+                            .mapNotNull { it.toAppMessage(activeShareId) }
+                            .filterNot { it is TrailsWebSocketServerMessage.Snapshot && !emitRtUpdates.value }
+                            .onEach { message -> sendSerialized<TrailsWebSocketServerMessage>(message) }
+                            .collect()
+                    }.also {
+                        it.invokeOnCompletion { shareSubscriptionRtUpdaters.remove(activeShareId) }
+                    }
                 }
-            }
 
-            suspend fun startShareSubscription(shareId: ActiveShareId) {
-                if (shareSubscriptionRtUpdaters[shareId]?.isActive == true) return
-                val share = db.transaction { ActiveShare.findById(shareId) } ?: return
-                val device = db.transaction { share.share.device }
+                suspend fun startOwnDeviceSubscription(deviceId: DeviceId) {
+                    requireNotNull(principal) { "Cannot subscribe to own device without a principal" }
+                    if (ownDeviceSubscriptionRtUpdaters[deviceId]?.isActive == true) return
+                    if (deviceRepository.getOwnedById(deviceId, principal.user.id) == null) return
 
-                sendLastKnownPosition(device, share)
+                    sendLastKnownPosition(deviceId, share = null, activeShareId = null)
 
-                shareSubscriptionRtUpdaters[shareId] = launch {
-                    deviceSubscriptionRepository.getFlowForDeviceSubscription(device.id.value)
-                        .mapNotNull { it.toAppSocketMessage(null, share) }
-                        .filterNot { it.message is TrailsWebSocketServerMessage.Snapshot && !emitRtUpdates.value }
-                        .onEach { message ->
-                            sendSerialized<TrailsWebSocketServerMessage>(message.message)
-                        }
-                        .takeWhile { !it.closeConnectionAfterSending }
-                        .collect()
-                    this@webSocket.close(CloseReason(CloseReason.Codes.NORMAL, ""))
-                }.also {
-                    it.invokeOnCompletion { shareSubscriptionRtUpdaters.remove(shareId) }
+                    ownDeviceSubscriptionRtUpdaters[deviceId] = launch {
+                        deviceRepository.events(deviceId)
+                            .mapNotNull { it.toAppMessage(thisDeviceId = principal.device.id) }
+                            .filterNot { it.message is TrailsWebSocketServerMessage.Snapshot && !emitRtUpdates.value }
+                            .onEach { message -> sendSerialized<TrailsWebSocketServerMessage>(message.message) }
+                            .takeWhile { !it.closeConnectionAfterSending }
+                            .collect()
+                        // Reached when this session's own device was removed: there is
+                        // nothing left for the connection to serve.
+                        this@webSocket.close(CloseReason(CloseReason.Codes.NORMAL, ""))
+                    }
                 }
-            }
 
-            suspend fun startOwnDeviceSubscription(deviceId: DeviceId) {
-                requireNotNull(principal) { "Cannot subscribe to own device without a principal" }
-
-                val device = db.transaction { Device.findById(deviceId) } ?: return
-
-                if (ownDeviceSubscriptionRtUpdaters[device.id.value]?.isActive == true) return
-
-                sendLastKnownPosition(device, share = null)
-
-                ownDeviceSubscriptionRtUpdaters[device.id.value] = launch {
-                    deviceSubscriptionRepository.getFlowForDeviceSubscription(device.id.value)
-                        .mapNotNull { it.toAppSocketMessage(principal, null) }
-                        .filterNot { it.message is TrailsWebSocketServerMessage.Snapshot && !emitRtUpdates.value }
-                        .onEach { message ->
-                            sendSerialized<TrailsWebSocketServerMessage>(message.message)
-                        }
-                        .takeWhile { !it.closeConnectionAfterSending }
-                        .collect()
-                    this@webSocket.close(CloseReason(CloseReason.Codes.NORMAL, ""))
+                if (principal != null) {
+                    deviceRepository.listOwnedBy(principal.user.id).forEach { startOwnDeviceSubscription(it.id) }
                 }
-            }
 
-            if (principal != null) {
-                val ownDevices = db.transaction { principal.user.devices.toList().filter { it.deletion == null } }
-                ownDevices.forEach { startOwnDeviceSubscription(it.id.value) }
+                /*
+             * Watches the connection for silence, and ends it when the silence lasts.
+             *
+             * Deliberately not the WebSocket ping: a proxy in front of the server
+             * answers control frames itself, so a device that is long gone can keep a
+             * connection looking healthy — which is exactly how a device stayed online
+             * for hours. A heartbeat is an application message; only the app can answer
+             * it.
+             *
+             * Closing here is all that is needed: it ends the receive loop below, which
+             * runs the deregistration in the `finally` and reports the device offline.
+             */
+            launch(CoroutineName("ConnectionHeartbeat")) {
+                if (presentDeviceId == null) return@launch
+                while (isActive) {
+                    delay(HEARTBEAT_INTERVAL)
+
+                    val silence = Clock.System.now() - lastContact.value
+                    if (silence >= HEARTBEAT_TIMEOUT) {
+                        close(CloseReason(CloseReason.Codes.GOING_AWAY, "Heartbeat timed out"))
+                        return@launch
+                    }
+                    if (silence < HEARTBEAT_INTERVAL) continue
+
+                    // A write into a black-holed connection can block for as long as the
+                    // operating system lets it, and this loop is what has to notice that.
+                    withTimeoutOrNull(HEARTBEAT_INTERVAL) {
+                        sendSerialized<TrailsWebSocketServerMessage>(TrailsWebSocketServerMessage.Heartbeat)
+                    }
+                }
             }
 
             launch(CoroutineName("SharesRtUpdates")) {
-                subscribedShares.forEach { startShareSubscription(it) }
-            }
+                    subscribedShares.forEach { startShareSubscription(it) }
+                }
 
-            launch(CoroutineName("ThisUserEvents")) {
-                if (principal == null) return@launch
-                userSubscriptionRepository.getFlowForUser(principal.user.id.value)
-                    .onEach { message ->
-                        when (message) {
-                            is UserSubscriptionMessage.DeviceUpdated -> {
-                                startOwnDeviceSubscription(message.device.id.value)
+                launch(CoroutineName("ThisUserEvents")) {
+                    if (principal == null) return@launch
+                    userRepository.events(principal.user.id)
+                        .onEach { event ->
+                            when (event) {
+                                // A device that was added or came back keeps its own
+                                // subscription; one that is gone drops it.
+                                is UserEvent.DeviceChanged -> startOwnDeviceSubscription(event.device.id)
+                                is UserEvent.DeviceRemoved ->
+                                    ownDeviceSubscriptionRtUpdaters.remove(event.deletion.deviceId)?.cancel()
+                                is UserEvent.SavedSharesChanged -> {}
+                                is UserEvent.EmittedSharesChanged -> {}
+                                is UserEvent.OptimizationProgressed -> {}
                             }
-                            is UserSubscriptionMessage.DeviceDeleted -> {
-                                val deviceId = db.transaction { message.deletion.device.id.value }
-                                ownDeviceSubscriptionRtUpdaters[deviceId]?.cancel()
-                                ownDeviceSubscriptionRtUpdaters.remove(deviceId)
-                            }
-                            is UserSubscriptionMessage.RingState -> { }
-                            is UserSubscriptionMessage.OptimizationProgress -> { }
-                            is UserSubscriptionMessage.SharesChanged -> { }
-                            is UserSubscriptionMessage.EmittedSharesChanged -> { }
                         }
-                    }
-                    .mapNotNull { it.toAppSocketMessage(principal) }
-                    .onEach { this@webSocket.sendSerialized(it.message) }
-                    .takeWhile { !it.closeConnectionAfterSending && this@webSocket.isActive }
-                    .collect()
-            }
+                        .mapNotNull { it.toAppMessage() }
+                        .onEach { this@webSocket.sendSerialized(it) }
+                        .takeWhile { this@webSocket.isActive }
+                        .collect()
+                }
 
-            for (frame in incoming) {
-                if (frame is Frame.Text) {
-                    val message = converter!!.deserialize<TrailsWebSocketAppMessage>(frame)
-                    try {
-                        println(message)
-                        when (message) {
-                            is TrailsWebSocketAppMessage.DataSnapshot -> {
-                                if (principal == null) continue
-                                launch {
-                                    val createdAt = Instant.fromEpochSeconds(message.time)
+                for (frame in incoming) {
+                    if (frame is Frame.Text) {
+                        val message = converter!!.deserialize<TrailsWebSocketAppMessage>(frame)
+                        try {
+                            when (message) {
+                                is TrailsWebSocketAppMessage.DataSnapshot -> {
+                                    if (principal == null) continue
+                                    launch {
+                                        // Storing is idempotent, so a re-upload is acknowledged
+                                        // rather than written twice. Only a write that genuinely
+                                        // failed goes unacknowledged, which is what makes the
+                                        // device try again.
+                                        val result = trackRepository.addSnapshot(
+                                            deviceId = principal.device.id,
+                                            snapshotId = message.snapshotId,
+                                            recordedAt = Instant.fromEpochSeconds(message.time),
+                                            latitude = message.latitude,
+                                            longitude = message.longitude,
+                                            locationAccuracy = message.locationAccuracy.toDouble(),
+                                            bearing = message.bearing.toDouble(),
+                                            bearingAccuracy = message.bearingAccuracy?.toDouble(),
+                                            batteryLevel = message.batteryLevel,
+                                            batteryCharging = message.batteryCharging,
+                                        )
 
-                                    // A snapshot counts as stored once its ID is known, or once the
-                                    // device has one for that second — the unique
-                                    // (device, timestamp) index allows only one. Must run inside a
-                                    // transaction.
-                                    val isAlreadyStored = {
-                                        DataSnapshot.findById(message.snapshotId) != null ||
-                                                !DataSnapshot.find {
-                                                    (DataSnapshots.device eq principal.device.id) and
-                                                            (DataSnapshots.createdAt eq createdAt) and
-                                                            (DataSnapshots.isRaw eq true)
-                                                }.empty()
-                                    }
-
-                                    // Storing has to be idempotent: an app whose acknowledgement
-                                    // got lost re-uploads the snapshot, and a snapshot recorded in
-                                    // the same second as an existing one collides with the index.
-                                    // Both cases mean the data is already stored, so they are
-                                    // acknowledged instead of failing the write — otherwise the
-                                    // app retries them forever.
-                                    val stored = runCatching {
-                                        db.transaction {
-                                            if (isAlreadyStored()) return@transaction null
-
-                                            DataSnapshot.new(message.snapshotId) {
-                                                this.device = principal.device
-                                                this.latitude = message.latitude
-                                                this.longitude = message.longitude
-                                                this.bearing = message.bearing.toDouble()
-                                                this.bearingAccuracy = message.bearingAccuracy?.toDouble()
-                                                this.locationAccuracy = message.locationAccuracy.toDouble()
-                                                this.batteryLevel = message.batteryLevel
-                                                this.batteryCharging = message.batteryCharging
-                                                this.createdAt = createdAt
-                                                this.isRaw = true
-                                            }
-                                        }
-                                    }.getOrElse { error ->
-                                        // Two uploads for the same second can race past the check
-                                        // above. Only acknowledge if the data did land.
-                                        val landed = runCatching { db.transaction(isAlreadyStored) }
-                                            .getOrDefault(false)
-
-                                        if (!landed) {
-                                            appSocketLogger.warn("Could not store snapshot ${message.snapshotId}", error)
+                                        if (result is SnapshotWriteResult.Failed) {
+                                            appSocketLogger.warn(
+                                                "Could not store snapshot ${message.snapshotId}",
+                                                result.error,
+                                            )
                                             return@launch
                                         }
-                                        null
-                                    }
 
-                                    if (stored != null && selfFlow != null && selfFlow.subscriptionCount.value > 0) {
-                                        selfFlow.emit(DeviceSubscriptionMessage.Snapshot(stored))
+                                        sendSerialized<TrailsWebSocketServerMessage>(
+                                            TrailsWebSocketServerMessage.SnapshotAcknowledged(
+                                                snapshotId = message.snapshotId,
+                                            )
+                                        )
                                     }
-
-                                    sendSerialized<TrailsWebSocketServerMessage>(TrailsWebSocketServerMessage.SnapshotAcknowledged(
-                                        snapshotId = message.snapshotId,
-                                    ))
                                 }
-                            }
 
-                            is TrailsWebSocketAppMessage.ShareSubscribe -> {
-                                message.shareIds
-                                    .map { id -> Uuid.parse(id) }
-                                    .forEach { id ->
-                                        subscribedShares.add(id)
-                                        startShareSubscription(id)
-                                    }
-                            }
+                                is TrailsWebSocketAppMessage.ShareSubscribe -> {
+                                    message.shareIds
+                                        .map { id -> Uuid.parse(id) }
+                                        .forEach { id ->
+                                            subscribedShares.add(id)
+                                            startShareSubscription(id)
+                                        }
+                                }
 
-                            is TrailsWebSocketAppMessage.ShareUnsubscribe -> {
-                                val unsubscribeIds = message.shareIds.map { Uuid.parse(it) }
-                                shareSubscriptionRtUpdaters.filterKeys { it in unsubscribeIds }.forEach { it.value.cancel() }
-                            }
+                                is TrailsWebSocketAppMessage.ShareUnsubscribe -> {
+                                    val unsubscribeIds = message.shareIds.map { Uuid.parse(it) }
+                                    shareSubscriptionRtUpdaters.filterKeys { it in unsubscribeIds }
+                                        .forEach { it.value.cancel() }
+                                }
+
+                                // Nothing to do: the arrival itself was the point.
+                            is TrailsWebSocketAppMessage.HeartbeatAck -> {}
 
                             is TrailsWebSocketAppMessage.StartRtUpdates -> {
-                                emitRtUpdates.value = true
-                                // The other moment the client asks for positions, and the
-                                // one the user actually notices: the app coming back to
-                                // the foreground. Its subscriptions outlive that, so
-                                // nothing else would tell it what stood still while it was
-                                // away.
-                                launch { sendLastKnownPositions() }
-                            }
-                            is TrailsWebSocketAppMessage.StopRtUpdates -> emitRtUpdates.value = false
-
-                            is TrailsWebSocketAppMessage.Pong -> {
-                                if (principal == null) continue
-                                val deferred = pendingPings[principal.device.id.value] ?: continue
-                                deferred.complete(PingResult(message.hasDeliveredNotification))
-                            }
-
-                            is TrailsWebSocketAppMessage.RingStart -> {
-                                if (principal == null) continue
-                                val deviceId = principal.device.id.value
-                                val ringedBy = deviceRingInfo[deviceId] ?: principal.device.displayName
-                                val userFlow = userSubscriptionRepository.getFlowForUser(principal.user.id.value)
-                                userFlow.emit(UserSubscriptionMessage.RingState(
-                                    deviceId = deviceId,
-                                    isRinging = true,
-                                    ringedByDeviceName = ringedBy,
-                                ))
-                            }
-
-                            is TrailsWebSocketAppMessage.RingStop -> {
-                                if (principal == null) continue
-                                val deviceId = principal.device.id.value
-                                val ringedBy = deviceRingInfo.remove(deviceId) ?: ""
-                                val userFlow = userSubscriptionRepository.getFlowForUser(principal.user.id.value)
-                                userFlow.emit(UserSubscriptionMessage.RingState(
-                                    deviceId = deviceId,
-                                    isRinging = false,
-                                    ringedByDeviceName = ringedBy,
-                                ))
-                            }
-
-                            is TrailsWebSocketAppMessage.DevicePing -> {
-                                if (principal == null) continue
-                                val targetDeviceId = Uuid.parse(message.deviceId)
-                                val targetDevice = db.transaction { Device.findById(targetDeviceId) }
-                                if (targetDevice == null || db.transaction { targetDevice.owner.id.value != principal.user.id.value }) {
-                                    sendSerialized(TrailsWebSocketServerMessage.PingResult(deviceId = message.deviceId, success = false, errorMessage = "Not allowed"))
-                                    continue
+                                    emitRtUpdates.value = true
+                                    // The other moment the client asks for positions, and the
+                                    // one the user actually notices: the app coming back to
+                                    // the foreground. Its subscriptions outlive that, so
+                                    // nothing else would tell it what stood still while it was
+                                    // away.
+                                    launch { sendLastKnownPositions() }
                                 }
-                                val deferred = CompletableDeferred<PingResult>()
-                                pendingPings[targetDeviceId] = deferred
-                                val deviceFlow = deviceSubscriptionRepository.getFlowForDeviceSubscription(targetDeviceId)
-                                deviceFlow.emit(DeviceSubscriptionMessage.Ping(targetDevice, pingedByDeviceName = principal.device.displayName))
-                                launch {
-                                    val result = withTimeoutOrNull(5.seconds) { deferred.await() }
-                                    pendingPings.remove(targetDeviceId)
-                                    if (result != null) {
-                                        sendSerialized(TrailsWebSocketServerMessage.PingResult(
-                                            deviceId = message.deviceId,
-                                            success = true,
-                                            hasDeliveredNotification = result.hasDeliveredNotification
-                                        ))
-                                    } else {
-                                        sendSerialized(TrailsWebSocketServerMessage.PingResult(deviceId = message.deviceId, success = false, errorMessage = "Timeout"))
+                                is TrailsWebSocketAppMessage.StopRtUpdates -> emitRtUpdates.value = false
+
+                                is TrailsWebSocketAppMessage.Pong -> {
+                                    if (principal == null) continue
+                                    deviceRepository.acknowledgePing(
+                                        deviceId = principal.device.id,
+                                        hasDeliveredNotification = message.hasDeliveredNotification,
+                                    )
+                                }
+
+                                is TrailsWebSocketAppMessage.RingStart -> {
+                                    if (principal == null) continue
+                                    deviceRepository.reportRingStarted(principal.device.id)
+                                }
+
+                                is TrailsWebSocketAppMessage.RingStop -> {
+                                    if (principal == null) continue
+                                    deviceRepository.reportRingStopped(principal.device.id)
+                                }
+
+                                is TrailsWebSocketAppMessage.DevicePing -> {
+                                    if (principal == null) continue
+                                    val targetDeviceId = Uuid.parse(message.deviceId)
+                                    if (deviceRepository.getOwnedById(targetDeviceId, principal.user.id) == null) {
+                                        sendSerialized(
+                                            TrailsWebSocketServerMessage.PingResult(
+                                                deviceId = message.deviceId,
+                                                success = false,
+                                                errorMessage = "Not allowed",
+                                            )
+                                        )
+                                        continue
+                                    }
+
+                                    // Waiting for the answer must not stop this connection from
+                                    // reading, so the ping runs beside the receive loop.
+                                    launch {
+                                        val ack = deviceRepository.ping(
+                                            deviceId = targetDeviceId,
+                                            requestedByName = principal.device.displayName,
+                                            requestedBySource = PingSource.DEVICE,
+                                        )
+                                        if (ack != null) {
+                                            sendSerialized(
+                                                TrailsWebSocketServerMessage.PingResult(
+                                                    deviceId = message.deviceId,
+                                                    success = true,
+                                                    hasDeliveredNotification = ack.hasDeliveredNotification,
+                                                )
+                                            )
+                                        } else {
+                                            sendSerialized(
+                                                TrailsWebSocketServerMessage.PingResult(
+                                                    deviceId = message.deviceId,
+                                                    success = false,
+                                                    errorMessage = "Timeout",
+                                                )
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            is TrailsWebSocketAppMessage.DeviceRing -> {
-                                if (principal == null) continue
-                                val targetDeviceId = Uuid.parse(message.deviceId)
-                                val targetDevice = db.transaction { Device.findById(targetDeviceId) }
-                                if (targetDevice == null || db.transaction { targetDevice.owner.id.value != principal.user.id.value }) continue
-                                deviceRingInfo[targetDeviceId] = principal.device.displayName
-                                val deviceFlow = deviceSubscriptionRepository.getFlowForDeviceSubscription(targetDeviceId)
-                                deviceFlow.emit(DeviceSubscriptionMessage.Ring(targetDevice, pingedByDeviceName = principal.device.displayName))
-                            }
+                                is TrailsWebSocketAppMessage.DeviceRing -> {
+                                    if (principal == null) continue
+                                    val targetDeviceId = Uuid.parse(message.deviceId)
+                                    if (deviceRepository.getOwnedById(targetDeviceId, principal.user.id) == null) continue
+                                    deviceRepository.requestRing(
+                                        deviceId = targetDeviceId,
+                                        requestedByName = principal.device.displayName,
+                                    )
+                                }
 
-                            is TrailsWebSocketAppMessage.DeviceRingStop -> {
-                                if (principal == null) continue
-                                val targetDeviceId = Uuid.parse(message.deviceId)
-                                val targetDevice = db.transaction { Device.findById(targetDeviceId) }
-                                if (targetDevice == null) continue
-                                val deviceFlow = deviceSubscriptionRepository.getFlowForDeviceSubscription(targetDeviceId)
-                                deviceFlow.emit(DeviceSubscriptionMessage.RingStop(targetDevice))
+                                is TrailsWebSocketAppMessage.DeviceRingStop -> {
+                                    if (principal == null) continue
+                                    val targetDeviceId = Uuid.parse(message.deviceId)
+                                    if (deviceRepository.getById(targetDeviceId) == null) continue
+                                    deviceRepository.requestRingStop(targetDeviceId)
+                                }
                             }
+                        } catch (e: Exception) {
+                            appSocketLogger.error("""WebSocket message could not be handled:
+                                |Message: $message
+                                |Error: ${e.stackTraceToString()}
+                            """.trimMargin())
                         }
-                    } catch (e: Exception) {
-                        appSocketLogger.error("""WebSocket message could not be handled:
-                            |Message: $message
-                            |Error: ${e.stackTraceToString()}
-                        """.trimMargin())
                     }
+                }
+
+            } finally {
+                // A device usually goes offline by losing its connection, which ends
+                // this block with an exception or a cancellation rather than a clean
+                // return — so the deregistration has to survive both. NonCancellable,
+                // because announcing the change suspends and a cancelled coroutine
+                // cannot.
+                if (presentDeviceId != null) withContext(NonCancellable) {
+                    deviceRepository.disconnected(presentDeviceId)
                 }
             }
         }
     }
 }
 
-private const val MIN_DISTANCE_METERS = 10.0
-private const val EARTH_RADIUS_METERS = 6371000.0
+/** The wire shape of one stored position. */
+private fun snapshotMessage(
+    snapshot: SnapshotModel,
+    target: TrailsWebSocketServerMessage.Snapshot.Target,
+): TrailsWebSocketServerMessage.Snapshot = TrailsWebSocketServerMessage.Snapshot(
+    snapshotId = snapshot.id,
+    target = target,
+    timestamp = snapshot.createdAt.epochSeconds,
+    location = TrailsWebSocketServerMessage.Snapshot.Location(
+        latitude = snapshot.latitude,
+        longitude = snapshot.longitude,
+        bearing = snapshot.bearing.toFloat(),
+        bearingAccuracy = snapshot.bearingAccuracy?.toFloat(),
+        locationAccuracy = snapshot.locationAccuracy.toFloat(),
+    ),
+    batteryState = snapshot.battery?.let {
+        TrailsWebSocketServerMessage.Snapshot.BatteryState(
+            percentage = it.percentage,
+            isCharging = it.isCharging,
+        )
+    },
+)
 
-private fun distanceMeters(
-    latitude1: Double,
-    longitude1: Double,
-    latitude2: Double,
-    longitude2: Double,
-): Double {
-    val lat1 = Math.toRadians(latitude1)
-    val lat2 = Math.toRadians(latitude2)
-    val deltaLat = Math.toRadians(latitude2 - latitude1)
-    val deltaLon = Math.toRadians(longitude2 - longitude1)
+/**
+ * What one of the user's own devices sends to this connection.
+ *
+ * [thisDeviceId] is the device on the other end: a ping or a ring is a request
+ * aimed at one device, so only its own connection acts on it — the owner's other
+ * devices have no business ringing on its behalf.
+ */
+private fun DeviceEvent.toAppMessage(thisDeviceId: Uuid): AppSocketMessage? = when (this) {
+    is DeviceEvent.SnapshotAdded -> AppSocketMessage(
+        snapshotMessage(
+            snapshot = snapshot,
+            target = TrailsWebSocketServerMessage.Snapshot.Target.Device(deviceId.toString()),
+        )
+    )
 
-    val a = sin(deltaLat / 2).let { it * it } +
-        cos(lat1) * cos(lat2) * sin(deltaLon / 2).let { it * it }
-    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return EARTH_RADIUS_METERS * c
+    is DeviceEvent.Deleted -> AppSocketMessage(
+        TrailsWebSocketServerMessage.DeviceDeleted(
+            deletedByDeviceName = deletion.deletedByDeviceName ?: "Browser",
+            deviceId = deletion.deviceId.toString(),
+        ),
+        closeConnectionAfterSending = deletion.deviceId == thisDeviceId,
+    )
+
+    is DeviceEvent.PingRequested -> if (deviceId != thisDeviceId) null else AppSocketMessage(
+        TrailsWebSocketServerMessage.Ping(
+            pingedByDeviceName = requestedByName,
+            pingedBySource = requestedBySource,
+        )
+    )
+
+    is DeviceEvent.RingRequested -> if (deviceId != thisDeviceId) null else AppSocketMessage(
+        TrailsWebSocketServerMessage.Ring(ringedByDeviceName = requestedByName)
+    )
+
+    is DeviceEvent.RingStopRequested -> if (deviceId != thisDeviceId) null else AppSocketMessage(
+        TrailsWebSocketServerMessage.RingStop
+    )
+
+    // The confirmed ring state is what the *other* UIs follow; this connection is
+    // where it came from.
+    is DeviceEvent.RingStateChanged -> null
+
+    // A rename reaches the app through the account's stream, which carries the whole
+    // device.
+    is DeviceEvent.Changed -> null
+
+    is DeviceEvent.OnlineStateChanged -> AppSocketMessage(
+        TrailsWebSocketServerMessage.OnlineState(
+            target = TrailsWebSocketServerMessage.Snapshot.Target.Device(deviceId.toString()),
+            isOnline = isOnline,
+            since = since?.toEpochMilliseconds(),
+        )
+    )
 }
 
+/** What one held redemption sends to this connection. */
+private fun ActiveShareEvent.toAppMessage(activeShareId: Uuid): TrailsWebSocketServerMessage? = when (this) {
+    is ActiveShareEvent.SnapshotAdded -> snapshotMessage(
+        snapshot = snapshot,
+        target = TrailsWebSocketServerMessage.Snapshot.Target.Share(activeShareId.toString()),
+    )
 
+    is ActiveShareEvent.Gone -> TrailsWebSocketServerMessage.ShareDeleted(
+        wasDeviceRemoved = wasDeviceRemoved,
+        shareId = activeShareId.toString(),
+    )
+
+    // The app is told what a share reveals, not how it is configured; the next
+    // position already reflects the change.
+    is ActiveShareEvent.SettingsChanged -> null
+
+    is ActiveShareEvent.OnlineStateChanged -> TrailsWebSocketServerMessage.OnlineState(
+        target = TrailsWebSocketServerMessage.Snapshot.Target.Share(activeShareId.toString()),
+        isOnline = isOnline,
+        since = since?.toEpochMilliseconds(),
+    )
+}
+
+/** What the account itself sends to this connection. */
+private fun UserEvent.toAppMessage(): TrailsWebSocketServerMessage? = when (this) {
+    is UserEvent.DeviceChanged -> TrailsWebSocketServerMessage.DeviceUpdated(
+        data = DeviceResponse(
+            id = device.id.toString(),
+            manufacturer = device.manufacturer,
+            model = device.model,
+            friendlyName = device.friendlyName,
+            displayName = device.displayName,
+            ownerId = device.ownerId.toString(),
+        )
+    )
+
+    is UserEvent.DeviceRemoved -> TrailsWebSocketServerMessage.DeviceDeleted(
+        deletedByDeviceName = deletion.deletedByDeviceName ?: "Browser",
+        deviceId = deletion.deviceId.toString(),
+    )
+
+    is UserEvent.SavedSharesChanged -> TrailsWebSocketServerMessage.ShareDeleted(
+        wasDeviceRemoved = false,
+        shareId = activeShareId.toString(),
+    )
+
+    // Emitted shares are not part of the app's socket state — it reads them via
+    // `GET /me/emitted-shares` when it needs them.
+    is UserEvent.EmittedSharesChanged -> null
+
+    // The app draws no tracks, so optimization progress means nothing to it.
+    is UserEvent.OptimizationProgressed -> null
+}
 
 data class AppSocketMessage(
     val message: TrailsWebSocketServerMessage,

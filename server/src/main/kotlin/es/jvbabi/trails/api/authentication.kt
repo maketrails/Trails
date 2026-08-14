@@ -3,24 +3,16 @@ package es.jvbabi.trails.api
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import es.jvbabi.trails.config.ApplicationConfig
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.database.Devices
-import es.jvbabi.trails.database.Session
-import es.jvbabi.trails.database.Sessions
-import es.jvbabi.trails.database.User
+import es.jvbabi.trails.data.SessionRepository
+import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.model.DeviceModel
+import es.jvbabi.trails.data.model.SessionModel
+import es.jvbabi.trails.data.model.UserModel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.auth.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.isNull
-import org.jetbrains.exposed.v1.core.leftJoin
-import org.jetbrains.exposed.v1.jdbc.andWhere
-import org.jetbrains.exposed.v1.jdbc.selectAll
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 import org.koin.ktor.ext.inject
 import java.security.MessageDigest
 import kotlin.uuid.Uuid
@@ -30,7 +22,8 @@ const val TRAILS_WEBAPP_REALM = "trails-webapp"
 
 fun Application.installAuthentication() {
     val applicationConfig by inject<ApplicationConfig>()
-    val db by inject<DatabaseManager>()
+    val sessionRepository by inject<SessionRepository>()
+    val userRepository by inject<UserRepository>()
 
     install(Authentication) {
         jwt(name = TRAILS_USER_REALM) {
@@ -45,24 +38,14 @@ fun Application.installAuthentication() {
                 val originalJwt = (this.request.parseAuthorizationHeader() as HttpAuthHeader.Single).blob
                 val jwtHash = MessageDigest.getInstance("SHA-256").digest(originalJwt.toByteArray()).joinToString("") { "%02x".format(it) }
                 val userId = Uuid.parse(credential.payload.getClaim("user_id").asString())
-                val session = db.transaction {
-                    Sessions
-                        .leftJoin(Devices, { Sessions.device }, { Devices.id })
-                        .selectAll()
-                        .where { Sessions.tokenHash eq jwtHash }
-                        .andWhere { Devices.owner eq userId }
-                        .andWhere { Sessions.invalidatedAt.isNull() }
-                        .singleOrNull()
-                        ?.let { Session.wrapRow(it) }
-                }
-                return@validate if (session == null) null
-                else db.transaction {
-                    val device = session.device
-                    val user = device.owner
+
+                // The token, the device holding it and the account come back together
+                // — and only when the session is valid and really that user's.
+                sessionRepository.findByToken(tokenHash = jwtHash, ownerId = userId)?.let { authenticated ->
                     TrailsAppUserPrincipal(
-                        user,
-                        device,
-                        session
+                        user = authenticated.user,
+                        device = authenticated.device,
+                        session = authenticated.session,
                     )
                 }
             }
@@ -95,28 +78,32 @@ fun Application.installAuthentication() {
 
             validate { credential ->
                 val userId = Uuid.parse(credential.payload.getClaim("user_id").asString())
-                db.transaction {
-                    User.findById(userId)
-                }?.let {
-                    TrailsWebappPrincipal(it)
-                }
+                userRepository.getById(userId)?.let { TrailsWebappPrincipal(it) }
             }
         }
     }
 }
 
+/**
+ * A signed-in device: which account, which device, which session. Read fresh on
+ * every request, so [device] is the state at the time of the call — which is what
+ * makes [requireValidSession] a plain check rather than another read.
+ */
 data class TrailsAppUserPrincipal(
-    val user: User,
-    val device: Device,
-    val session: Session,
-): KoinComponent {
-    private val db by inject<DatabaseManager>()
-
-    suspend fun requireValidSession() {
-        if (db.transaction { device.deletion } != null) throw RuntimeException("Device is deleted")
+    val user: UserModel,
+    val device: DeviceModel,
+    val session: SessionModel,
+) {
+    /**
+     * Refuses to serve a session whose device was removed. Its token stays
+     * technically valid — the device is what is gone.
+     */
+    fun requireValidSession() {
+        if (device.isDeleted) throw RuntimeException("Device is deleted")
     }
 }
 
+/** A browser session: an account, with no device of its own. */
 data class TrailsWebappPrincipal(
-    val user: User,
+    val user: UserModel,
 )

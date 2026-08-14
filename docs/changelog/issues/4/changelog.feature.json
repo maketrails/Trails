@@ -1,0 +1,10 @@
+{
+  "title": "See which devices are reachable",
+  "description": "A device that has no connection to Trails right now is shown without colour — in the list, on its detail page and on the map — and instead of when it was last seen, it says how long it has been offline. Its last known position stays visible, which is exactly when it matters most. Devices shared with you show it too.",
+  "localized": {
+    "de": {
+      "title": "Sehen, welche Geräte erreichbar sind",
+      "description": "Ein Gerät ohne Verbindung zu Trails wird farblos dargestellt — in der Liste, auf seiner Detailseite und auf der Karte — und statt wann es zuletzt gesehen wurde, steht dort, seit wann es offline ist. Die zuletzt bekannte Position bleibt sichtbar, denn genau dann zählt sie am meisten. Auch für Geräte, die mit dir geteilt wurden."
+    }
+  }
+}

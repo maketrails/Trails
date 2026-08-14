@@ -77,6 +77,7 @@
                     title={device.name}
                     subtitle={device.hasCustomName ? device.modelName : null}
                     lastLocation={device.last_location}
+                    isOnline={device.isOnline}
                     history={historyState}
                     battery={device.battery}
                     actions={isOwnDevice ? deviceActions : undefined}

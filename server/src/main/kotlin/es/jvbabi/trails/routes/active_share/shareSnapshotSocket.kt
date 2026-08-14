@@ -1,16 +1,16 @@
 package es.jvbabi.trails.routes.active_share
 
-import es.jvbabi.trails.data.DeviceSubscriptionMessage
-import es.jvbabi.trails.data.DeviceSubscriptionRepository
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.ReverseGeocoding
-import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.data.ShareRepository
+import es.jvbabi.trails.data.TrackRepository
+import es.jvbabi.trails.data.event.ActiveShareEvent
 import io.ktor.serialization.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
@@ -27,18 +27,29 @@ import kotlin.uuid.Uuid
  * Unauthenticated by design: the active-share id is itself the capability (an
  * unguessable UUID), so possessing it is the authorization — the same model the
  * app's share subscription uses.
+ *
+ * What it subscribes to is the *share's* stream, not the device's: the repository
+ * has already decided what this redemption may reveal, so nothing here has to know
+ * the share's settings.
  */
 fun Route.shareSnapshotSocket() {
-    val db by inject<DatabaseManager>()
     val reverseGeocoding by inject<ReverseGeocoding>()
-    val deviceSubscriptionRepository by inject<DeviceSubscriptionRepository>()
+    val shareRepository by inject<ShareRepository>()
+    val trackRepository by inject<TrackRepository>()
+    val deviceRepository by inject<DeviceRepository>()
 
     webSocket {
         // One live-update collector job per subscribed active-share id.
         val subscriptions = mutableMapOf<Uuid, Job>()
 
         suspend fun pushSnapshot(activeShareId: Uuid) {
-            val snapshot = buildShareSnapshot(db, reverseGeocoding, activeShareId)
+            val snapshot = buildShareSnapshot(
+                shareRepository = shareRepository,
+                trackRepository = trackRepository,
+                deviceRepository = deviceRepository,
+                reverseGeocoding = reverseGeocoding,
+                activeShareId = activeShareId,
+            )
             if (snapshot != null) {
                 sendSerialized<ShareSocketServerMessage>(
                     ShareSocketServerMessage.Snapshot(activeShareId.toString(), snapshot)
@@ -51,15 +62,28 @@ fun Route.shareSnapshotSocket() {
         suspend fun subscribe(activeShareId: Uuid) {
             if (subscriptions.containsKey(activeShareId)) return
 
-            // Send the current snapshot right away, then keep it live off the
-            // device's snapshot flow.
+            // Send the current snapshot right away, then follow the share.
             pushSnapshot(activeShareId)
 
-            val deviceId = activeShareDeviceId(db, activeShareId) ?: return
             subscriptions[activeShareId] = launch {
-                deviceSubscriptionRepository.getFlowForDeviceSubscription(deviceId)
-                    .filterIsInstance<DeviceSubscriptionMessage.Snapshot>()
-                    .onEach { pushSnapshot(activeShareId) }
+                shareRepository.activeShareEvents(activeShareId)
+                    .onEach { event ->
+                        when (event) {
+                            // Rebuilt rather than assembled from the event: the
+                            // snapshot carries the whole shared device, and the
+                            // position is only part of it.
+                            is ActiveShareEvent.SnapshotAdded -> pushSnapshot(activeShareId)
+                            // The snapshot carries whether the device is reachable, so
+                            // a connection coming or going is a new snapshot.
+                            is ActiveShareEvent.OnlineStateChanged -> pushSnapshot(activeShareId)
+                            is ActiveShareEvent.Gone -> sendSerialized<ShareSocketServerMessage>(
+                                ShareSocketServerMessage.Gone(activeShareId.toString())
+                            )
+                            // The client is told what a share reveals, not how it is
+                            // configured; the next snapshot already reflects it.
+                            is ActiveShareEvent.SettingsChanged -> {}
+                        }
+                    }
                     .collect()
             }
         }

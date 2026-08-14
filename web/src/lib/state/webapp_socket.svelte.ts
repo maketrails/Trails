@@ -37,6 +37,7 @@ interface ApiDevice {
     friendly_name: string;
     battery: Battery | null;
     last_location: LastLocation | null;
+    is_online: boolean;
 }
 
 /** A device as the app uses it: the name has already been resolved, so consumers
@@ -54,6 +55,15 @@ export interface Device {
     hasCustomName: boolean;
     battery: Battery | null;
     last_location: LastLocation | null;
+    /**
+     * Whether the device is connected to the service right now.
+     *
+     * Live state, not a stored one: the server holds it in memory, so every device
+     * starts out offline after a server restart and turns online again once its app
+     * reconnects. An offline device still carries its `last_location` — that is
+     * precisely when the last known position matters.
+     */
+    isOnline: boolean;
 }
 
 /** Resolves the server's display/friendly name split into a single `name`. */
@@ -69,6 +79,7 @@ function toDevice(api: ApiDevice): Device {
         hasCustomName,
         battery: api.battery,
         last_location: api.last_location,
+        isOnline: api.is_online,
     };
 }
 
@@ -84,6 +95,12 @@ export interface Share {
     owner_username: string;
     battery: Battery | null;
     last_location: LastLocation | null;
+    /**
+     * Whether the shared device is reachable right now — see {@link Device.isOnline}.
+     * A share hands this out unconditionally: it says whether the position shown is
+     * current or the last thing known, which is not something to opt into.
+     */
+    is_online: boolean;
 }
 
 /** The main label shown for a shared device: the device's friendly name plus

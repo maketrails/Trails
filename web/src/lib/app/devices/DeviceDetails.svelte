@@ -28,6 +28,7 @@
         owner_username: string;
         last_location: LastLocation | null;
         battery: Battery | null;
+        is_online: boolean;
         // URL base of the share's origin homeserver ("" = current origin).
         base: string;
         // The origin homeserver itself ("" = this server), shown as part of the
@@ -42,6 +43,7 @@
         subtitle = null,
         lastLocation,
         battery = null,
+        isOnline = true,
         history,
         actions,
     }: {
@@ -54,6 +56,13 @@
         subtitle?: string | null;
         lastLocation?: LastLocation | null;
         battery?: Battery | null;
+        /**
+         * Whether the device is reachable right now. Handed in rather than looked up,
+         * because this component is given a device by whoever opened it — an own
+         * device or a shared one — and does not know which. Defaults to online, so a
+         * caller that has nothing to say about it marks nothing.
+         */
+        isOnline?: boolean;
         history: HistoryState;
         // Optional content placed beside the image, below the title/subtitle
         // (e.g. the ping/ring actions for the user's own devices).
@@ -78,6 +87,15 @@
     );
     let resolvedLastLocation = $derived(share ? share.last_location : lastLocation ?? null);
     let resolvedBattery = $derived(share ? share.battery : battery);
+    let resolvedIsOnline = $derived(share ? share.is_online : isOnline);
+
+    /*
+     * Everything that describes where the device is loses its colour while it is
+     * unreachable: it is the last thing known, not the current state. The label stays
+     * at full strength — it is the explanation for the dimming.
+     */
+    let dimmed = $derived(resolvedIsOnline ? "" : "opacity-60");
+    let dimmedImage = $derived(resolvedIsOnline ? "" : "grayscale opacity-60");
 
     let imageAvailable = $state(true);
 
@@ -118,7 +136,7 @@
 
 <div class="flex flex-col gap-2">
     <div class="flex flex-row items-center gap-4 mt-4">
-        <div class="size-20 shrink-0 flex items-center justify-center">
+        <div class="size-20 shrink-0 flex items-center justify-center transition-[filter,opacity] duration-200 {dimmedImage}">
             {#if imageAvailable && resolvedImageUrl}
                 <img
                         src={resolvedImageUrl}
@@ -132,10 +150,20 @@
         </div>
 
         <div class="flex flex-col min-w-0">
-            <span class="text-lg font-semibold truncate leading-tight">{resolvedTitle}</span>
+            <div class="flex flex-row items-center gap-2 min-w-0">
+                <span class="text-lg font-semibold truncate leading-tight transition-opacity duration-200 {dimmed}">
+                    {resolvedTitle}
+                </span>
+
+                {#if !resolvedIsOnline}
+                    <span class="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs leading-4 text-muted-foreground">
+                        {$_("devices.offline")}
+                    </span>
+                {/if}
+            </div>
 
             {#if resolvedSubtitle}
-                <span class="text-sm font-light text-muted-foreground truncate">{resolvedSubtitle}</span>
+                <span class="text-sm font-light text-muted-foreground truncate transition-opacity duration-200 {dimmed}">{resolvedSubtitle}</span>
             {/if}
 
             {#if actions}
@@ -146,7 +174,7 @@
 
     <div class="grid grid-cols-2 items-center gap-1 px-1 mt-2">
         {#if timeText}
-            <div class="flex flex-row items-center gap-1.5 text-sm">
+            <div class="flex flex-row items-center gap-1.5 text-sm transition-opacity duration-200 {dimmed}">
                 <ClockIcon class="w-lh h-lh" />
                 <span class="font-medium text-muted-foreground truncate">{timeText}</span>
             </div>
@@ -169,7 +197,7 @@
             </div>
         {/if}
 
-        <div class="flex flex-row items-center gap-1.5 text-sm col-span-2">
+        <div class="flex flex-row items-center gap-1.5 text-sm col-span-2 transition-opacity duration-200 {dimmed}">
             <MapPinIcon class="w-lh h-lh" />
             <span class="font-medium text-muted-foreground truncate">{placeText}</span>
         </div>

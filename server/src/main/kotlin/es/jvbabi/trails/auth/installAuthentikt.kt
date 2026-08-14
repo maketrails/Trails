@@ -8,7 +8,10 @@ import es.jvbabi.authentikt.core.installAuthentikt
 import es.jvbabi.authentikt.core.session.SessionDestination
 import es.jvbabi.authentikt.core.step.plugins.builtin.*
 import es.jvbabi.trails.config.ApplicationConfig
-import es.jvbabi.trails.database.*
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.SessionRepository
+import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.model.UserModel
 import io.ktor.client.call.*
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -16,8 +19,6 @@ import io.ktor.util.AttributeKey
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toJavaLocalDateTime
 import kotlinx.datetime.toLocalDateTime
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.or
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import org.koin.core.context.loadKoinModules
@@ -35,7 +36,12 @@ val deviceModelAttribute = AttributeKey<String>("device_model")
 val deviceManufacturerAttribute = AttributeKey<String>("device_manufacturer")
 val authSessionSelectedDeviceIdAttribute = AttributeKey<Uuid>("auth_session_selected_device_id")
 
-class TrailsAuthentiktUser(dbUser: User): AuthentiktUser<User>(dbUser) {
+/**
+ * How Authentikt sees an account. Wraps the domain model, not a database entity:
+ * the sign-in flow keeps the user around across steps and requests, which an
+ * Exposed entity would not survive.
+ */
+class TrailsAuthentiktUser(user: UserModel): AuthentiktUser<UserModel>(user) {
     override suspend fun getEmail(): String = user.email
     override suspend fun getUsername(): String = user.username
     override suspend fun getDisplayName(): String = user.username
@@ -43,8 +49,10 @@ class TrailsAuthentiktUser(dbUser: User): AuthentiktUser<User>(dbUser) {
 
 fun Application.installAuthentikt() {
 
-    val db by inject<DatabaseManager>()
     val applicationConfig by inject<ApplicationConfig>()
+    val userRepository by inject<UserRepository>()
+    val deviceRepository by inject<DeviceRepository>()
+    val sessionRepository by inject<SessionRepository>()
     val deviceSelectionAuthentiktPlugin = DeviceSelectionAuthentiktPlugin()
     loadKoinModules(module { single { deviceSelectionAuthentiktPlugin } })
 
@@ -55,16 +63,15 @@ fun Application.installAuthentikt() {
             appendPathSegments("auth", "authorize")
         }.buildString()
 
-        var emailPlugin: EmailUserSelectionPlugin<User>? = null
-        var passwordPlugin: PasswordPlugin<User>? = null
-        var totpPlugin: TotpPlugin<User>? = null
-        var oauthPlugin: OIDCPlugin<User>? = null
+        var emailPlugin: EmailUserSelectionPlugin<UserModel>? = null
+        var passwordPlugin: PasswordPlugin<UserModel>? = null
+        var totpPlugin: TotpPlugin<UserModel>? = null
+        var oauthPlugin: OIDCPlugin<UserModel>? = null
 
         if (applicationConfig.config.auth?.oauth == null) {
             emailPlugin = EmailUserSelectionPlugin {
                 findUserByEmail { email ->
-                    val user = db.transaction { User.find { (Users.email eq email) or (Users.username eq email) }.firstOrNull() }
-                    user?.let { TrailsAuthentiktUser(it) }
+                    userRepository.findByEmailOrUsername(email)?.let { TrailsAuthentiktUser(it) }
                 }
 
                 withUsername = true
@@ -72,14 +79,15 @@ fun Application.installAuthentikt() {
             install(emailPlugin)
 
             passwordPlugin = PasswordPlugin {
+                // The hash never leaves the data layer; only the verdict comes back.
                 checkPassword { user, password ->
-                    return@checkPassword BCrypt.verifyer().verify(password.toCharArray(), db.transaction { user.password }).verified
+                    return@checkPassword userRepository.verifyPassword(user.id, password)
                 }
             }
             install(passwordPlugin)
 
             totpPlugin = TotpPlugin {
-                getSecret { user -> db.transaction { user.otp!! } }
+                getSecret { user -> userRepository.otpSecret(user.id)!! }
             }
             install(totpPlugin)
         } else {
@@ -93,7 +101,7 @@ fun Application.installAuthentikt() {
 
                 onUserInfo { response, _ ->
                     val map = response.body<Map<String, String>>()
-                    val user = db.transaction { User.find { Users.email eq map["email"]!! }.firstOrNull() }
+                    val user = userRepository.findByEmail(map["email"]!!)
                     if (user == null) return@onUserInfo UserInfo.Result.Failure("user not found")
                     return@onUserInfo UserInfo.Result.Success(TrailsAuthentiktUser(user))
                 }
@@ -101,21 +109,21 @@ fun Application.installAuthentikt() {
             install(oauthPlugin)
         }
 
-        val donePlugin = DonePlugin<User> {
+        val donePlugin = DonePlugin<UserModel> {
             onSuccess { session, user ->
 
                 when (session.destination) {
                     Destination.App -> {
                         val deviceId = session.attributes[authSessionSelectedDeviceIdAttribute]
-                        val device = db.transaction { Device.findById(deviceId!!)!! }
-                        require(db.transaction { device.owner.id == user.id }) { "Device does not belong to user" }
+                        val device = deviceRepository.getById(deviceId!!)!!
+                        require(device.ownerId == user.id) { "Device does not belong to user" }
 
                         val jwt = JWT
                             .create()
                             .withAudience("trails-app")
                             .withIssuer("trails-app-server")
-                            .withClaim("user_id", user.id.value.toString())
-                            .withClaim("device_id", device.id.value.toString())
+                            .withClaim("user_id", user.id.toString())
+                            .withClaim("device_id", device.id.toString())
                             .withExpiresAt(
                                 Clock.System.now()
                                     .toLocalDateTime(TimeZone.currentSystemDefault())
@@ -125,12 +133,10 @@ fun Application.installAuthentikt() {
                             )
                             .sign(Algorithm.HMAC256(applicationConfig.jwtSecret))
 
-                        db.transaction {
-                            Session.new {
-                                this.device = device
-                                this.tokenHash = MessageDigest.getInstance("SHA-256").digest(jwt.toByteArray()).joinToString("") { "%02x".format(it) }
-                            }
-                        }
+                        sessionRepository.create(
+                            deviceId = device.id,
+                            tokenHash = MessageDigest.getInstance("SHA-256").digest(jwt.toByteArray()).joinToString("") { "%02x".format(it) },
+                        )
 
                         val url = URLBuilder(Destination.App.redirectUri).apply {
                             parameters.append("token", jwt)
@@ -144,7 +150,7 @@ fun Application.installAuthentikt() {
                             .create()
                             .withAudience("trails-webapp")
                             .withIssuer("trails-app-server")
-                            .withClaim("user_id", user.id.value.toString())
+                            .withClaim("user_id", user.id.toString())
                             .withExpiresAt(
                                 Clock.System.now()
                                     .toLocalDateTime(TimeZone.currentSystemDefault())
@@ -179,7 +185,7 @@ fun Application.installAuthentikt() {
                 when {
                     user == null -> return@authorization emailPlugin!!
                     !session.has(passwordPlugin!!) -> return@authorization passwordPlugin
-                    db.transaction { user.user.otp } != null && !session.has(totpPlugin!!) -> return@authorization totpPlugin
+                    userRepository.otpSecret(user.user.id) != null && !session.has(totpPlugin!!) -> return@authorization totpPlugin
                 }
             } else {
                 if (user == null) return@authorization oauthPlugin!!

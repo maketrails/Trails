@@ -6,17 +6,13 @@ import es.jvbabi.authentikt.core.session.Session
 import es.jvbabi.authentikt.core.session.SessionKey
 import es.jvbabi.authentikt.core.step.BaseState
 import es.jvbabi.authentikt.core.step.plugins.BasePlugin
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.database.Devices
-import es.jvbabi.trails.database.User
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.model.UserModel
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.core.eq
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.uuid.Uuid
@@ -42,48 +38,45 @@ class DeviceSelectionAuthentiktState(
     }
 }
 
-class DeviceSelectionAuthentiktPlugin: BasePlugin<User, DeviceSelectionAuthentiktState>(namespace = "trails/device-selection"), KoinComponent {
+class DeviceSelectionAuthentiktPlugin: BasePlugin<UserModel, DeviceSelectionAuthentiktState>(namespace = "trails/device-selection"), KoinComponent {
 
-    private val db by inject<DatabaseManager>()
+    private val deviceRepository by inject<DeviceRepository>()
 
     override suspend fun createState(session: Session<*>): DeviceSelectionAuthentiktState {
-        val user = session.identifiedUser!!.user as User
+        val user = session.identifiedUser!!.user as UserModel
 
         val deviceModel = session.publicAttributes[deviceModelAttribute]!!
         val deviceManufacturer = session.publicAttributes[deviceManufacturerAttribute]!!
 
-        val devices = db.transaction {
-            Device
-                .find { (Devices.owner eq user.id) and (Devices.model eq deviceModel) and (Devices.manufacturer eq deviceManufacturer) and (Devices.deletion eq null) }
-                .toList()
-                .map { device ->
-                    DeviceSelectionOption(
-                        deviceId = device.id.value.toString(),
-                        friendlyName = device.friendlyName,
-                        displayName = device.displayName,
-                        manufacturer = device.manufacturer,
-                        model = device.model,
-                        type = device.type.name,
-                        createdAt = device.createdAt.epochSeconds
-                    )
-                }
-        }
+        val devices = deviceRepository
+            .listOwnedByModel(user.id, manufacturer = deviceManufacturer, model = deviceModel)
+            .map { device ->
+                DeviceSelectionOption(
+                    deviceId = device.id.toString(),
+                    friendlyName = device.friendlyName,
+                    displayName = device.displayName,
+                    manufacturer = device.manufacturer,
+                    model = device.model,
+                    type = device.type.name,
+                    createdAt = device.createdAt.epochSeconds
+                )
+            }
 
         return DeviceSelectionAuthentiktState(devices)
     }
 
     override fun installRoutes(
         inRoute: Route,
-        authentiktInstance: AuthentiktInstance<User>
+        authentiktInstance: AuthentiktInstance<UserModel>
     ) {
         with(inRoute) {
             post("/select") {
                 val request = call.receive<DeviceSelectionRequest>()
                 val session = call.attributes[SessionKey]
-                val user = session.identifiedUser!!.user as User
-                val device = db.transaction { Device.findById(Uuid.parse(request.deviceId))!! }
-                if (db.transaction { device.owner.id } != user.id) throw Exception("Device does not belong to user")
-                if (db.transaction { device.deletion } != null) throw Exception("Device is deleted")
+                val user = session.identifiedUser!!.user as UserModel
+                val device = deviceRepository.getById(Uuid.parse(request.deviceId))!!
+                if (device.ownerId != user.id) throw Exception("Device does not belong to user")
+                if (device.isDeleted) throw Exception("Device is deleted")
                 val state = session.authenticationSteps.last().second as DeviceSelectionAuthentiktState
                 state.selectedOption = DeviceSelectionAuthentiktState.UserSelection.Selected(
                     device = state.deviceSelectionOptions.find { it.deviceId == request.deviceId }!!
@@ -96,13 +89,11 @@ class DeviceSelectionAuthentiktPlugin: BasePlugin<User, DeviceSelectionAuthentik
             post("/new-device") {
                 val request = call.receive<NewDeviceSelectionRequest>()
                 val session = call.attributes[SessionKey]
-                val user = session.identifiedUser!!.user as User
+                val user = session.identifiedUser!!.user as UserModel
 
-                val existingDeviceWithSameNameAndOwner = db.transaction {
-                    Device.find { (Devices.owner eq user.id) and (Devices.displayName eq request.name) }.firstOrNull()
-                }
+                val isNameTaken = deviceRepository.existsOwnedWithDisplayName(user.id, request.name)
 
-                if (existingDeviceWithSameNameAndOwner != null) {
+                if (isNameTaken) {
                     call.respond(buildMap { put("success", false); put("error", "name_already_exists") })
                     return@post
                 }

@@ -40,7 +40,14 @@
         if (isForeign) {
             const snapshot = subscription?.snapshot;
             if (snapshot == null) return snapshot; // undefined (loading) or null (gone)
-            return { ...snapshot, base: shareOriginBase(homeserver), homeserver };
+            return {
+                ...snapshot,
+                // A foreign homeserver that does not report presence is taken as
+                // online — see ShareSnapshot.is_online.
+                is_online: snapshot.is_online ?? true,
+                base: shareOriginBase(homeserver),
+                homeserver,
+            };
         }
 
         const local = webappSocket.shares.find((s) => s.id === shareId);
@@ -53,6 +60,7 @@
                 owner_username: local.owner_username,
                 last_location: local.last_location,
                 battery: local.battery,
+                is_online: local.is_online,
                 base: "",
                 homeserver: "",
             };

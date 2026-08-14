@@ -93,6 +93,7 @@ import es.jvbabi.trails.utils.PinSize
 import es.jvbabi.trails.utils.averageLocation
 import es.jvbabi.trails.utils.bundleOverlappingPins
 import es.jvbabi.trails.utils.bundleSpread
+import es.jvbabi.trails.ui.components.desaturated
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
 import es.jvbabi.trails.utils.ring
 import kotlin.math.ceil
@@ -102,6 +103,11 @@ import kotlin.time.Duration.Companion.seconds
 @Composable
 fun DeviceMarker(
     imageBytes: ByteArray?,
+    /**
+     * Whether the device is reachable. An unreachable one is drawn without colour, so
+     * a pin that marks a last known position rather than a current one says so.
+     */
+    isOnline: Boolean = true,
     onClick: () -> Unit,
 ) {
     val arrowShape = remember {
@@ -145,7 +151,8 @@ fun DeviceMarker(
                 contentDescription = null,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(32.dp),
+                    .size(32.dp)
+                    .desaturated(!isOnline),
             )
         }
 
@@ -260,7 +267,9 @@ fun DeviceBundleMarker(
                                 Image(
                                     bitmap = bitmap,
                                     contentDescription = null,
-                                    modifier = Modifier.size(BUNDLE_IMAGE_SIZE),
+                                    modifier = Modifier
+                                        .size(BUNDLE_IMAGE_SIZE)
+                                        .desaturated(device.onlineState?.isOnline == false),
                                 )
                             }
                         }
@@ -545,6 +554,7 @@ actual fun Map(
                                 } else {
                                     DeviceMarker(
                                         imageBytes = device.image,
+                                        isOnline = device.onlineState?.isOnline != false,
                                         onClick = { onDeviceClick(device) },
                                     )
                                 }

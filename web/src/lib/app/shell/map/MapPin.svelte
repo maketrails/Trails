@@ -1,6 +1,7 @@
 <script lang="ts">
     import {DeviceMobileIcon} from "phosphor-svelte";
     import {mapCamera} from "$lib/state/map_camera.svelte";
+    import {isTargetOnline} from "$lib/state/presence.svelte";
     import {pinPop} from "./pin_transition";
 
     let {
@@ -19,6 +20,15 @@
     // Highlighted while its device's detail page is open (see claimCameraTarget).
     let highlighted = $derived(mapCamera.targetId === id);
 
+    /*
+     * Read from the state rather than taken as a prop, like [highlighted] above: a pin
+     * is mounted imperatively and only ever moved afterwards (see upsertPin), so a
+     * prop would keep whatever it was mounted with and never follow the device going
+     * offline. [id] is a device id or an active-share id — isTargetOnline resolves
+     * both.
+     */
+    let isOnline = $derived(isTargetOnline(id));
+
     let imageAvailable = $state(true);
 
     function handleImageError() {
@@ -30,11 +40,17 @@
 </script>
 
 {#snippet pin()}
+    <!-- Offline layer: the device loses its colour and takes a step back. On its own
+         node, and not on the two below, because a scale here has to multiply with the
+         focus/hover bump instead of replacing it. -->
+    <div
+            class="origin-[50%_96.4%] transition-[scale,filter] duration-200 {isOnline ? 'scale-100 filter-none' : 'scale-90 grayscale'}"
+    >
     <!-- Outer layer: a gentle, persistent size bump while focused (and on
          hover). Inner layer: the one-shot droplet squash-&-stretch. Keeping
          them separate stops the two transforms from clobbering each other. -->
     <div
-            class="origin-[50%_96.4%] transition-transform group-hover:scale-110 {highlighted ? 'scale-[1.5]' : ''}"
+            class="origin-[50%_96.4%] transition-[scale] duration-200 group-hover:scale-110 {highlighted ? 'scale-[1.5]' : ''}"
     >
     <div
             class="relative origin-[50%_96.4%]"
@@ -85,6 +101,7 @@
                     class="absolute left-1/2 top-[45%] size-7 -translate-x-1/2 -translate-y-1/2 text-primary"
             />
         {/if}
+    </div>
     </div>
     </div>
 {/snippet}

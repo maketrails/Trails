@@ -1,9 +1,6 @@
 package es.jvbabi.trails.routes.active_share.item
 
-import es.jvbabi.trails.data.UserSubscriptionMessage
-import es.jvbabi.trails.data.UserSubscriptionRepository
-import es.jvbabi.trails.database.ActiveShare
-import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.data.ShareRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.response.*
@@ -13,42 +10,27 @@ import kotlin.uuid.Uuid
 
 /**
  * `POST /active-shares/{activeShareId}/return` — gives back a redeemed share by
- * deleting its [ActiveShare]. Capability-based and unauthenticated: holding the
+ * deleting the redemption. Capability-based and unauthenticated: holding the
  * active-share id (an unguessable UUID) is the permission, mirroring the public
  * redeem/snapshot endpoints. This is the origin-homeserver half of a return; the
  * account server separately drops its saved reference.
  *
- * Deleting the redemption deliberately does **not** touch [share.isLocked] — a
- * spent single-use share stays locked, so the link cannot be redeemed again.
+ * Deleting the redemption deliberately does **not** unlock a spent single-use
+ * share, so the link cannot be redeemed again.
  *
  * A `POST` (not `DELETE`) so a cross-homeserver browser call stays a CORS
  * "simple request" and needs no preflight; the origin is allowed application-wide
  * by `installCors`.
  */
 fun Route.returnActiveShare() {
-    val db by inject<DatabaseManager>()
-    val userSubscriptionRepository by inject<UserSubscriptionRepository>()
+    val shareRepository by inject<ShareRepository>()
 
     post {
         val activeShareId = call.parameters["activeShareId"]?.let(Uuid::parseOrNull)
             ?: return@post call.respond(HttpStatusCode.NotFound)
 
-        // Idempotent: an already-returned (missing) share is still a success. The
-        // emitting user is read before the delete so they can be notified after.
-        val emitter = db.transaction {
-            val activeShare = ActiveShare.findById(activeShareId) ?: return@transaction null
-            val share = activeShare.share
-            val emitter = share.id.value to share.device.owner.id.value
-            activeShare.delete()
-            emitter
-        }
-
-        // The redemption is gone from the emitter's share; refresh their webapp
-        // sockets so it disappears from the redemption list.
-        emitter?.let { (shareId, ownerId) ->
-            userSubscriptionRepository.getFlowForUser(ownerId)
-                .emit(UserSubscriptionMessage.EmittedSharesChanged(shareId))
-        }
+        // Idempotent: an already-returned (missing) redemption is still a success.
+        shareRepository.returnActiveShare(activeShareId)
 
         call.respond(HttpStatusCode.NoContent)
     }

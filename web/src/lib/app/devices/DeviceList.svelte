@@ -25,6 +25,8 @@
                     owner_username: snapshot.owner_username,
                     battery: snapshot.battery,
                     last_location: snapshot.last_location,
+                    // A foreign homeserver that does not report it is taken as online.
+                    is_online: snapshot.is_online ?? true,
                 },
                 homeserver: entry.homeserver,
             }];
