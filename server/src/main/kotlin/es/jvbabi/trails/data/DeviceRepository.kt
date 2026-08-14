@@ -24,6 +24,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import org.slf4j.LoggerFactory
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -64,6 +65,16 @@ data class PingAck(
 class DeviceRepository : KoinComponent {
     private val db by inject<DatabaseManager>()
     private val userRepository by inject<UserRepository>()
+
+    /**
+     * Presence is the only state here that lives nowhere but in memory, so a
+     * transition that is not written down is unobservable afterwards — there is no row
+     * to look at and no history to reconstruct it from. That makes these two lines the
+     * only way to tell "the server never noticed" from "the server noticed and the
+     * client did not hear", which is the question every report about a device stuck
+     * online comes down to.
+     */
+    private val presenceLogger = LoggerFactory.getLogger("DevicePresence")
 
     private val events = mutableMapOf<Uuid, MutableSharedFlow<DeviceEvent>>()
     private val eventsMutex = Mutex()
@@ -246,7 +257,10 @@ class DeviceRepository : KoinComponent {
             presence[deviceId] = DevicePresence(connections = connections, since = since)
             current?.isOnline != true
         }
-        if (cameOnline) publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = true, since = presenceOf(deviceId)?.since))
+        if (cameOnline) {
+            presenceLogger.info("Device {} is online", deviceId)
+            publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = true, since = presenceOf(deviceId)?.since))
+        }
     }
 
     /**
@@ -256,6 +270,11 @@ class DeviceRepository : KoinComponent {
     suspend fun disconnected(deviceId: Uuid) {
         val wentOffline = presenceMutex.withLock {
             val current = presence[deviceId] ?: return@withLock false
+            // Already at zero: a connection was given back twice, or one was never
+            // counted. Reporting offline again would be a lie about a device that may
+            // well be online through another connection by now.
+            if (!current.isOnline) return@withLock false
+
             if (current.connections > 1) {
                 presence[deviceId] = current.copy(connections = current.connections - 1)
                 false
@@ -264,7 +283,10 @@ class DeviceRepository : KoinComponent {
                 true
             }
         }
-        if (wentOffline) publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = false, since = presenceOf(deviceId)?.since))
+        if (wentOffline) {
+            presenceLogger.info("Device {} is offline", deviceId)
+            publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = false, since = presenceOf(deviceId)?.since))
+        }
     }
 
     /** Whether the device is connected to the service right now. */
