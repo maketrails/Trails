@@ -1,0 +1,10 @@
+{
+  "title": "Shares show their homeserver",
+  "description": "A device someone shared with you now says where it comes from: the owner is named with their homeserver, as testuser@trails.example.com, both in the list of shares and on the share's detail page. Accounts with the same name on different homeservers can be told apart that way.",
+  "localized": {
+    "de": {
+      "title": "Freigaben zeigen ihren Homeserver",
+      "description": "Ein Gerät, das jemand mit dir geteilt hat, zeigt jetzt, woher es kommt: Der Besitzer wird samt Homeserver genannt, also testuser@trails.example.com — in der Liste der Freigaben und auf der Detailseite der Freigabe. Damit lassen sich gleichnamige Konten auf verschiedenen Homeservern unterscheiden."
+    }
+  }
+}
