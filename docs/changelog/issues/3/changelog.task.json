@@ -1,0 +1,8 @@
+{
+  "description": "The list of your own shares now shows each share's settings as tags and its redemption count as a compact badge.",
+  "localized": {
+    "de": {
+      "description": "Die Liste deiner eigenen Freigaben zeigt die Einstellungen jeder Freigabe jetzt als Tags und die Anzahl der Einlösungen als kompaktes Badge."
+    }
+  }
+}
