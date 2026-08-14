@@ -62,6 +62,16 @@ class DeviceRepository : KoinComponent {
     private val pendingPings = mutableMapOf<Uuid, CompletableDeferred<PingAck>>()
     private val pendingPingsMutex = Mutex()
 
+    /**
+     * How many open connections each device holds; a device with an entry is online.
+     *
+     * Counted rather than flagged: an app that reconnects can briefly hold the old
+     * and the new connection at once, and closing the old one must not report the
+     * device as offline while the new one is already live.
+     */
+    private val connections = mutableMapOf<Uuid, Int>()
+    private val connectionsMutex = Mutex()
+
     companion object {
         /** How long a ping waits before it counts as unanswered. */
         val PING_TIMEOUT: Duration = 5.seconds
@@ -195,6 +205,56 @@ class DeviceRepository : KoinComponent {
         userRepository.publish(UserEvent.DeviceRemoved(userId = ownerId, deletion = deletion))
         return deletion
     }
+
+    // --- presence ---------------------------------------------------------
+
+    /**
+     * Registers one open connection of a device and announces it as online if it is
+     * its first.
+     *
+     * Presence lives in memory and nowhere else: it describes connections to *this*
+     * process, and none of them survives a restart. Every device therefore counts as
+     * offline right after a start and turns online again the moment its app
+     * reconnects — there is nothing to reconcile with the database, and a crash
+     * cannot leave a device marked online forever.
+     */
+    suspend fun connected(deviceId: Uuid) {
+        val cameOnline = connectionsMutex.withLock {
+            val count = connections[deviceId] ?: 0
+            connections[deviceId] = count + 1
+            count == 0
+        }
+        if (cameOnline) publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = true))
+    }
+
+    /**
+     * Gives one connection back and announces the device as offline once its last one
+     * is gone.
+     */
+    suspend fun disconnected(deviceId: Uuid) {
+        val wentOffline = connectionsMutex.withLock {
+            val count = connections[deviceId] ?: return@withLock false
+            if (count > 1) {
+                connections[deviceId] = count - 1
+                false
+            } else {
+                connections.remove(deviceId)
+                true
+            }
+        }
+        if (wentOffline) publish(DeviceEvent.OnlineStateChanged(deviceId, isOnline = false))
+    }
+
+    /** Whether the device is connected to the service right now. */
+    suspend fun isOnline(deviceId: Uuid): Boolean =
+        connectionsMutex.withLock { connections.containsKey(deviceId) }
+
+    /**
+     * Every device that is connected right now. Read once for a caller describing a
+     * whole list, so all of them are answered as of the same moment instead of each
+     * asking on its own.
+     */
+    suspend fun onlineDevices(): Set<Uuid> = connectionsMutex.withLock { connections.keys.toSet() }
 
     // --- ping and ring ----------------------------------------------------
 

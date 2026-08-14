@@ -38,6 +38,18 @@ sealed interface DeviceEvent {
         override val deviceId: Uuid get() = snapshot.deviceId
     }
 
+    /**
+     * The device gained or lost its connection to the service.
+     *
+     * Presence is held in memory (see [es.jvbabi.trails.data.DeviceRepository]), so
+     * this is a live signal and never a stored fact: after a restart every device is
+     * offline until its app connects again.
+     */
+    data class OnlineStateChanged(
+        override val deviceId: Uuid,
+        val isOnline: Boolean,
+    ) : DeviceEvent
+
     /** Someone asked the device to report back once, so it can be located. */
     data class PingRequested(
         override val deviceId: Uuid,

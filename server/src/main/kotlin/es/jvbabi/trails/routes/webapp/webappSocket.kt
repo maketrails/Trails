@@ -18,7 +18,7 @@ import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
@@ -74,10 +74,14 @@ fun Route.webappSocket() {
             }
 
             suspend fun sendDevices() {
+                // Read once, so every device in this list is described as of the same
+                // moment instead of each asking on its own.
+                val onlineDeviceIds = deviceRepository.onlineDevices()
                 val devices = deviceRepository.listOwnedBy(user.id).map { device ->
                     WebAppSocketServerMessage.DevicesUpdate.Device.of(
                         device = device,
                         snapshot = trackRepository.latestSnapshot(device.id),
+                        isOnline = device.id in onlineDeviceIds,
                     )
                 }
 
@@ -157,13 +161,22 @@ fun Route.webappSocket() {
                 )
             }
 
-            // Follow one device and re-send the list whenever it reports a new
-            // position — location and battery are part of what is shown.
-            fun subscribeToDevice(deviceId: Uuid) {
+            /**
+             * Follow one device and re-send the list whenever what is shown about it
+             * changes.
+             *
+             * [includePresence] holds for the user's own devices only: a share does not
+             * reveal whether its device is reachable, so a shared device coming or going
+             * would re-send an identical list — reverse geocoding and all.
+             */
+            fun subscribeToDevice(deviceId: Uuid, includePresence: Boolean) {
                 if (deviceSubscriptions[deviceId]?.isActive == true) return
                 deviceSubscriptions[deviceId] = launch {
                     deviceRepository.events(deviceId)
-                        .filterIsInstance<DeviceEvent.SnapshotAdded>()
+                        .filter {
+                            it is DeviceEvent.SnapshotAdded ||
+                                    (includePresence && it is DeviceEvent.OnlineStateChanged)
+                        }
                         .onEach { sendDevices() }
                         .collect()
                 }
@@ -174,10 +187,10 @@ fun Route.webappSocket() {
 
             // Own devices, and the devices behind the saved shares: a position of
             // either changes what this page draws.
-            deviceRepository.listOwnedBy(user.id).forEach { subscribeToDevice(it.id) }
+            deviceRepository.listOwnedBy(user.id).forEach { subscribeToDevice(it.id, includePresence = true) }
             shareRepository.listSavedBy(user.id).forEach { savedShare ->
                 val shared = shareRepository.getSharedDevice(savedShare.activeShareId) ?: return@forEach
-                subscribeToDevice(shared.device.id)
+                subscribeToDevice(shared.device.id, includePresence = false)
             }
 
             // Re-send the whole list whenever *which* things exist changes, and keep
@@ -186,7 +199,8 @@ fun Route.webappSocket() {
                 userRepository.events(user.id)
                     .onEach { event ->
                         when (event) {
-                            is UserEvent.DeviceChanged -> subscribeToDevice(event.device.id)
+                            is UserEvent.DeviceChanged ->
+                                subscribeToDevice(event.device.id, includePresence = true)
                             is UserEvent.DeviceRemoved ->
                                 deviceSubscriptions.remove(event.deletion.deviceId)?.cancel()
                             is UserEvent.SavedSharesChanged -> {}
@@ -239,18 +253,27 @@ sealed class WebAppSocketServerMessage {
             @SerialName("display_name") val displayName: String,
             @SerialName("battery") val battery: Battery?,
             @SerialName("last_location") val lastLocation: LastLocation?,
+            /**
+             * Whether the device is reachable right now. A device that is offline
+             * still carries its last known position — that is precisely when it
+             * matters.
+             */
+            @SerialName("is_online") val isOnline: Boolean,
         ) {
             companion object {
                 /**
                  * [snapshot] is where the device was last seen, or null if it never
                  * reported — the position and the charge level both come from it.
+                 * [isOnline] is handed in because presence is not stored with the
+                 * device; only the repository knows it.
                  */
-                fun of(device: DeviceModel, snapshot: SnapshotModel?) = Device(
+                fun of(device: DeviceModel, snapshot: SnapshotModel?, isOnline: Boolean) = Device(
                     id = device.id,
                     manufacturer = device.manufacturer,
                     model = device.model,
                     friendlyName = device.friendlyName,
                     displayName = device.displayName,
+                    isOnline = isOnline,
                     battery = snapshot?.battery?.let { Battery(it.percentage, it.isCharging) },
                     lastLocation = snapshot?.let {
                         LastLocation(
