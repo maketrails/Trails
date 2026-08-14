@@ -84,6 +84,12 @@ export interface Share {
     owner_username: string;
     battery: Battery | null;
     last_location: LastLocation | null;
+    /**
+     * Whether the shared device is reachable right now — see {@link Device.isOnline}.
+     * A share hands this out unconditionally: it says whether the position shown is
+     * current or the last thing known, which is not something to opt into.
+     */
+    is_online: boolean;
 }
 
 /** The main label shown for a shared device: the device's friendly name plus

@@ -1,6 +1,7 @@
 <script lang="ts">
     import {DeviceMobileIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
+    import {isTargetOnline} from "$lib/state/presence.svelte";
     import {
         BUNDLE_AVATAR_SIZE,
         BUNDLE_BORDER,
@@ -36,6 +37,7 @@
 
     // Members whose device image failed to load; those fall back to a generic icon.
     let failed = $state<Record<string, boolean>>({});
+
 </script>
 
 <!-- Pivoted on the pointer's tip, so the pill grows out of the spot its members
@@ -58,21 +60,27 @@
             <a
                     href={item.href}
                     aria-label={item.label}
-                    class="block shrink-0 overflow-hidden rounded-full transition-transform hover:scale-110"
+                    class="block shrink-0 overflow-hidden rounded-full transition-[scale] duration-200 hover:scale-110"
                     style:width="{BUNDLE_AVATAR_SIZE}px"
                     style:height="{BUNDLE_AVATAR_SIZE}px"
                     style:padding="{AVATAR_INSET}px"
             >
-                {#if failed[item.id]}
-                    <DeviceMobileIcon class="size-full p-1 text-primary"/>
-                {:else}
-                    <img
-                            src={item.imageUrl}
-                            alt=""
-                            class="size-full object-contain"
-                            onerror={() => (failed[item.id] = true)}
-                    />
-                {/if}
+                <!-- The offline treatment sits inside the link, so its scale multiplies
+                     with the hover bump above instead of being replaced by it. -->
+                <div
+                        class="size-full transition-[scale,filter] duration-200 {isTargetOnline(item.id) ? 'scale-100 filter-none' : 'scale-90 grayscale'}"
+                >
+                    {#if failed[item.id]}
+                        <DeviceMobileIcon class="size-full p-1 text-primary"/>
+                    {:else}
+                        <img
+                                src={item.imageUrl}
+                                alt=""
+                                class="size-full object-contain"
+                                onerror={() => (failed[item.id] = true)}
+                        />
+                    {/if}
+                </div>
             </a>
         {/each}
     </div>

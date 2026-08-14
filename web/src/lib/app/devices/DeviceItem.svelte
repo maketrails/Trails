@@ -11,6 +11,15 @@
         device: Device
     } = $props();
 
+    /*
+     * An offline device is shown dimmed, and its image loses its colour: what it says
+     * is the last thing known about it, not where it is now. The label itself stays at
+     * full strength — it is the explanation for the dimming, so it must not be dimmed
+     * along with it.
+     */
+    let dimmed = $derived(device.isOnline ? "" : "opacity-60");
+    let dimmedImage = $derived(device.isOnline ? "" : "grayscale opacity-60");
+
     let imageAvailable = $state(true);
 
     function handleImageError() {
@@ -42,7 +51,7 @@
 
 <a class="flex flex-row gap-3 items-center transition-colors duration-100 hover:bg-foreground/10 cursor-pointer py-3 pl-2 pr-4 rounded-2xl"
    href={`/devices/${device.id}`}>
-    <div class="size-10 bg-accent rounded-full flex items-center justify-center">
+    <div class="size-10 bg-accent rounded-full flex items-center justify-center transition-[filter,opacity] duration-200 {dimmedImage}">
         {#if imageAvailable}
             <img
                     src={`/api/v1/devices/image/${device.manufacturer}-${device.model}`}
@@ -56,18 +65,27 @@
     </div>
 
     <div class="flex flex-col flex-1 min-w-0">
-        <span class="font-lg">{device.name}</span>
+        <div class="flex flex-row items-center gap-1.5 min-w-0">
+            <span class="font-lg truncate transition-opacity duration-200 {dimmed}">{device.name}</span>
+
+            {#if !device.isOnline}
+                <span class="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-4 text-muted-foreground">
+                    {$_("devices.offline")}
+                </span>
+            {/if}
+        </div>
+
         {#if device.hasCustomName}
-            <span class="text-xs font-light text-muted-foreground">
+            <span class="text-xs font-light text-muted-foreground transition-opacity duration-200 {dimmed}">
                 {device.modelName}
             </span>
         {/if}
-        <span class="text-xs font-light text-muted-foreground truncate">
+        <span class="text-xs font-light text-muted-foreground truncate transition-opacity duration-200 {dimmed}">
             {locationText}
         </span>
     </div>
 
-    <div>
+    <div class="transition-[filter,opacity] duration-200 {dimmedImage}">
         {#if device.battery}
             <BatteryIcon
                     height={16}

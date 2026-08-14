@@ -28,6 +28,14 @@
         shareOwnerHandle(share.owner_username, homeserver || ($currentUser?.homeserver ?? ""))
     );
 
+    /*
+     * An offline device is shown dimmed and its image loses its colour: what the row
+     * says is the last thing known about it, not where it is now. The label itself
+     * stays at full strength — it is the explanation for the dimming.
+     */
+    let dimmed = $derived(share.is_online ? "" : "opacity-60");
+    let dimmedImage = $derived(share.is_online ? "" : "grayscale opacity-60");
+
     let imageAvailable = $state(true);
 
     function handleImageError() {
@@ -61,7 +69,7 @@
      identifier the client has for a share). -->
 <a class="flex flex-row gap-3 items-center transition-colors duration-100 hover:bg-foreground/10 cursor-pointer py-3 pl-2 pr-4 rounded-md"
    href={href}>
-    <div class="size-10 bg-accent rounded-full flex items-center justify-center">
+    <div class="size-10 bg-accent rounded-full flex items-center justify-center transition-[filter,opacity] duration-200 {dimmedImage}">
         {#if imageAvailable}
             <img
                     src={`${base}/api/v1/devices/image/${share.manufacturer}-${share.model}`}
@@ -78,16 +86,27 @@
          device on top, who it comes from underneath. The handle carries the origin
          homeserver, which is the only thing telling two same-named owners apart. -->
     <div class="flex flex-col flex-1 min-w-0">
-        <span class="font-medium truncate leading-tight">{share.device_friendly_name}</span>
-        <span class="text-xs font-light text-muted-foreground truncate">
+        <div class="flex flex-row items-center gap-1.5 min-w-0">
+            <span class="font-medium truncate leading-tight transition-opacity duration-200 {dimmed}">
+                {share.device_friendly_name}
+            </span>
+
+            {#if !share.is_online}
+                <span class="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-4 text-muted-foreground">
+                    {$_("devices.offline")}
+                </span>
+            {/if}
+        </div>
+
+        <span class="text-xs font-light text-muted-foreground truncate transition-opacity duration-200 {dimmed}">
             {$_("shares.owner", {values: {owner: ownerHandle}})}
         </span>
-        <span class="text-xs font-light text-muted-foreground truncate">
+        <span class="text-xs font-light text-muted-foreground truncate transition-opacity duration-200 {dimmed}">
             {locationText}
         </span>
     </div>
 
-    <div>
+    <div class="transition-[filter,opacity] duration-200 {dimmedImage}">
         {#if share.battery}
             <BatteryIcon
                     height={16}

@@ -72,6 +72,7 @@
     "title": "Geräte",
     "not_found": "Gerät nicht gefunden.",
     "never_seen": "Noch nie gesehen",
+    "offline": "Offline",
     "just_now": "gerade eben",
     "place_and_time": "{place} · {time}",
     "history_unavailable": "Verlauf nicht verfügbar",

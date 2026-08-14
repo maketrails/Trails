@@ -10,6 +10,15 @@ export interface ShareSnapshot {
     owner_username: string;
     last_location: LastLocation | null;
     battery: Battery | null;
+    /**
+     * Whether the shared device is reachable right now.
+     *
+     * Optional, unlike on a same-server share: this snapshot comes from a *foreign*
+     * homeserver, which is its own deployment and may predate the field. Absent means
+     * "that server does not say", which is read as online — claiming a device is
+     * offline because its homeserver is old would be a lie.
+     */
+    is_online?: boolean;
 }
 
 type ServerMessage =

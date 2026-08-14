@@ -72,6 +72,7 @@
     "title": "Devices",
     "not_found": "Device not found.",
     "never_seen": "Never seen",
+    "offline": "Offline",
     "just_now": "just now",
     "place_and_time": "{place} · {time}",
     "history_unavailable": "History unavailable",
