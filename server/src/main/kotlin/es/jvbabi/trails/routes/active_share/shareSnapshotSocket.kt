@@ -1,5 +1,6 @@
 package es.jvbabi.trails.routes.active_share
 
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.ReverseGeocoding
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
@@ -35,13 +36,20 @@ fun Route.shareSnapshotSocket() {
     val reverseGeocoding by inject<ReverseGeocoding>()
     val shareRepository by inject<ShareRepository>()
     val trackRepository by inject<TrackRepository>()
+    val deviceRepository by inject<DeviceRepository>()
 
     webSocket {
         // One live-update collector job per subscribed active-share id.
         val subscriptions = mutableMapOf<Uuid, Job>()
 
         suspend fun pushSnapshot(activeShareId: Uuid) {
-            val snapshot = buildShareSnapshot(shareRepository, trackRepository, reverseGeocoding, activeShareId)
+            val snapshot = buildShareSnapshot(
+                shareRepository = shareRepository,
+                trackRepository = trackRepository,
+                deviceRepository = deviceRepository,
+                reverseGeocoding = reverseGeocoding,
+                activeShareId = activeShareId,
+            )
             if (snapshot != null) {
                 sendSerialized<ShareSocketServerMessage>(
                     ShareSocketServerMessage.Snapshot(activeShareId.toString(), snapshot)
@@ -65,6 +73,9 @@ fun Route.shareSnapshotSocket() {
                             // snapshot carries the whole shared device, and the
                             // position is only part of it.
                             is ActiveShareEvent.SnapshotAdded -> pushSnapshot(activeShareId)
+                            // The snapshot carries whether the device is reachable, so
+                            // a connection coming or going is a new snapshot.
+                            is ActiveShareEvent.OnlineStateChanged -> pushSnapshot(activeShareId)
                             is ActiveShareEvent.Gone -> sendSerialized<ShareSocketServerMessage>(
                                 ShareSocketServerMessage.Gone(activeShareId.toString())
                             )

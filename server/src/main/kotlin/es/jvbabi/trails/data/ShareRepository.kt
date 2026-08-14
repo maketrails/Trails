@@ -22,6 +22,7 @@ import es.jvbabi.trails.database.UserShare
 import es.jvbabi.trails.database.UserShares
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -62,10 +63,9 @@ sealed interface ShareRedeemResult {
  *
  * Where [DeviceRepository] owns a device, this owns the permission to watch one —
  * and it *subscribes* to the device to serve that permission: a holder of a
- * redemption never sees the device's own stream, only
- * [activeShareEvents], which forwards what the share's settings allow. That
- * filtering lives here, so no consumer has to know the rules or be trusted to
- * apply them.
+ * redemption never sees the device's own stream, only [activeShareEvents], which
+ * forwards the part a share hands out. That filtering lives here, so no consumer has
+ * to know the rules or be trusted to apply them.
  */
 class ShareRepository : KoinComponent {
     private val db by inject<DatabaseManager>()
@@ -422,6 +422,8 @@ class ShareRepository : KoinComponent {
                             send(ActiveShareEvent.Gone(wasDeviceRemoved = true))
                             close()
                         }
+                        is DeviceEvent.OnlineStateChanged ->
+                            send(ActiveShareEvent.OnlineStateChanged(event.isOnline))
                         // A rename, a ring, a ping: the device's own affairs, and
                         // nothing a share hands out.
                         else -> {}
@@ -442,7 +444,18 @@ class ShareRepository : KoinComponent {
     }
 
     private suspend fun flowFor(shareId: Uuid): MutableSharedFlow<ShareEvent> =
-        eventsMutex.withLock { events.getOrPut(shareId) { MutableSharedFlow() } }
+        eventsMutex.withLock { events.getOrPut(shareId) { MutableSharedFlow(
+            // Buffered and dropping, so publishing never waits on a subscriber. An
+            // unbuffered flow suspends the *publisher* until every collector has taken
+            // the value — one webapp socket busy re-sending its list (reverse geocoding
+            // included) would hold up the device going offline for everyone else.
+            //
+            // Dropping is safe because these are signals, not a log: every consumer
+            // re-reads the current state when it hears one, so a dropped event costs at
+            // most one redundant re-send, and the next one still carries the truth.
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        ) } }
 
     private suspend fun announceChange(share: ShareModel) {
         publish(ShareEvent.Changed(share))

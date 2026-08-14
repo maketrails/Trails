@@ -95,6 +95,7 @@ fun Route.webappSocket() {
                     // reading, and the share decides whether the latter comes with it.
                     val snapshot = trackRepository.latestSnapshot(shared.device.id)?.forShare(shared.share)
                     WebAppSocketServerMessage.DevicesUpdate.Share(
+                        isOnline = shared.device.id in onlineDeviceIds,
                         id = shared.activeShare.id,
                         name = shared.share.shareName,
                         manufacturer = shared.device.manufacturer,
@@ -165,18 +166,14 @@ fun Route.webappSocket() {
              * Follow one device and re-send the list whenever what is shown about it
              * changes.
              *
-             * [includePresence] holds for the user's own devices only: a share does not
-             * reveal whether its device is reachable, so a shared device coming or going
-             * would re-send an identical list — reverse geocoding and all.
+             * Presence counts as a change like a position does — for shared devices too,
+             * since a share hands out whether its device is reachable.
              */
-            fun subscribeToDevice(deviceId: Uuid, includePresence: Boolean) {
+            fun subscribeToDevice(deviceId: Uuid) {
                 if (deviceSubscriptions[deviceId]?.isActive == true) return
                 deviceSubscriptions[deviceId] = launch {
                     deviceRepository.events(deviceId)
-                        .filter {
-                            it is DeviceEvent.SnapshotAdded ||
-                                    (includePresence && it is DeviceEvent.OnlineStateChanged)
-                        }
+                        .filter { it is DeviceEvent.SnapshotAdded || it is DeviceEvent.OnlineStateChanged }
                         .onEach { sendDevices() }
                         .collect()
                 }
@@ -187,10 +184,10 @@ fun Route.webappSocket() {
 
             // Own devices, and the devices behind the saved shares: a position of
             // either changes what this page draws.
-            deviceRepository.listOwnedBy(user.id).forEach { subscribeToDevice(it.id, includePresence = true) }
+            deviceRepository.listOwnedBy(user.id).forEach { subscribeToDevice(it.id) }
             shareRepository.listSavedBy(user.id).forEach { savedShare ->
                 val shared = shareRepository.getSharedDevice(savedShare.activeShareId) ?: return@forEach
-                subscribeToDevice(shared.device.id, includePresence = false)
+                subscribeToDevice(shared.device.id)
             }
 
             // Re-send the whole list whenever *which* things exist changes, and keep
@@ -199,11 +196,16 @@ fun Route.webappSocket() {
                 userRepository.events(user.id)
                     .onEach { event ->
                         when (event) {
-                            is UserEvent.DeviceChanged ->
-                                subscribeToDevice(event.device.id, includePresence = true)
+                            is UserEvent.DeviceChanged -> subscribeToDevice(event.device.id)
                             is UserEvent.DeviceRemoved ->
                                 deviceSubscriptions.remove(event.deletion.deviceId)?.cancel()
-                            is UserEvent.SavedSharesChanged -> {}
+                            // A share saved just now brings a device with it that
+                            // nothing is following yet — without this its positions and
+                            // its presence would only arrive after a reconnect.
+                            is UserEvent.SavedSharesChanged -> {
+                                val shared = shareRepository.getSharedDevice(event.activeShareId)
+                                if (shared != null) subscribeToDevice(shared.device.id)
+                            }
                             is UserEvent.EmittedSharesChanged -> {}
                             // Progress has its own socket; re-sending the device list
                             // (reverse geocoding included) for every batch would tie a
@@ -328,6 +330,8 @@ sealed class WebAppSocketServerMessage {
             @SerialName("owner_username") val ownerUsername: String,
             @SerialName("battery") val battery: Device.Battery?,
             @SerialName("last_location") val lastLocation: Device.LastLocation?,
+            /** Whether the shared device is reachable right now, see [Device.isOnline]. */
+            @SerialName("is_online") val isOnline: Boolean,
         )
 
         /**

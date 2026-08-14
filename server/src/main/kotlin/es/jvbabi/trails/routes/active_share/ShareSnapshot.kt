@@ -1,5 +1,6 @@
 package es.jvbabi.trails.routes.active_share
 
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.ReverseGeocoding
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
@@ -21,6 +22,11 @@ data class ShareSnapshotResponse(
     @SerialName("owner_username") val ownerUsername: String,
     @SerialName("last_location") val lastLocation: LastLocation?,
     @SerialName("battery") val battery: Battery?,
+    /**
+     * Whether the shared device is reachable right now. Part of the position, in
+     * effect: it says whether what is shown is current or the last thing known.
+     */
+    @SerialName("is_online") val isOnline: Boolean,
 ) {
     @Serializable
     data class Battery(
@@ -60,6 +66,7 @@ data class ShareSnapshotResponse(
 suspend fun buildShareSnapshot(
     shareRepository: ShareRepository,
     trackRepository: TrackRepository,
+    deviceRepository: DeviceRepository,
     reverseGeocoding: ReverseGeocoding,
     activeShareId: Uuid,
 ): ShareSnapshotResponse? {
@@ -82,6 +89,7 @@ suspend fun buildShareSnapshot(
         battery = snapshot?.battery?.let {
             ShareSnapshotResponse.Battery(percentage = it.percentage, isCharging = it.isCharging)
         },
+        isOnline = deviceRepository.isOnline(shared.device.id),
     )
 
     val enriched = base.lastLocation?.let { location ->

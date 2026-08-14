@@ -451,6 +451,9 @@ private fun ActiveShareEvent.toAppMessage(activeShareId: Uuid): TrailsWebSocketS
     // The app is told what a share reveals, not how it is configured; the next
     // position already reflects the change.
     is ActiveShareEvent.SettingsChanged -> null
+
+    // Only the web app shows presence so far; the app has no message for it.
+    is ActiveShareEvent.OnlineStateChanged -> null
 }
 
 /** What the account itself sends to this connection. */

@@ -46,6 +46,15 @@ sealed interface ActiveShareEvent {
     data class SettingsChanged(val share: ShareModel) : ActiveShareEvent
 
     /**
+     * The shared device gained or lost its connection.
+     *
+     * Part of what a share reveals: a holder seeing a position needs to know whether
+     * it is current or the last thing known. Unconditional — unlike the charge level,
+     * this is not something a share opts into.
+     */
+    data class OnlineStateChanged(val isOnline: Boolean) : ActiveShareEvent
+
+    /**
      * The redemption stopped existing: it was given back, its share was deleted, or
      * the shared device was removed. Terminal, and nothing follows it.
      *

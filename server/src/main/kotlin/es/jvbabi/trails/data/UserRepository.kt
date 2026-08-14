@@ -7,6 +7,7 @@ import es.jvbabi.trails.data.model.toModel
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.User
 import es.jvbabi.trails.database.Users
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.sync.Mutex
@@ -75,5 +76,16 @@ class UserRepository : KoinComponent {
     }
 
     private suspend fun flowFor(userId: Uuid): MutableSharedFlow<UserEvent> =
-        eventsMutex.withLock { events.getOrPut(userId) { MutableSharedFlow() } }
+        eventsMutex.withLock { events.getOrPut(userId) { MutableSharedFlow(
+            // Buffered and dropping, so publishing never waits on a subscriber. An
+            // unbuffered flow suspends the *publisher* until every collector has taken
+            // the value — one webapp socket busy re-sending its list (reverse geocoding
+            // included) would hold up the device going offline for everyone else.
+            //
+            // Dropping is safe because these are signals, not a log: every consumer
+            // re-reads the current state when it hears one, so a dropped event costs at
+            // most one redundant re-send, and the next one still carries the truth.
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        ) } }
 }

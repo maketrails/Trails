@@ -14,6 +14,7 @@ import es.jvbabi.trails.database.Session
 import es.jvbabi.trails.database.User
 import es.jvbabi.trails.shared.dto.websocket.PingSource
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.sync.Mutex
@@ -355,7 +356,18 @@ class DeviceRepository : KoinComponent {
     }
 
     private suspend fun flowFor(deviceId: Uuid): MutableSharedFlow<DeviceEvent> =
-        eventsMutex.withLock { events.getOrPut(deviceId) { MutableSharedFlow() } }
+        eventsMutex.withLock { events.getOrPut(deviceId) { MutableSharedFlow(
+            // Buffered and dropping, so publishing never waits on a subscriber. An
+            // unbuffered flow suspends the *publisher* until every collector has taken
+            // the value — one webapp socket busy re-sending its list (reverse geocoding
+            // included) would hold up the device going offline for everyone else.
+            //
+            // Dropping is safe because these are signals, not a log: every consumer
+            // re-reads the current state when it hears one, so a dropped event costs at
+            // most one redundant re-send, and the next one still carries the truth.
+            extraBufferCapacity = 64,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        ) } }
 
     /** A change to the device itself is both its own event and a change to its owner's list. */
     private suspend fun announceChange(device: DeviceModel) {
