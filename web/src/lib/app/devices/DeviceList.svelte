@@ -69,12 +69,15 @@
     {#if webappSocket.emittedShares.length > 0}
         <h1 class="text-sm font-semibold mt-1 px-6 text-accent-foreground">{$_("emitted_shares.title")}</h1>
 
-        <div class="px-3 pb-2 ">
+        <div class="px-3 pb-2">
             <div class="flex flex-col rounded-4xl bg-card overflow-hidden">
                 {#each webappSocket.emittedShares as share, index (share.id)}
-                    <div class="border-gray-300" class:border-t={index > 0}>
-                        <EmittedShareItem share={share}/>
-                    </div>
+                    {#if index > 0}
+                        <div class="px-6 w-full h-px">
+                            <div class="w-full h-full bg-border"></div>
+                        </div>
+                    {/if}
+                    <EmittedShareItem share={share}/>
                 {/each}
             </div>
         </div>
