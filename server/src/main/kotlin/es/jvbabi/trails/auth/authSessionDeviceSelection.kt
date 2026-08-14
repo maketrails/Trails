@@ -3,15 +3,8 @@ package es.jvbabi.trails.auth
 import es.jvbabi.authentikt.core.session.Session
 import es.jvbabi.authentikt.core.step.plugins.BasePlugin
 import es.jvbabi.trails.data.DeviceInformationRepository
-import es.jvbabi.trails.data.UserSubscriptionMessage
-import es.jvbabi.trails.data.UserSubscriptionRepository
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.database.DeviceType
-import es.jvbabi.trails.database.Devices
-import es.jvbabi.trails.database.User
-import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.core.eq
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.model.UserModel
 import org.koin.core.context.GlobalContext
 import kotlin.uuid.Uuid
 
@@ -20,15 +13,16 @@ import kotlin.uuid.Uuid
  * create it and add it to the user's devices. If it may be already existing, we need to ask the user to select it.
  * Otherwise, we create a new one. If the user has already selected a device, we just return null.
  *
+ * Linking a device is a write like any other, so it goes through
+ * [DeviceRepository.create] — which is also what tells the user's other sessions
+ * about it, without this having to remember to.
+ *
  * @return The next authentication step we would want to go to get more device information or just null if we're done.
  */
-suspend fun authSessionDeviceSelection(session: Session<User>, user: User): BasePlugin<User, *>? {
-    val db = GlobalContext.get().get<DatabaseManager>()
+suspend fun authSessionDeviceSelection(session: Session<UserModel>, user: UserModel): BasePlugin<UserModel, *>? {
     val deviceSelectionAuthentiktPlugin = GlobalContext.get().get<DeviceSelectionAuthentiktPlugin>()
     val deviceInformationRepository = GlobalContext.get().get<DeviceInformationRepository>()
-
-    val userSubscriptionRepository = GlobalContext.get().get<UserSubscriptionRepository>()
-    val userFlow = userSubscriptionRepository.getFlowForUser(user.id.value)
+    val deviceRepository = GlobalContext.get().get<DeviceRepository>()
 
     val deviceModel = session.publicAttributes[deviceModelAttribute]
     val deviceManufacturer = session.publicAttributes[deviceManufacturerAttribute]
@@ -36,10 +30,8 @@ suspend fun authSessionDeviceSelection(session: Session<User>, user: User): Base
 
     if (authSessionDeviceId != null) return null
 
-    val existingDevices = if (deviceManufacturer != null && deviceModel != null) db.transaction {
-        Device
-            .find { (Devices.owner eq user.id) and (Devices.model eq deviceModel) and (Devices.manufacturer eq deviceManufacturer) and (Devices.deletion eq null) }
-            .toList()
+    val existingDevices = if (deviceManufacturer != null && deviceModel != null) {
+        deviceRepository.listOwnedByModel(user.id, manufacturer = deviceManufacturer, model = deviceModel)
     } else emptyList()
 
     val deviceInformation = if (deviceManufacturer != null && deviceModel != null) {
@@ -57,19 +49,14 @@ suspend fun authSessionDeviceSelection(session: Session<User>, user: User): Base
             }
 
             is DeviceSelectionAuthentiktState.UserSelection.NewDevice -> {
-                val device = db.transaction {
-                    Device.new {
-                        this.owner = user
-                        this.manufacturer = manufacturer
-                        this.model = deviceInformation?.model ?: deviceModel ?: "Unknown"
-                        this.friendlyName = friendlyName
-                        this.displayName = userSelection.name
-                        this.owner = user
-                        this.type = DeviceType.Phone
-                    }
-                }
-                userFlow.emit(UserSubscriptionMessage.DeviceUpdated(device))
-                session.attributes[authSessionSelectedDeviceIdAttribute] = device.id.value
+                val device = deviceRepository.create(
+                    ownerId = user.id,
+                    manufacturer = manufacturer,
+                    model = deviceInformation?.model ?: deviceModel ?: "Unknown",
+                    friendlyName = friendlyName,
+                    displayName = userSelection.name,
+                ) ?: return deviceSelectionAuthentiktPlugin
+                session.attributes[authSessionSelectedDeviceIdAttribute] = device.id
                 return null
             }
 
@@ -81,19 +68,14 @@ suspend fun authSessionDeviceSelection(session: Session<User>, user: User): Base
     }
 
     if (existingDevices.isEmpty()) {
-        val device = db.transaction {
-            Device.new {
-                this.owner = user
-                this.manufacturer = manufacturer
-                this.model = deviceInformation?.model ?: deviceModel ?: "Unknown"
-                this.friendlyName = friendlyName
-                this.displayName = "$manufacturer $friendlyName"
-                this.owner = user
-                this.type = DeviceType.Phone
-            }
-        }
-        userFlow.emit(UserSubscriptionMessage.DeviceUpdated(device))
-        session.attributes[authSessionSelectedDeviceIdAttribute] = device.id.value
+        val device = deviceRepository.create(
+            ownerId = user.id,
+            manufacturer = manufacturer,
+            model = deviceInformation?.model ?: deviceModel ?: "Unknown",
+            friendlyName = friendlyName,
+            displayName = "$manufacturer $friendlyName",
+        ) ?: return deviceSelectionAuthentiktPlugin
+        session.attributes[authSessionSelectedDeviceIdAttribute] = device.id
 
         return null
     }

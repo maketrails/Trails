@@ -4,17 +4,13 @@ import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.TrailsAppUserPrincipal
 import es.jvbabi.trails.api.TrailsWebappPrincipal
-import es.jvbabi.trails.data.UserSubscriptionMessage
-import es.jvbabi.trails.data.UserSubscriptionRepository
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.User
-import es.jvbabi.trails.routes.app.deviceRingInfo
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.event.DeviceEvent
 import io.ktor.server.auth.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -30,52 +26,51 @@ import kotlin.uuid.Uuid
  *
  * Kept separate from the device-update socket and from the command endpoints so
  * ring state has one authoritative source: the target device confirms start/stop
- * (via the app socket), the server broadcasts that through here, and every UI
- * (app and web) reflects the confirmed state.
+ * (via the app socket), the repository publishes that as
+ * [DeviceEvent.RingStateChanged], and every UI (app and web) reflects the confirmed
+ * state.
  *
  * Generic for both realms so the web (cookie) and, if ever needed, the app
  * (bearer) can consume it.
  */
 fun Route.ringSocket() {
-    val db by inject<DatabaseManager>()
-    val userSubscriptionRepository by inject<UserSubscriptionRepository>()
+    val deviceRepository by inject<DeviceRepository>()
 
     authenticate(TRAILS_USER_REALM, TRAILS_WEBAPP_REALM) {
         webSocket {
-            val userId = call.principal<TrailsAppUserPrincipal>()?.user?.id?.value
-                ?: call.principal<TrailsWebappPrincipal>()?.user?.id?.value
+            val userId = call.principal<TrailsAppUserPrincipal>()?.user?.id
+                ?: call.principal<TrailsWebappPrincipal>()?.user?.id
                 ?: return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unauthenticated"))
 
             val deviceId = call.parameters["deviceId"]?.let(Uuid::parseOrNull)
                 ?: return@webSocket close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Invalid device id"))
 
-            // The ring state is only meaningful for a device the caller owns.
-            val ownsDevice = db.transaction {
-                User.findById(userId)?.devices?.any { it.id.value == deviceId && it.deletion == null } == true
+            // The ring state is only meaningful for a device the caller still has.
+            val device = deviceRepository.getOwnedById(deviceId, userId)
+            if (device == null || device.isDeleted) {
+                return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Forbidden"))
             }
-            if (!ownsDevice) return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Forbidden"))
 
-            // Subscribe to confirmed ring-state changes for this device first, so
-            // no update that lands while we send the initial snapshot is missed.
+            // Subscribe to confirmed ring-state changes first, so no update that lands
+            // while we send the initial state is missed.
             val streamer = launch {
-                userSubscriptionRepository.getFlowForUser(userId)
-                    .filterIsInstance<UserSubscriptionMessage.RingState>()
-                    .filter { it.deviceId == deviceId }
-                    .onEach { message ->
+                deviceRepository.events(deviceId)
+                    .filterIsInstance<DeviceEvent.RingStateChanged>()
+                    .onEach { event ->
                         sendSerialized<RingSocketMessage>(
                             RingSocketMessage.RingState(
-                                deviceId = message.deviceId.toString(),
-                                isRinging = message.isRinging,
-                                ringedBy = message.ringedByDeviceName,
+                                deviceId = event.deviceId.toString(),
+                                isRinging = event.isRinging,
+                                ringedBy = event.requestedByName,
                             )
                         )
                     }
                     .collect()
             }
 
-            // Send the current ring state so a UI that (re)connects while the
-            // device is already ringing is up to date.
-            deviceRingInfo[deviceId]?.let { ringedBy ->
+            // Send the current ring state so a UI that (re)connects while the device is
+            // already ringing is up to date — an event stream alone cannot say that.
+            deviceRepository.ringRequestedBy(deviceId)?.let { ringedBy ->
                 sendSerialized<RingSocketMessage>(
                     RingSocketMessage.RingState(deviceId.toString(), isRinging = true, ringedBy = ringedBy)
                 )

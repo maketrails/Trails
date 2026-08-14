@@ -3,11 +3,10 @@ package es.jvbabi.trails.routes.devices.item.history
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
+import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.TrackSource
-import es.jvbabi.trails.data.deviceTrack
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.database.mapper.toHistoryPoint
+import es.jvbabi.trails.data.model.toHistoryPoint
 import es.jvbabi.trails.routes.devices.item.deviceActor
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
@@ -29,7 +28,8 @@ import kotlin.uuid.Uuid
  *
  * `?source=raw` asks for the measurements instead of the optimized track — the
  * detail view offers both. Anything else (including no value) means the
- * optimized track, which is what a map should normally draw. See [deviceTrack].
+ * optimized track, which is what a map should normally draw. See
+ * [TrackRepository.track].
  *
  * `?since=<epoch millis>` limits the answer to the rows **stored** at or after that
  * instant — the `cursor` of an earlier response, not a recording time. A client that
@@ -48,11 +48,12 @@ import kotlin.uuid.Uuid
  * apart from one that was wiped behind its back (an empty answer).
  */
 fun Route.getDeviceHistory() {
-    val db by inject<DatabaseManager>()
+    val deviceRepository by inject<DeviceRepository>()
+    val trackRepository by inject<TrackRepository>()
 
     authenticate(TRAILS_USER_REALM, TRAILS_WEBAPP_REALM) {
         get {
-            val actor = call.deviceActor(db)
+            val actor = call.deviceActor()
                 ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deviceId = call.parameters["deviceId"]?.let(Uuid::parseOrNull)
                 ?: return@get call.respond(HttpStatusCode.NotFound)
@@ -66,16 +67,15 @@ fun Route.getDeviceHistory() {
                 ?.toLongOrNull()
                 ?.let(Instant::fromEpochMilliseconds)
 
-            // Resolve + ownership-check + read in one transaction; null means the
-            // device is missing, already deleted, or not the caller's — all
-            // answered as Forbidden so foreign device ids cannot be probed for.
-            val response = db.transaction {
-                val device = Device.findById(deviceId) ?: return@transaction null
-                if (device.owner.id.value != actor.userId) return@transaction null
-                if (device.deletion != null) return@transaction null
+            // Missing, already removed, or not the caller's — all answered as
+            // Forbidden, so foreign device ids cannot be probed for.
+            val device = deviceRepository.getOwnedById(deviceId, actor.userId)
+                ?: return@get call.respond(HttpStatusCode.Forbidden)
+            if (device.isDeleted) return@get call.respond(HttpStatusCode.Forbidden)
 
-                val track = deviceTrack(device, storedSince = since, source = source)
+            val track = trackRepository.track(deviceId, storedSince = since, source = source)
 
+            call.respond(
                 LocationHistoryResponse(
                     historySeconds = null,
                     // Null when nothing came back: there is no new cursor to report, and
@@ -83,9 +83,7 @@ fun Route.getDeviceHistory() {
                     cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
                     points = track.map { it.toHistoryPoint(includeBattery = true) },
                 )
-            } ?: return@get call.respond(HttpStatusCode.Forbidden)
-
-            call.respond(response)
+            )
         }
     }
 }

@@ -3,8 +3,8 @@ package es.jvbabi.trails.routes.devices.item.optimization
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.TrailOptimizerScheduler
-import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.routes.devices.item.deviceActor
 import es.jvbabi.trails.routes.devices.item.ownDevice
 import io.ktor.http.HttpStatusCode
@@ -23,18 +23,17 @@ import org.koin.ktor.ext.inject
  * and the counts would leak how much history exists beyond the share's window.
  */
 fun Route.getDeviceOptimization() {
-    val db by inject<DatabaseManager>()
+    val deviceRepository by inject<DeviceRepository>()
     val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()
 
     authenticate(TRAILS_USER_REALM, TRAILS_WEBAPP_REALM) {
         get {
-            val actor = call.deviceActor(db)
+            val actor = call.deviceActor()
                 ?: return@get call.respond(HttpStatusCode.Forbidden)
-            val device = call.ownDevice(db, actor.userId)
+            val device = call.ownDevice(deviceRepository, actor.userId)
                 ?: return@get call.respond(HttpStatusCode.Forbidden)
 
-            val optimizer = db.transaction { trailOptimizerScheduler.optimizerFor(device) }
-            val state = optimizer.state()
+            val state = trailOptimizerScheduler.optimizerFor(device).state()
 
             call.respond(
                 DeviceOptimizationResponse(

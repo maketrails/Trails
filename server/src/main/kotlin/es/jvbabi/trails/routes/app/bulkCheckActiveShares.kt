@@ -2,8 +2,7 @@ package es.jvbabi.trails.routes.app
 
 import es.jvbabi.trails.api.v1.active_shares.BulkCheckActiveSharesRequest
 import es.jvbabi.trails.api.v1.active_shares.BulkCheckActiveSharesResponse
-import es.jvbabi.trails.database.ActiveShare
-import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.data.ShareRepository
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
@@ -21,18 +20,11 @@ import org.koin.ktor.ext.inject
  * sibling of the app socket rather than something behind the app auth realm.
  */
 fun Route.bulkCheckActiveShares() {
-    val db by inject<DatabaseManager>()
+    val shareRepository by inject<ShareRepository>()
 
     post {
         val request = call.receive<BulkCheckActiveSharesRequest>()
-
-        val existing = db.transaction {
-            request.activeShareIds.filter { id ->
-                val activeShare = ActiveShare.findById(id) ?: return@filter false
-                activeShare.share.device.deletion == null
-            }
-        }
-
+        val existing = shareRepository.filterExistingActiveShares(request.activeShareIds)
         call.respond(BulkCheckActiveSharesResponse(existingActiveShareIds = existing))
     }
 }

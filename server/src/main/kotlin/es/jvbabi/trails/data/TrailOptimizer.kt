@@ -35,6 +35,7 @@ import kotlin.math.sqrt
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Instant
+import kotlin.uuid.Uuid
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
 
@@ -68,19 +69,14 @@ import kotlin.time.Duration.Companion.minutes
  * `optimizer/` Python playground, where 40 % of the positions failed the trust
  * filter, 0.8 % were spikes and 29 % belonged to a pause.
  */
-class TrailOptimizer(device: Device) : KoinComponent {
+class TrailOptimizer(
+    private val deviceId: Uuid,
+    private val ownerId: Uuid,
+) : KoinComponent {
 
     private val db by inject<DatabaseManager>()
 
-    private val userSubscriptions by inject<UserSubscriptionRepository>()
-
-    /**
-     * Captured once at construction: an Exposed entity belongs to the
-     * transaction it was read in, while this instance outlives it. Reading the
-     * owner means the constructor has to run inside a transaction.
-     */
-    private val deviceId = device.id
-    private val ownerId = device.owner.id.value
+    private val deviceRepository by inject<DeviceRepository>()
 
     /** The measurements of this device — the input, never written to. */
     private val raw get() = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true)
@@ -353,12 +349,11 @@ class TrailOptimizer(device: Device) : KoinComponent {
      * [state] are a full scan and are only read when a view asks for them.
      */
     private suspend fun publishProgress(progress: Double, isRunning: Boolean) {
-        userSubscriptions.getFlowForUser(ownerId).emit(
-            UserSubscriptionMessage.OptimizationProgress(
-                deviceId = deviceId.value,
-                progress = progress,
-                isRunning = isRunning
-            )
+        deviceRepository.reportOptimizationProgress(
+            deviceId = deviceId,
+            ownerId = ownerId,
+            progress = progress,
+            isRunning = isRunning,
         )
     }
 

@@ -2,56 +2,38 @@ package es.jvbabi.trails.routes.devices.item
 
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
-import es.jvbabi.trails.data.DeviceSubscriptionMessage
-import es.jvbabi.trails.data.DeviceSubscriptionRepository
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.routes.devices.PingResult
-import es.jvbabi.trails.routes.devices.pendingPings
+import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.shared.dto.PingDeviceResponse
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.ktor.ext.inject
-import kotlin.time.Duration.Companion.seconds
-import kotlin.uuid.Uuid
 
 /**
  * Triggers a "find my device" ping on one of the caller's own devices and waits
- * up to five seconds for the device to acknowledge it. This is a generic REST
- * endpoint usable by both the app and the web (see [deviceActor]); it reuses the
- * shared [pendingPings] registry so a ping is acknowledged the same way
- * regardless of where it came from.
+ * for the device to acknowledge it. Generic REST endpoint usable by both the app
+ * and the web (see [deviceActor]); the waiting itself lives in the repository, so
+ * a ping is answered the same way no matter where it came from.
  */
 fun Route.pingDevice() {
-    val db by inject<DatabaseManager>()
-    val deviceSubscriptionRepository by inject<DeviceSubscriptionRepository>()
+    val deviceRepository by inject<DeviceRepository>()
 
     authenticate(TRAILS_USER_REALM, TRAILS_WEBAPP_REALM) {
         post {
-            val actor = call.deviceActor(db)
+            val actor = call.deviceActor()
                 ?: return@post call.respond<PingDeviceResponse>(PingDeviceResponse.Forbidden)
-            val deviceId = call.parameters["deviceId"]?.let(Uuid::parseOrNull)
+            val device = call.ownDevice(deviceRepository, actor.userId)
                 ?: return@post call.respond<PingDeviceResponse>(PingDeviceResponse.Forbidden)
 
-            val device = db.transaction { Device.findById(deviceId) }
-            if (device == null || db.transaction { device.owner.id.value != actor.userId }) {
-                return@post call.respond<PingDeviceResponse>(PingDeviceResponse.Forbidden)
-            }
-
-            val deferred = CompletableDeferred<PingResult>()
-            pendingPings[deviceId] = deferred
-            deviceSubscriptionRepository.getFlowForDeviceSubscription(deviceId)
-                .emit(DeviceSubscriptionMessage.Ping(device, pingedByDeviceName = actor.sourceName, pingedBySource = actor.source))
-
-            val result = withTimeoutOrNull(5.seconds) { deferred.await() }
-            pendingPings.remove(deviceId)
+            val ack = deviceRepository.ping(
+                deviceId = device.id,
+                requestedByName = actor.sourceName,
+                requestedBySource = actor.source,
+            )
 
             call.respond<PingDeviceResponse>(
-                if (result != null) PingDeviceResponse.Success(result.hasDeliveredNotification)
+                if (ack != null) PingDeviceResponse.Success(ack.hasDeliveredNotification)
                 else PingDeviceResponse.Timeout
             )
         }

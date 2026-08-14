@@ -2,8 +2,8 @@ package es.jvbabi.trails.routes.webapp.optimization
 
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.TrailsWebappPrincipal
-import es.jvbabi.trails.data.UserSubscriptionMessage
-import es.jvbabi.trails.data.UserSubscriptionRepository
+import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.event.UserEvent
 import io.ktor.server.auth.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
@@ -28,23 +28,23 @@ import kotlin.uuid.Uuid
  * Web only: the app draws no tracks, so it has nothing to do with this.
  */
 fun Route.webappOptimizationSocket() {
-    val userSubscriptionRepository by inject<UserSubscriptionRepository>()
+    val userRepository by inject<UserRepository>()
 
     authenticate(TRAILS_WEBAPP_REALM) {
         webSocket {
             val user = call.principal<TrailsWebappPrincipal>()?.user
                 ?: return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Unauthenticated"))
 
-            // Progress is published into the owner's flow, so subscribing to it is
+            // Progress is published into the owner's stream, so subscribing to it is
             // the whole ownership check: another user's devices never appear here.
-            userSubscriptionRepository.getFlowForUser(user.id.value)
-                .filterIsInstance<UserSubscriptionMessage.OptimizationProgress>()
-                .onEach { message ->
+            userRepository.events(user.id)
+                .filterIsInstance<UserEvent.OptimizationProgressed>()
+                .onEach { event ->
                     sendSerialized<OptimizationSocketMessage>(
                         OptimizationSocketMessage.Progress(
-                            deviceId = message.deviceId,
-                            progress = message.progress,
-                            isRunning = message.isRunning,
+                            deviceId = event.deviceId,
+                            progress = event.progress,
+                            isRunning = event.isRunning,
                         )
                     )
                 }

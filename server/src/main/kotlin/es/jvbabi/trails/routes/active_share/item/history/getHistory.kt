@@ -1,16 +1,13 @@
 package es.jvbabi.trails.routes.active_share.item.history
 
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
-import es.jvbabi.trails.data.deviceTrack
-import es.jvbabi.trails.database.ActiveShare
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.mapper.toHistoryPoint
+import es.jvbabi.trails.data.ShareRepository
+import es.jvbabi.trails.data.TrackRepository
+import es.jvbabi.trails.data.model.toHistoryPoint
 import es.jvbabi.trails.routes.EntityNotFoundException
 import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.core.eq
 import org.koin.ktor.ext.inject
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
@@ -45,7 +42,8 @@ import kotlin.uuid.Uuid
  * endpoints.
  */
 fun Route.getActiveShareHistory() {
-    val db by inject<DatabaseManager>()
+    val shareRepository by inject<ShareRepository>()
+    val trackRepository by inject<TrackRepository>()
 
     get {
         val activeShareId = call.parameters["activeShareId"]?.let(Uuid::parseOrNull)
@@ -55,26 +53,25 @@ fun Route.getActiveShareHistory() {
             ?.toLongOrNull()
             ?.let(Instant::fromEpochMilliseconds)
 
-        val response = db.transaction {
-            // A returned share is deleted and a removed device is soft-deleted;
-            // both are answered as a plain 404 so a spent capability cannot be
-            // replayed to mine history.
-            val activeShare = ActiveShare.findById(activeShareId)
-                ?: throw EntityNotFoundException("Active share not found")
-            val share = activeShare.share
-            val device = share.device
-            if (device.deletion != null) throw EntityNotFoundException("Active share not found")
+        // A returned share is deleted and a removed device is soft-deleted; both are
+        // answered as a plain 404 so a spent capability cannot be replayed to mine
+        // history.
+        val shared = shareRepository.getSharedDevice(activeShareId)
+            ?: throw EntityNotFoundException("Active share not found")
+        val share = shared.share
 
-            val historySeconds = share.locationHistorySeconds
-            if (historySeconds == 0) {
-                return@transaction LocationHistoryResponse(historySeconds = 0, points = emptyList())
-            }
-
-            val window = if (historySeconds < 0) null else Clock.System.now() - historySeconds.seconds
-            val track = deviceTrack(device, notOlderThan = window, storedSince = requestedSince)
+        val response = if (!share.revealsHistory) {
+            LocationHistoryResponse(historySeconds = 0, points = emptyList())
+        } else {
+            val window = share.historySeconds?.let { Clock.System.now() - it.seconds }
+            val track = trackRepository.track(
+                deviceId = shared.device.id,
+                notOlderThan = window,
+                storedSince = requestedSince,
+            )
 
             LocationHistoryResponse(
-                historySeconds = historySeconds.takeIf { it > 0 },
+                historySeconds = share.historySeconds,
                 // Null when nothing came back: there is no new cursor to report, and the
                 // caller keeps the one it already has.
                 cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },

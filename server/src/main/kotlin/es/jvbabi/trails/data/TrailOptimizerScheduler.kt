@@ -1,8 +1,6 @@
 package es.jvbabi.trails.data
 
-import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
-import es.jvbabi.trails.database.Devices
+import es.jvbabi.trails.data.model.DeviceModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -11,7 +9,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import org.jetbrains.exposed.v1.core.isNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import org.slf4j.LoggerFactory
@@ -30,7 +27,7 @@ import kotlin.uuid.Uuid
  */
 class TrailOptimizerScheduler : KoinComponent {
 
-    private val db by inject<DatabaseManager>()
+    private val deviceRepository by inject<DeviceRepository>()
 
     private val logger = LoggerFactory.getLogger("TrailOptimizer")
 
@@ -79,12 +76,9 @@ class TrailOptimizerScheduler : KoinComponent {
     /**
      * The one optimizer of a device. Going through here rather than
      * constructing one is what keeps a device's runs from overlapping.
-     *
-     * Has to be called inside a transaction — the optimizer reads the owner of
-     * the device it is given.
      */
-    fun optimizerFor(device: Device): TrailOptimizer =
-        optimizers.computeIfAbsent(device.id.value) { TrailOptimizer(device) }
+    fun optimizerFor(device: DeviceModel): TrailOptimizer =
+        optimizers.computeIfAbsent(device.id) { TrailOptimizer(device.id, device.ownerId) }
 
     /**
      * Optimizes the devices one after another. Sequential on purpose: a pass
@@ -92,11 +86,8 @@ class TrailOptimizerScheduler : KoinComponent {
      * once would fight over the database.
      */
     private suspend fun tick() {
-        val devices = db.transaction {
-            Device
-                .find { Devices.deletion.isNull() }
-                .associate { device -> device.id.value to optimizerFor(device) }
-        }
+        val devices = deviceRepository.listAll()
+            .associate { device -> device.id to optimizerFor(device) }
 
         // Deleted devices take their optimizer with them.
         optimizers.keys.retainAll(devices.keys)

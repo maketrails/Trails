@@ -20,7 +20,7 @@ fun Route.webappMe() {
             val user = call.principal<TrailsWebappPrincipal>()!!.user
             call.respond(
                 WebappMeResponse(
-                    id = user.id.value,
+                    id = user.id,
                     username = user.username,
                     homeserver = applicationConfig.url.host,
                 )
