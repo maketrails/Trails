@@ -1,6 +1,5 @@
 package es.jvbabi.trails
 
-import es.jvbabi.trails.rootModule
 import io.ktor.client.request.get
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
@@ -23,7 +22,7 @@ class ServerTest {
         // test brings its own — otherwise it fails while Koin builds ApplicationConfig,
         // long before any route is reached.
         val storage = createTempDirectory().toFile()
-        storage.resolve("config.json").writeText("""{"base_url": "http://localhost:8080"}""")
+        storage.resolve("config.json").writeText("""{"base_url": "http://localhost:20416"}""")
 
         application {
             rootModule(ApplicationLaunchConfig(storageDirectory = storage))

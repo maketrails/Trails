@@ -7,12 +7,12 @@ services:
   - name: "api"
     modes:
       local:
-        port: 8080
+        port: 20416
 
   - name: "frontend"
     modes:
       local:
-        port: 5173
+        port: 20415
 
   - name: "nominatim"
     modes:
