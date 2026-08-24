@@ -266,6 +266,11 @@ fun Route.app() {
                 }
 
                 for (frame in incoming) {
+                    // Anything arriving is proof the app is still there — a heartbeat
+                    // answer, an upload, a subscription change. Recorded before the
+                    // frame is looked at, because what it says does not matter for this.
+                    lastContact.value = Clock.System.now()
+
                     if (frame is Frame.Text) {
                         val message = converter!!.deserialize<TrailsWebSocketAppMessage>(frame)
                         try {
