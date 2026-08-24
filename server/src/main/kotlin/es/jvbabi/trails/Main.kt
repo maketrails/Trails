@@ -36,7 +36,7 @@ class AppCommand: SuspendingCliktCommand("server") {
 
         embeddedServer(
             factory = Netty,
-            port = 8080,
+            port = 20416,
             host = bindHost ?: "0.0.0.0",
             module = { rootModule(applicationLaunchConfig) }
         ).start(wait = true)

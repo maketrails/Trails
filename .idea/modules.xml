@@ -4,8 +4,6 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/modules/app/android/Trails.app.android.main.iml" filepath="$PROJECT_DIR$/.idea/modules/app/android/Trails.app.android.main.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/Trails.app.ios.iml" filepath="$PROJECT_DIR$/.idea/Trails.app.ios.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/Trails.ios.iml" filepath="$PROJECT_DIR$/.idea/Trails.ios.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/Trails.ios.ios.iml" filepath="$PROJECT_DIR$/.idea/Trails.ios.ios.iml" />
     </modules>
   </component>
 </project>
