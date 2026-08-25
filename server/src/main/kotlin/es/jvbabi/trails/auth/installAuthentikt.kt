@@ -1,6 +1,5 @@
 package es.jvbabi.trails.auth
 
-import at.favre.lib.crypto.bcrypt.BCrypt
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import es.jvbabi.authentikt.core.AuthentiktUser
@@ -15,7 +14,8 @@ import es.jvbabi.trails.data.model.UserModel
 import io.ktor.client.call.*
 import io.ktor.http.*
 import io.ktor.server.application.*
-import io.ktor.util.AttributeKey
+import io.ktor.util.*
+import io.ktor.util.date.*
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toJavaLocalDateTime
 import kotlinx.datetime.toLocalDateTime
@@ -27,7 +27,6 @@ import org.koin.ktor.ext.inject
 import util.date.plus
 import java.security.MessageDigest
 import java.time.ZoneOffset
-import kotlin.text.toCharArray
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.days
 import kotlin.uuid.Uuid
@@ -146,15 +145,17 @@ fun Application.installAuthentikt() {
                     }
 
                     Destination.Webapp -> {
+                        val validFor = 365.days
+                        val validUntil = Clock.System.now().plus(validFor)
+
                         val jwt = JWT
                             .create()
                             .withAudience("trails-webapp")
                             .withIssuer("trails-app-server")
                             .withClaim("user_id", user.id.toString())
                             .withExpiresAt(
-                                Clock.System.now()
+                                validUntil
                                     .toLocalDateTime(TimeZone.currentSystemDefault())
-                                    .plus(365.days)
                                     .toJavaLocalDateTime()
                                     .toInstant(ZoneOffset.UTC)
                             )
@@ -166,6 +167,7 @@ fun Application.installAuthentikt() {
                             path = "/",
                             secure = true,
                             httpOnly = true,
+                            expires = GMTDate(validUntil.toEpochMilliseconds())
                         ))
                         redirect(Destination.Webapp.redirectUri)
                     }
