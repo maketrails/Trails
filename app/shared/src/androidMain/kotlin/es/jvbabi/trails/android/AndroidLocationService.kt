@@ -147,7 +147,9 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
                 channelId,
                 getString(R.string.notification_channel_tracking_name),
                 NotificationManager.IMPORTANCE_LOW
-            )
+            ).apply {
+                setShowBadge(false)
+            }
             val manager = getSystemService(NotificationManager::class.java) as NotificationManager
             manager.createNotificationChannel(channel)
         }

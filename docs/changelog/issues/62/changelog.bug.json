@@ -1,0 +1,8 @@
+{
+  "description": "New installations of the app will now disable the notification dot on the app icon for the location service by default.",
+  "localized": {
+    "de": {
+      "description": "Neue Installationen der App deaktivieren standardmäßig den Benachrichtigungspunkt auf dem App-Symbol für den Standortdienst."
+    }
+  }
+}
