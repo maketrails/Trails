@@ -14,6 +14,9 @@ inputs:
   mapbox_public_token:
     description: "Mapbox public token"
     required: true
+  play_developer_signing_id:
+    description: "Play Developer Signing ID"
+    required: true
 
 runs:
   using: "composite"
@@ -51,3 +54,4 @@ runs:
         } >> local.properties
         
         echo "mapbox.token=${{ inputs.mapbox_secret_token }}" >> ~/.gradle/gradle.properties
+        echo "${{ inputs.play_developer_signing_id }}" >> ~/app/android/src/main/assets/adi-registration.properties

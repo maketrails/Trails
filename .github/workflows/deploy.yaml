@@ -207,6 +207,7 @@ jobs:
           keystore_password: ${{ secrets.KEYSTORE_PASSWORD }}
           mapbox_public_token: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
           mapbox_secret_token: ${{ secrets.MAPBOX_SECRET_TOKEN }}
+          play_developer_signing_id: ${{ secrets.PLAY_DEVELOPER_SIGNING_ID }}
 
       - name: Build Android APK
         env:
