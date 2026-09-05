@@ -54,4 +54,4 @@ runs:
         } >> local.properties
         
         echo "mapbox.token=${{ inputs.mapbox_secret_token }}" >> ~/.gradle/gradle.properties
-        echo "${{ inputs.play_developer_signing_id }}" >> ~/app/android/src/main/assets/adi-registration.properties
+        echo "${{ inputs.play_developer_signing_id }}" >> ${GITHUB_WORKSPACE}/app/android/src/main/assets/adi-registration.properties
