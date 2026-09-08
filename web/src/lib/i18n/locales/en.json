@@ -214,6 +214,11 @@
       "start": "Start of the marked range",
       "end": "End of the marked range",
       "clear": "Clear the marked range"
+    },
+    "range": {
+      "edit": "Edit the marked range",
+      "from": "From",
+      "to": "To"
     }
   }
 }

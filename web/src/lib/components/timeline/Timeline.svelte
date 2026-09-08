@@ -1,8 +1,9 @@
 <script lang="ts">
-    import {ArrowsOutLineHorizontalIcon, MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon} from "phosphor-svelte";
+    import {ArrowsOutLineHorizontalIcon, MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon, XIcon} from "phosphor-svelte";
     import {_, locale} from "svelte-i18n";
     import TimelineAxis from "./TimelineAxis.svelte";
     import TimelineScrollbar from "./TimelineScrollbar.svelte";
+    import TimelineRangePicker from "./TimelineRangePicker.svelte";
     import TimelineSelection from "./TimelineSelection.svelte";
     import {type DragModifiers, timelineGestures} from "./timeline_gestures";
     import {axisFor} from "./timeline_scale";
@@ -99,6 +100,19 @@
         },
     };
 
+    /**
+     * Brings a range that was set from outside the window — from the picker, mostly —
+     * into view, keeping the zoom if it fits and framing the range if it does not.
+     */
+    function reveal(range: TimelineRange) {
+        const from = range.start.getTime();
+        const to = range.end.getTime();
+        if (from >= timeline.start && to <= timeline.end) return;
+
+        if (to - from > timeline.span) timeline.show(range.start, range.end);
+        else timeline.set(from - (timeline.span - (to - from)) / 2, timeline.span);
+    }
+
     /** Moves one end of the marked range, keeping the other where it is. */
     function resizeSelection(edge: "start" | "end", anchor: number, modifiers: DragModifiers) {
         if (selection == null) return;
@@ -142,7 +156,31 @@
 
 <div class="flex h-full w-full flex-col gap-1 p-2">
     <div class="flex flex-row items-center justify-between gap-2 px-1">
-        <span class="truncate text-xs text-muted-foreground">{rangeLabel}</span>
+        <!-- What the header says is what the timeline is about: the window while
+             nothing is marked, and the marked range itself once there is one — then
+             as something to edit rather than only to read. -->
+        {#if selection != null}
+            <div class="flex min-w-0 flex-row items-center gap-1">
+                <TimelineRangePicker
+                        range={selection}
+                        onchange={(next) => {
+                            selection = next;
+                            reveal(next);
+                        }}
+                />
+                <button
+                        type="button"
+                        onclick={() => (selection = null)}
+                        title={$_("timeline.selection.clear")}
+                        aria-label={$_("timeline.selection.clear")}
+                        class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+                >
+                    <XIcon size={14} />
+                </button>
+            </div>
+        {:else}
+            <span class="truncate text-xs text-muted-foreground">{rangeLabel}</span>
+        {/if}
 
         <div class="flex shrink-0 flex-row items-center gap-1">
             {@render control($_("timeline.zoom_out"), () => timeline.zoomBy(1 / ZOOM_STEP), MagnifyingGlassMinusIcon)}

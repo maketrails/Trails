@@ -214,6 +214,11 @@
       "start": "Beginn des markierten Bereichs",
       "end": "Ende des markierten Bereichs",
       "clear": "Markierung aufheben"
+    },
+    "range": {
+      "edit": "Markierten Bereich bearbeiten",
+      "from": "Von",
+      "to": "Bis"
     }
   }
 }
