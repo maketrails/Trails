@@ -102,7 +102,8 @@
         "title": "Gerät löschen",
         "description": "Möchtest du „{name}“ wirklich löschen? Bestehende Freigaben dieses Geräts werden ungültig. Diese Aktion kann nicht rückgängig gemacht werden."
       }
-    }
+    },
+    "export_gpx": "Diesen Abschnitt als GPX exportieren"
   },
   "shares": {
     "shared_with_me": "Geteilt mit mir",
@@ -198,6 +199,27 @@
     },
     "bundle": {
       "label": "{count} Geräte an dieser Stelle"
+    }
+  },
+  "timeline": {
+    "label": "Verlaufszeitleiste",
+    "zoom_in": "Vergrößern",
+    "zoom_out": "Verkleinern",
+    "fit": "Gesamten Verlauf anzeigen",
+    "scrollbar": {
+      "window": "Sichtbarer Ausschnitt",
+      "start": "Beginn des sichtbaren Ausschnitts",
+      "end": "Ende des sichtbaren Ausschnitts"
+    },
+    "selection": {
+      "start": "Beginn des markierten Bereichs",
+      "end": "Ende des markierten Bereichs",
+      "clear": "Markierung aufheben"
+    },
+    "range": {
+      "edit": "Markierten Bereich bearbeiten",
+      "from": "Von",
+      "to": "Bis"
     }
   }
 }

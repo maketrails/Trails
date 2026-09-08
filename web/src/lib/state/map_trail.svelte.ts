@@ -1,7 +1,18 @@
 import type {HistoryPoint} from "$lib/api/history/history_repository";
 
+/** A stretch of time, as the two moments that bound it. */
+export interface TrailRange {
+    start: Date;
+    end: Date;
+}
+
 let points = $state<HistoryPoint[]>([]);
 let key = $state<string | null>(null);
+
+// What the trail is being read through: the stretch a timeline shows, and the range
+// marked inside it. Neither changes what the line contains, only how it is coloured.
+let window = $state<TrailRange | null>(null);
+let selection = $state<TrailRange | null>(null);
 
 /**
  * The detail view the trail currently belongs to. Switching between two detail
@@ -28,6 +39,12 @@ export interface MapTrailClaim {
      * on every update.
      */
     set(next: HistoryPoint[] | null, trailKey: string | null): void;
+    /**
+     * Publishes what the trail is being read through: [window] is the stretch on
+     * show, [selection] the range marked inside it. Pass `null` for either to say
+     * there is none — with no window at all the whole line reads as being on show.
+     */
+    focus(window: TrailRange | null, selection: TrailRange | null): void;
     /** Takes the trail off the map again. */
     release(): void;
 }
@@ -48,10 +65,17 @@ export function claimMapTrail(): MapTrailClaim {
             points = next ?? [];
             key = trailKey;
         },
+        focus(nextWindow, nextSelection) {
+            if (owner !== claim) return;
+            window = nextWindow;
+            selection = nextSelection;
+        },
         release() {
             if (owner !== claim) return;
             points = [];
             key = null;
+            window = null;
+            selection = null;
         },
     };
 }
@@ -64,5 +88,13 @@ export const mapTrail = {
     /** Which track [points] belong to; `null` when there is no trail. */
     get key() {
         return key;
+    },
+    /** The stretch on show, or `null` while the whole trail counts as on show. */
+    get window() {
+        return window;
+    },
+    /** The marked range, or `null` while nothing is marked. */
+    get selection() {
+        return selection;
     },
 };

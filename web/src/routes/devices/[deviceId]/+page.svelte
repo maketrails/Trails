@@ -10,7 +10,10 @@
     import type {HistorySource} from "$lib/api/history/history_repository";
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
+    import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
+    import {DownloadSimpleIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
+    import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
 
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
@@ -33,12 +36,20 @@
     // time, and only the claim keeps this one from taking the map back on teardown.
     const cameraTarget = claimCameraTarget();
     const mapTrail = claimMapTrail();
+    const mapOverlay = claimMapOverlay();
 
     // Hand the camera to the detail scope while the page is open, and give it back
     // to the overview on leave.
     $effect(() => {
         cameraTarget.set(deviceId ?? null);
         return () => cameraTarget.release();
+    });
+
+    // Fill the strip the layout leaves between card and camera switch while the
+    // page is open. It only exists where the card does not span the whole width.
+    $effect(() => {
+        mapOverlay.set(timeline);
+        return () => mapOverlay.release();
     });
 
     // Draw the history as a line on the map while the page is open. The key names the
@@ -49,7 +60,28 @@
         return () => mapTrail.release();
     });
 
+    // What the timeline shows and what is marked in it, kept on the trail: the line
+    // is coloured by it, so reading the timeline and reading the map are the same act.
+    let timelineView = $state<TimelineView | null>(null);
+    let timelineSelection = $state<TimelineRange | null>(null);
+
+    $effect(() => {
+        mapTrail.focus(timelineView, timelineSelection);
+    });
+
     let imageUrl = $derived(device ? `/api/v1/devices/image/${device.manufacturer}-${device.model}` : null);
+
+    // What an export covers: the marked range, or the whole window while nothing is
+    // marked. Whatever the timeline highlights is what leaves the app.
+    let exportRange = $derived(timelineSelection ?? timelineView);
+    let gpxUrl = $derived(
+        device != null && exportRange != null
+            ? `/api/v1/devices/${device.id}/history/gpx`
+                + `?start=${exportRange.start.getTime()}`
+                + `&end=${exportRange.end.getTime()}`
+                + `&source=${historySource}`
+            : null,
+    );
 
     let historyState: HistoryState = $derived.by(() => {
         if (!device || !history) return {type: "loading"}
@@ -68,7 +100,7 @@
     {#if device}
         {#snippet deviceActions()}
             <div class="mt-1">
-                <DeviceActions deviceId={device.id} />
+                <DeviceActions deviceId={device.id}/>
             </div>
         {/snippet}
         <div class="flex flex-col gap-2 px-4">
@@ -86,11 +118,43 @@
             <!-- The optimization is only readable for own devices: a share hands
                  out a track, not the state of the machinery behind it. -->
             {#if isOwnDevice}
-                <HistorySourceTabs bind:source={historySource} />
-                <DeviceOptimization deviceId={device.id} />
+                <HistorySourceTabs bind:source={historySource}/>
+                <DeviceOptimization deviceId={device.id}/>
             {/if}
         </div>
     {:else}
         <p class="px-2 mt-4 text-sm text-muted-foreground">{$_("devices.not_found")}</p>
     {/if}
 </div>
+
+<!-- The server names the file after the device and the window, so the link carries
+     no name of its own. -->
+{#snippet exportAction()}
+    {#if gpxUrl != null}
+        <a
+                href={gpxUrl}
+                download
+                title={$_("devices.export_gpx")}
+                aria-label={$_("devices.export_gpx")}
+                class="flex size-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+        >
+            <DownloadSimpleIcon size={16} />
+        </a>
+    {/if}
+{/snippet}
+
+<!-- Nothing to lay a timeline over until the history has arrived, and the two
+     ends below would read past the end of an empty list. -->
+{#snippet timeline()}
+    {#if history.points.length > 0}
+        <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+            <Timeline
+                    oldestPoint={new Date(history.points[0].timestamp)}
+                    newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+                    bind:view={timelineView}
+                    bind:selection={timelineSelection}
+                    actions={exportAction}
+            />
+        </div>
+    {/if}
+{/snippet}

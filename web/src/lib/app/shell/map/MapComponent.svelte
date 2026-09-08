@@ -8,6 +8,15 @@
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
+    import {
+        bandFlags,
+        gapFlags,
+        rawFlags,
+        toCoordinates,
+        trailData,
+        type TrailBand,
+        type TrailFocus
+    } from "./trail_features";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
@@ -69,6 +78,8 @@
     const TRAIL_CASING_LAYER = "location-history-casing";
     const TRAIL_LINE_LAYER = "location-history-line";
     const TRAIL_GAP_LAYER = "location-history-gap";
+    const TRAIL_FOCUS_LINE_LAYER = "location-history-focus-line";
+    const TRAIL_FOCUS_GAP_LAYER = "location-history-focus-gap";
     const trailColors = $derived(
         darkMode.current
             ? { line: "#e2e8f0", casing: "#020617" }
@@ -83,6 +94,22 @@
      */
     const trailRawColor = $derived(darkMode.current ? "#a78bfa" : "#7c3aed");
 
+    /**
+     * How the line answers the timeline: what the window shows is white, what lies
+     * before it recedes into the map as dark grey, what lies after it stays light but
+     * quiet, and a marked range is the one stretch that carries colour.
+     *
+     * The highlight is a colour of its own rather than the theme's `--primary`: that
+     * token is near-black in light mode and near-white in dark, and neither would be
+     * seen on a map. It is the same amber the timeline marks a range in.
+     */
+    const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
+        window: "#ffffff",
+        before: "rgba(51,65,85,0.55)",
+        after: "rgba(255,255,255,0.5)",
+        selected: "#f59e0b"
+    };
+
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
@@ -93,73 +120,6 @@
     // space, so panning, zooming, rotating or tilting alone can bundle them or pull
     // them apart again — this is what tells the pin effect to look anew.
     let cameraEpoch = $state(0);
-
-    // Minimal GeoJSON shape for the trail. Spelled out locally because
-    // @types/geojson isn't a dependency, so the global `GeoJSON` namespace that
-    // mapbox-gl's own typings reference is unavailable here.
-    type TrailFeature = {
-        type: "Feature";
-        properties: { gap: boolean; raw: boolean };
-        geometry: { type: "LineString"; coordinates: number[][] };
-    };
-    type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
-
-    /**
-     * Anything longer than this between two consecutive points is a recording gap:
-     * where the device actually went in between is unknown, so that stretch is
-     * drawn as a faint dotted hint instead of a solid line.
-     */
-    const TRAIL_GAP_MS = 60_000;
-
-    /**
-     * Per-point flag: `gaps[i]` marks the segment from point `i - 1` to `i` as a
-     * gap. Index 0 has no incoming segment and is always false, which keeps the
-     * flags aligned with {@link toCoordinates} — the animation relies on that.
-     */
-    function gapFlags(points: HistoryPoint[]): boolean[] {
-        return points.map((point, i) => i > 0 && point.timestamp - points[i - 1].timestamp > TRAIL_GAP_MS);
-    }
-
-    /**
-     * Per-point flag in the same "incoming segment" convention as
-     * {@link gapFlags}: `raws[i]` marks the segment from point `i - 1` to `i` as
-     * unoptimized. The changeover segment counts as unoptimized — it is the one
-     * connection no optimizer has looked at.
-     */
-    function rawFlags(points: HistoryPoint[]): boolean[] {
-        return points.map((point, i) => i > 0 && point.is_raw);
-    }
-
-    /**
-     * Splits the coordinates into one LineString per run of same-kind segments, so
-     * the solid and the dotted layer can each filter for their own features. Runs
-     * share their boundary point, which keeps the line visually continuous.
-     */
-    function trailData(coordinates: number[][], gaps: boolean[], raws: boolean[] = []): TrailData {
-        const features: TrailFeature[] = [];
-        // A LineString needs at least two positions; fewer means nothing to draw.
-        let runStart = 1;
-        for (let segment = 1; segment < coordinates.length; segment++) {
-            const gap = gaps[segment] ?? false;
-            const raw = raws[segment] ?? false;
-            const isLast = segment === coordinates.length - 1;
-            const sameKind =
-                (gaps[segment + 1] ?? false) === gap && (raws[segment + 1] ?? false) === raw;
-            if (!isLast && sameKind) continue;
-
-            features.push({
-                type: "Feature",
-                properties: { gap, raw },
-                geometry: { type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1) }
-            });
-            runStart = segment + 1;
-        }
-        return { type: "FeatureCollection", features };
-    }
-
-    function toCoordinates(points: HistoryPoint[]): number[][] {
-        return points.map((point) => [point.longitude, point.latitude]);
-    }
 
     /** Keeps the trail below the style's labels so road/place names stay readable. */
     function firstSymbolLayerId(currentMap: mapboxgl.Map): string | undefined {
@@ -176,20 +136,56 @@
         if (currentMap.getSource(TRAIL_SOURCE) != null) return true;
 
         try {
-            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], []) });
+            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], [], []) });
 
-            // Violet where the track is still raw, the theme colour where it is
-            // optimized. One expression, so a stretch cannot end up in both.
+            // The band decides the colour; only inside the window does the track's own
+            // state still show through, violet where it is raw. One expression, so a
+            // stretch cannot end up in two of them.
             const lineColor: mapboxgl.ExpressionSpecification = [
-                "case",
-                ["get", "raw"],
-                trailRawColor,
-                trailColors.line
+                "match",
+                ["get", "band"],
+                "before", TRAIL_BAND_COLORS.before,
+                "after", TRAIL_BAND_COLORS.after,
+                "selected", TRAIL_BAND_COLORS.selected,
+                ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
             ];
+
+            // Which stretches are on show, and which have stepped back. A trail crosses
+            // itself, so the two are drawn in two passes: the dimmed ones first, the
+            // highlighted ones last and therefore on top, where they cannot be painted
+            // over by a stretch that was meant to recede.
+            const FOCUS_BANDS = ["window", "selected"];
+            const DIMMED_BANDS = ["before", "after"];
+            const inBands = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["match", ["get", "band"], bands, true, false];
+            const solid = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["all", ["!", ["get", "gap"]], inBands(bands)];
+            const dotted = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["all", ["get", "gap"], inBands(bands)];
+
+            // Recording gaps are drawn as dots: round caps plus a zero-length dash.
+            // Dash lengths are multiples of the line width, so 2 = one dot diameter of
+            // spacing. `line-dasharray` takes no data-driven expression, hence a layer
+            // of its own rather than a filter on the solid one.
+            const line = (id: string, filter: mapboxgl.ExpressionSpecification, gap: boolean): mapboxgl.LayerSpecification => ({
+                id,
+                type: "line",
+                slot: "middle",
+                source: TRAIL_SOURCE,
+                filter,
+                layout: { "line-cap": "round", "line-join": "round" },
+                paint: {
+                    "line-color": lineColor,
+                    "line-width": 3.5,
+                    "line-opacity": gap ? 0.45 : 0.9,
+                    ...(gap ? { "line-dasharray": [0, 2] as [number, number] } : {})
+                }
+            });
 
             // `slot` positions the layers in the v3 "standard" style (which imports
             // its basemap, so it exposes no symbol layers to sort against); the
-            // beforeId does the same job in the classic night style.
+            // beforeId does the same job in the classic night style. Inserting several
+            // layers before the same one stacks them in insertion order.
             const beforeId = firstSymbolLayerId(currentMap);
             // Solid stretches only — a solid casing under the dots would undo the
             // point of drawing them faintly.
@@ -198,37 +194,18 @@
                 type: "line",
                 slot: "middle",
                 source: TRAIL_SOURCE,
-                filter: ["!", ["get", "gap"]],
+                // Only under what is on show: the casing is there to hold a bright line
+                // off the map, and drawing it under the dimmed stretches would give them
+                // back the weight they were just relieved of.
+                filter: solid(FOCUS_BANDS),
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
-            currentMap.addLayer({
-                id: TRAIL_LINE_LAYER,
-                type: "line",
-                slot: "middle",
-                source: TRAIL_SOURCE,
-                filter: ["!", ["get", "gap"]],
-                layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": lineColor, "line-width": 3.5, "line-opacity": 0.9 }
-            }, beforeId);
-            // Recording gaps: round caps plus a zero-length dash renders as dots.
-            // Dash lengths are multiples of the line width, so 2 = one dot diameter
-            // of spacing. `line-dasharray` takes no data-driven expression, hence a
-            // layer of its own rather than a filter on the one above.
-            currentMap.addLayer({
-                id: TRAIL_GAP_LAYER,
-                type: "line",
-                slot: "middle",
-                source: TRAIL_SOURCE,
-                filter: ["get", "gap"],
-                layout: { "line-cap": "round", "line-join": "round" },
-                paint: {
-                    "line-color": lineColor,
-                    "line-width": 3.5,
-                    "line-opacity": 0.45,
-                    "line-dasharray": [0, 2]
-                }
-            }, beforeId);
+
+            currentMap.addLayer(line(TRAIL_LINE_LAYER, solid(DIMMED_BANDS), false), beforeId);
+            currentMap.addLayer(line(TRAIL_GAP_LAYER, dotted(DIMMED_BANDS), true), beforeId);
+            currentMap.addLayer(line(TRAIL_FOCUS_LINE_LAYER, solid(FOCUS_BANDS), false), beforeId);
+            currentMap.addLayer(line(TRAIL_FOCUS_GAP_LAYER, dotted(FOCUS_BANDS), true), beforeId);
             return true;
         } catch {
             return false;
@@ -239,10 +216,11 @@
         currentMap: mapboxgl.Map,
         coordinates: number[][],
         gaps: boolean[] = [],
-        raws: boolean[] = []
+        raws: boolean[] = [],
+        bands: TrailBand[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws));
+        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands));
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -318,15 +296,21 @@
      * from [animateFrom]. Passing the start of an animation that is already running
      * carries it on with the new geometry; null draws the finished line at once.
      */
-    function drawTrail(currentMap: mapboxgl.Map, points: HistoryPoint[], animateFrom: number | null) {
+    function drawTrail(
+        currentMap: mapboxgl.Map,
+        points: HistoryPoint[],
+        animateFrom: number | null,
+        focus: TrailFocus
+    ) {
         cancelTrailAnimation();
 
         const coordinates = toCoordinates(points);
         const gaps = gapFlags(points);
         const raws = rawFlags(points);
+        const bands = bandFlags(points, focus);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
-            setTrailCoordinates(currentMap, coordinates, gaps, raws);
+            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
             return;
         }
 
@@ -336,7 +320,7 @@
         // in the segment it replaces), so `gaps` still lines up.
         const drawUpTo = (now: number) => {
             const t = Math.min(1, (now - animateFrom) / TRAIL_ANIMATION_MS);
-            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws);
+            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands);
             return t;
         };
         const step = (now: number) => {
@@ -421,6 +405,10 @@
         const epoch = styleEpoch;
         const points = mapTrail.points;
         const trailKey = mapTrail.key;
+        // Read here so that moving the timeline re-runs this and recolours the line.
+        // The key has not changed then, so it is redrawn where its animation left it
+        // rather than growing in again.
+        const focus = { window: mapTrail.window, selection: mapTrail.selection };
 
         // `style.load` (epoch > 0) is the signal that a style is in place, and
         // deliberately not isStyleLoaded() — that one also waits for every tile to
@@ -454,18 +442,13 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
-        drawTrail(currentMap, points, animateFrom);
+        drawTrail(currentMap, points, animateFrom, focus);
 
-        return () => {
-            cancelTrailAnimation();
-            // The map (or just its style) may already be gone — on component
-            // teardown, or mid-swap between two styles.
-            try {
-                setTrailCoordinates(currentMap, []);
-            } catch {
-                // Nothing to clear.
-            }
-        };
+        // Only the animation is stopped here. Clearing the line as well would blank it
+        // on every re-run — and this effect re-runs whenever the timeline moves, which
+        // read as a flicker. A trail that is really gone publishes an empty list (see
+        // the trail claim's release), and that draws as nothing by itself.
+        return cancelTrailAnimation;
     });
 
     /*
@@ -838,6 +821,7 @@
         const pinX = PIN_WIDTH / 2; // pin half-width around its anchor
         const pinTop = PIN_HEIGHT;  // pin height above its anchor
         const rect = mapCamera.contentRect;
+        const overlay = mapCamera.overlayRect;
 
         const padding = {
             top: gap + pinTop,
@@ -845,20 +829,29 @@
             bottom: gap, // anchor sits at the pin's bottom tip → no overhang below
             left: gap + pinX
         };
-        if (rect == null || rect.width === 0 || rect.height === 0) return padding;
 
         const { clientWidth: w, clientHeight: h } = currentMap.getContainer();
-        const cardRight = rect.left + rect.width;
-        const cardBottom = rect.top + rect.height;
 
-        if (rect.width <= rect.height) {
-            // Tall card → a vertical strip; reserve the left or right column.
-            if (rect.left <= w - cardRight) padding.left = cardRight + gap + pinX;
-            else padding.right = w - rect.left + gap + pinX;
-        } else {
-            // Wide card → a horizontal strip; reserve the top or bottom row.
-            if (rect.top <= h - cardBottom) padding.top = cardBottom + gap + pinTop;
-            else padding.bottom = h - rect.top + gap;
+        if (rect != null && rect.width > 0 && rect.height > 0) {
+            const cardRight = rect.left + rect.width;
+            const cardBottom = rect.top + rect.height;
+
+            if (rect.width <= rect.height) {
+                // Tall card → a vertical strip; reserve the left or right column.
+                if (rect.left <= w - cardRight) padding.left = cardRight + gap + pinX;
+                else padding.right = w - rect.left + gap + pinX;
+            } else {
+                // Wide card → a horizontal strip; reserve the top or bottom row.
+                if (rect.top <= h - cardBottom) padding.top = cardBottom + gap + pinTop;
+                else padding.bottom = h - rect.top + gap;
+            }
+        }
+
+        // The strip a page draws beside the card (see map_overlay) is docked to the
+        // bottom edge, so it takes the row it stands in out of the free area — on top
+        // of whatever edge the card already claimed.
+        if (overlay != null) {
+            padding.bottom = Math.max(padding.bottom, h - overlay.top + gap);
         }
 
         // If the card covers (almost) the whole viewport there is no free area

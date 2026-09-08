@@ -7,14 +7,15 @@
     import UserIcon from "$lib/app/shell/UserIcon.svelte";
     import {isReconnecting, startWebappSocket} from "$lib/state/webapp_socket.svelte";
     import {startForeignShareSync} from "$lib/state/share_socket.svelte";
-    import {setContentRect} from "$lib/state/map_camera.svelte";
+    import {setContentRect, setOverlayRect, type ContentRect} from "$lib/state/map_camera.svelte";
+    import {mapOverlay} from "$lib/state/map_overlay.svelte";
     import CameraModeSwitch from "$lib/app/shell/map/CameraModeSwitch.svelte";
     import {CircleNotchIcon} from "phosphor-svelte";
     import {page} from "$app/state";
     import {beforeNavigate} from "$app/navigation";
     import {cubicOut} from "svelte/easing";
     import {locale} from "svelte-i18n";
-    import { fly } from 'svelte/transition';
+    import { fade, fly } from 'svelte/transition';
 
     let { children } = $props();
 
@@ -26,7 +27,11 @@
         if (active) document.documentElement.lang = active;
     });
 
-    let cardEl: HTMLDivElement | null = $state(null);
+    let cardEl: HTMLElement | null = $state(null);
+    let stripEl: HTMLElement | null = $state(null);
+
+    /** How long the strip beside the card takes to come and go, in milliseconds. */
+    const STRIP_FADE = 220;
 
     // Direction of the last client-side navigation, used to drive the
     // iOS-style push/pop slide: deeper routes push forward, shallower pop back.
@@ -92,15 +97,20 @@
         return () => mq.removeEventListener("change", onChange);
     })
 
-    // Keep the store in sync with the card's position/size so the map can inset
-    // its viewport padding to avoid placing pins behind the card.
-    $effect(() => {
-        const el = cardEl;
+    // Keep the store in sync with what the overlays cover, so the map can inset its
+    // viewport padding and never place pins behind them. An element that is not
+    // drawn — the strip while it is empty or hidden — measures 0 and is published
+    // as "covers nothing" rather than as a box at the origin.
+    const trackRect = (el: HTMLElement | null, publish: (rect: ContentRect | null) => void) => {
         if (el == null) return;
 
         const update = () => {
             const rect = el.getBoundingClientRect();
-            setContentRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+            publish(
+                rect.width === 0 || rect.height === 0
+                    ? null
+                    : { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+            );
         };
         update();
 
@@ -111,9 +121,12 @@
         return () => {
             observer.disconnect();
             window.removeEventListener("resize", update);
-            setContentRect(null);
+            publish(null);
         };
-    });
+    };
+
+    $effect(() => trackRect(cardEl, setContentRect));
+    $effect(() => trackRect(stripEl, setOverlayRect));
 </script>
 
 <svelte:head>
@@ -125,15 +138,24 @@
     <MapComponent />
 </div>
 
-<main class="pointer-events-none relative z-10 flex h-full w-full flex-col p-4">
-    <div
+<!-- Everything drawn on top of the map lives in one grid laid over it, rather
+     than each overlay positioning itself against the viewport. The columns are
+     what used to be the card's own widths, so the card fills the first one and
+     the space it leaves is a track a page can draw into (see mapOverlay). Below
+     md the card takes the full width and that middle track does not exist, so
+     the grid drops to card + controls and the strip stays hidden. -->
+<div
+        class="pointer-events-none fixed inset-0 z-10 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 p-4
+           md:grid-cols-[min(50%,25rem)_minmax(0,1fr)_auto]
+           lg:grid-cols-[min(33.333%,25rem)_minmax(0,1fr)_auto]
+           xl:grid-cols-[25rem_minmax(0,1fr)_auto]"
+>
+    <main
             bind:this={cardEl}
-            class="xl-card pointer-events-auto relative h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
-               md:w-1/2
-               lg:w-1/3
+            class="xl-card pointer-events-auto relative col-start-1 col-end-[-1] row-span-full h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
+               md:col-end-2
                xl:mt-auto
-               xl:h-[66.666dvh]
-               xl:w-100"
+               xl:h-[66.666dvh]"
     >
         {#if !$authInitialized}
             <div class="absolute inset-0 flex items-center justify-center">
@@ -162,8 +184,36 @@
                 </div>
             </div>
         {/if}
+    </main>
+
+    <!-- The strip a page can fill, between the card and the camera switch. It fades
+         with the navigation that brings it: a page slides in over 320 ms, and a strip
+         cutting in at the start of that (or out at its end) reads as a separate,
+         unrelated thing happening. Two pages that both fill it hand it over without a
+         fade — the strip stays, only its contents change. -->
+    <div
+            bind:this={stripEl}
+            class="pointer-events-none relative col-start-2 row-start-3 hidden self-end md:block"
+    >
+        {#if mapOverlay.content}
+            <div transition:fade={{duration: reducedMotion ? 0 : STRIP_FADE, easing: cubicOut}}>
+                {@render mapOverlay.content()}
+            </div>
+        {/if}
     </div>
-</main>
+
+    {#if $currentUser}
+        <!-- The extra padding on small screens is what the icon used to carry on
+             top of the overlay inset, so it keeps its distance from the corner. -->
+        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-1 justify-self-end max-md:p-4">
+            <UserIcon />
+        </div>
+
+        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-3 self-end justify-self-end">
+            <CameraModeSwitch />
+        </div>
+    {/if}
+</div>
 
 <style>
     @media (min-width: 1280px) and (max-height: 600px) {
@@ -172,13 +222,3 @@
         }
     }
 </style>
-
-{#if $currentUser}
-    <div class="fixed right-0 top-0 z-20 max-md:p-8 md:p-4">
-        <UserIcon />
-    </div>
-
-    <div class="fixed bottom-0 right-0 z-20 p-4">
-        <CameraModeSwitch />
-    </div>
-{/if}

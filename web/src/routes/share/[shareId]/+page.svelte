@@ -7,6 +7,8 @@
     import {ShareSubscription, shareOriginBase} from "$lib/state/share_socket.svelte";
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
+    import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
+    import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
     import {_} from "svelte-i18n";
 
     let shareId = $derived(page.params.shareId);
@@ -74,6 +76,7 @@
     // time, and only the claim keeps this one from taking the map back on teardown.
     const cameraTarget = claimCameraTarget();
     const mapTrail = claimMapTrail();
+    const mapOverlay = claimMapOverlay();
 
     // Hand the camera to the detail scope (and highlight the pin, present for
     // same-server shares) while the page is open.
@@ -86,6 +89,22 @@
     $effect(() => {
         mapTrail.set(history.points, shareId ? `share:${shareId}` : null);
         return () => mapTrail.release();
+    });
+
+    // A share is read the same way a device is: the same strip beside the map, the
+    // same window and marked range, and the same line answering both. What a share
+    // hands out is less — how far its history reaches is its owner's decision — but
+    // that is a matter of the points, not of how they are read.
+    $effect(() => {
+        mapOverlay.set(timeline);
+        return () => mapOverlay.release();
+    });
+
+    let timelineView = $state<TimelineView | null>(null);
+    let timelineSelection = $state<TimelineRange | null>(null);
+
+    $effect(() => {
+        mapTrail.focus(timelineView, timelineSelection);
     });
 
     let historyState: HistoryState = $derived.by(() => {
@@ -111,3 +130,18 @@
         <p class="px-2 mt-4 text-sm text-muted-foreground">{$_("common.loading")}</p>
     {/if}
 </div>
+
+<!-- Nothing to lay a timeline over until the history has arrived, and the two ends
+     below would read past the end of an empty list. -->
+{#snippet timeline()}
+    {#if history.points.length > 0}
+        <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+            <Timeline
+                    oldestPoint={new Date(history.points[0].timestamp)}
+                    newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+                    bind:view={timelineView}
+                    bind:selection={timelineSelection}
+            />
+        </div>
+    {/if}
+{/snippet}

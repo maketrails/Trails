@@ -102,7 +102,8 @@
         "title": "Delete device",
         "description": "Do you really want to delete “{name}”? Existing shares of this device become invalid. This action cannot be undone."
       }
-    }
+    },
+    "export_gpx": "Export this stretch as GPX"
   },
   "shares": {
     "shared_with_me": "Shared with me",
@@ -198,6 +199,27 @@
     },
     "bundle": {
       "label": "{count} devices at this spot"
+    }
+  },
+  "timeline": {
+    "label": "History timeline",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "fit": "Show the whole history",
+    "scrollbar": {
+      "window": "Visible window",
+      "start": "Start of the visible window",
+      "end": "End of the visible window"
+    },
+    "selection": {
+      "start": "Start of the marked range",
+      "end": "End of the marked range",
+      "clear": "Clear the marked range"
+    },
+    "range": {
+      "edit": "Edit the marked range",
+      "from": "From",
+      "to": "To"
     }
   }
 }

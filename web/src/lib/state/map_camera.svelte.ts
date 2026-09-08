@@ -32,6 +32,7 @@ export type DetailCameraMode =
 export type CameraScope = "general" | "detail";
 
 let contentRect = $state<ContentRect | null>(null);
+let overlayRect = $state<ContentRect | null>(null);
 let targetId = $state<string | null>(null);
 
 // The two modes are deliberately separate state: switching to manual inside a
@@ -48,6 +49,15 @@ let detailMode = $state<DetailCameraMode>(DETAIL_DEFAULT_MODE);
 /** Store the current bounding box of the page content. */
 export function setContentRect(rect: ContentRect | null) {
     contentRect = rect;
+}
+
+/**
+ * Store the current bounding box of the strip a page draws next to the card
+ * (see map_overlay), or `null` while it is empty. It covers the map the same way
+ * the card does, so the camera has to keep its pins clear of it too.
+ */
+export function setOverlayRect(rect: ContentRect | null) {
+    overlayRect = rect;
 }
 
 /**
@@ -121,6 +131,10 @@ export function releaseCameraToUser() {
 export const mapCamera = {
     get contentRect() {
         return contentRect;
+    },
+    /** Box of the strip beside the card, or `null` while nothing is drawn in it. */
+    get overlayRect() {
+        return overlayRect;
     },
     /** The opened device/share, or null on the overview. */
     get targetId() {
