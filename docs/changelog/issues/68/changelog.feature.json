@@ -1,0 +1,10 @@
+{
+  "title": "History timeline",
+  "description": "The web app shows a timeline next to the map. It opens on the last seven days of a device's history and can be moved and zoomed by dragging, scrolling, pinching or with its scrollbar.",
+  "localized": {
+    "de": {
+      "title": "Verlaufszeitleiste",
+      "description": "Die Web-App zeigt neben der Karte eine Zeitleiste. Sie öffnet mit den letzten sieben Tagen des Geräteverlaufs und lässt sich per Ziehen, Scrollen, Pinch oder über ihre Scrollleiste bewegen und zoomen."
+    }
+  }
+}
