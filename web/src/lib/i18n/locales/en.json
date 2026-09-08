@@ -102,7 +102,8 @@
         "title": "Delete device",
         "description": "Do you really want to delete “{name}”? Existing shares of this device become invalid. This action cannot be undone."
       }
-    }
+    },
+    "export_gpx": "Export this stretch as GPX"
   },
   "shares": {
     "shared_with_me": "Shared with me",

@@ -11,6 +11,7 @@
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
+    import {DownloadSimpleIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
     import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
 
@@ -70,6 +71,18 @@
 
     let imageUrl = $derived(device ? `/api/v1/devices/image/${device.manufacturer}-${device.model}` : null);
 
+    // What an export covers: the marked range, or the whole window while nothing is
+    // marked. Whatever the timeline highlights is what leaves the app.
+    let exportRange = $derived(timelineSelection ?? timelineView);
+    let gpxUrl = $derived(
+        device != null && exportRange != null
+            ? `/api/v1/devices/${device.id}/history/gpx`
+                + `?start=${exportRange.start.getTime()}`
+                + `&end=${exportRange.end.getTime()}`
+                + `&source=${historySource}`
+            : null,
+    );
+
     let historyState: HistoryState = $derived.by(() => {
         if (!device || !history) return {type: "loading"}
         if (history.historySeconds === 0) return {type: "not-available"}
@@ -114,6 +127,22 @@
     {/if}
 </div>
 
+<!-- The server names the file after the device and the window, so the link carries
+     no name of its own. -->
+{#snippet exportAction()}
+    {#if gpxUrl != null}
+        <a
+                href={gpxUrl}
+                download
+                title={$_("devices.export_gpx")}
+                aria-label={$_("devices.export_gpx")}
+                class="flex size-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+        >
+            <DownloadSimpleIcon size={16} />
+        </a>
+    {/if}
+{/snippet}
+
 <!-- Nothing to lay a timeline over until the history has arrived, and the two
      ends below would read past the end of an empty list. -->
 {#snippet timeline()}
@@ -124,6 +153,7 @@
                     newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
                     bind:view={timelineView}
                     bind:selection={timelineSelection}
+                    actions={exportAction}
             />
         </div>
     {/if}

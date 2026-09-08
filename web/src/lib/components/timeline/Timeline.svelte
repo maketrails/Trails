@@ -1,5 +1,6 @@
 <script lang="ts">
     import {ArrowsOutLineHorizontalIcon, MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon, XIcon} from "phosphor-svelte";
+    import type {Snippet} from "svelte";
     import {_, locale} from "svelte-i18n";
     import TimelineAxis from "./TimelineAxis.svelte";
     import TimelineScrollbar from "./TimelineScrollbar.svelte";
@@ -15,6 +16,7 @@
         newestPoint,
         view = $bindable(null),
         selection = $bindable(null),
+        actions,
     }: {
         /** First moment there is data for. */
         oldestPoint: Date;
@@ -33,6 +35,12 @@
          * assigning to it marks a range from the outside.
          */
         selection?: TimelineRange | null;
+        /**
+         * Drawn in the header, before the zoom controls. For whatever the timeline is
+         * about that the timeline itself has no business knowing — exporting what is
+         * marked, say.
+         */
+        actions?: Snippet<[]>;
     } = $props();
 
     /** How much history the timeline opens on, at most. */
@@ -183,6 +191,7 @@
         {/if}
 
         <div class="flex shrink-0 flex-row items-center gap-1">
+            {@render actions?.()}
             {@render control($_("timeline.zoom_out"), () => timeline.zoomBy(1 / ZOOM_STEP), MagnifyingGlassMinusIcon)}
             {@render control($_("timeline.zoom_in"), () => timeline.zoomBy(ZOOM_STEP), MagnifyingGlassPlusIcon)}
             {@render control($_("timeline.fit"), () => timeline.fit(), ArrowsOutLineHorizontalIcon)}
