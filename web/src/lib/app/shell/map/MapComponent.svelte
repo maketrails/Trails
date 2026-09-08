@@ -7,7 +7,16 @@
     import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
-    import { mapTrail, type TrailRange } from "$lib/state/map_trail.svelte";
+    import { mapTrail } from "$lib/state/map_trail.svelte";
+    import {
+        bandFlags,
+        gapFlags,
+        rawFlags,
+        toCoordinates,
+        trailData,
+        type TrailBand,
+        type TrailFocus
+    } from "./trail_features";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
@@ -83,9 +92,6 @@
      */
     const trailRawColor = $derived(darkMode.current ? "#a78bfa" : "#7c3aed");
 
-    /** Which stretch of the trail a segment belongs to, seen from the timeline. */
-    type TrailBand = "before" | "window" | "after" | "selected";
-
     /**
      * How the line answers the timeline: what the window shows is white, what lies
      * before it recedes into the map as dark grey, what lies after it stays light but
@@ -112,100 +118,6 @@
     // space, so panning, zooming, rotating or tilting alone can bundle them or pull
     // them apart again — this is what tells the pin effect to look anew.
     let cameraEpoch = $state(0);
-
-    // Minimal GeoJSON shape for the trail. Spelled out locally because
-    // @types/geojson isn't a dependency, so the global `GeoJSON` namespace that
-    // mapbox-gl's own typings reference is unavailable here.
-    type TrailFeature = {
-        type: "Feature";
-        properties: { gap: boolean; raw: boolean; band: TrailBand };
-        geometry: { type: "LineString"; coordinates: number[][] };
-    };
-    type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
-
-    /**
-     * Anything longer than this between two consecutive points is a recording gap:
-     * where the device actually went in between is unknown, so that stretch is
-     * drawn as a faint dotted hint instead of a solid line.
-     */
-    const TRAIL_GAP_MS = 60_000;
-
-    /**
-     * Per-point flag: `gaps[i]` marks the segment from point `i - 1` to `i` as a
-     * gap. Index 0 has no incoming segment and is always false, which keeps the
-     * flags aligned with {@link toCoordinates} — the animation relies on that.
-     */
-    function gapFlags(points: HistoryPoint[]): boolean[] {
-        return points.map((point, i) => i > 0 && point.timestamp - points[i - 1].timestamp > TRAIL_GAP_MS);
-    }
-
-    /**
-     * Per-point flag in the same "incoming segment" convention as
-     * {@link gapFlags}: `raws[i]` marks the segment from point `i - 1` to `i` as
-     * unoptimized. The changeover segment counts as unoptimized — it is the one
-     * connection no optimizer has looked at.
-     */
-    function rawFlags(points: HistoryPoint[]): boolean[] {
-        return points.map((point, i) => i > 0 && point.is_raw);
-    }
-
-    /** Which band [time] falls into. Without a window the whole trail is on show. */
-    function bandOf(time: number, window: TrailRange | null, selection: TrailRange | null): TrailBand {
-        if (selection != null && time >= selection.start.getTime() && time <= selection.end.getTime()) {
-            return "selected";
-        }
-        if (window == null) return "window";
-        if (time < window.start.getTime()) return "before";
-        if (time > window.end.getTime()) return "after";
-        return "window";
-    }
-
-    /**
-     * Per-point flag in the same "incoming segment" convention as {@link gapFlags}:
-     * the segment ending in point `i` is coloured for the band that point falls in.
-     */
-    function bandFlags(points: HistoryPoint[], window: TrailRange | null, selection: TrailRange | null): TrailBand[] {
-        return points.map((point) => bandOf(point.timestamp, window, selection));
-    }
-
-    /**
-     * Splits the coordinates into one LineString per run of same-kind segments, so
-     * the solid and the dotted layer can each filter for their own features. Runs
-     * share their boundary point, which keeps the line visually continuous.
-     */
-    function trailData(
-        coordinates: number[][],
-        gaps: boolean[],
-        raws: boolean[] = [],
-        bands: TrailBand[] = []
-    ): TrailData {
-        const features: TrailFeature[] = [];
-        // A LineString needs at least two positions; fewer means nothing to draw.
-        let runStart = 1;
-        for (let segment = 1; segment < coordinates.length; segment++) {
-            const gap = gaps[segment] ?? false;
-            const raw = raws[segment] ?? false;
-            const band = bands[segment] ?? "window";
-            const isLast = segment === coordinates.length - 1;
-            const sameKind =
-                (gaps[segment + 1] ?? false) === gap
-                && (raws[segment + 1] ?? false) === raw
-                && (bands[segment + 1] ?? "window") === band;
-            if (!isLast && sameKind) continue;
-
-            features.push({
-                type: "Feature",
-                properties: { gap, raw, band },
-                geometry: { type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1) }
-            });
-            runStart = segment + 1;
-        }
-        return { type: "FeatureCollection", features };
-    }
-
-    function toCoordinates(points: HistoryPoint[]): number[][] {
-        return points.map((point) => [point.longitude, point.latitude]);
-    }
 
     /** Keeps the trail below the style's labels so road/place names stay readable. */
     function firstSymbolLayerId(currentMap: mapboxgl.Map): string | undefined {
@@ -379,14 +291,14 @@
         currentMap: mapboxgl.Map,
         points: HistoryPoint[],
         animateFrom: number | null,
-        focus: { window: TrailRange | null; selection: TrailRange | null }
+        focus: TrailFocus
     ) {
         cancelTrailAnimation();
 
         const coordinates = toCoordinates(points);
         const gaps = gapFlags(points);
         const raws = rawFlags(points);
-        const bands = bandFlags(points, focus.window, focus.selection);
+        const bands = bandFlags(points, focus);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
             setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
