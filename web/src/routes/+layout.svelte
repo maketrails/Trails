@@ -26,7 +26,7 @@
         if (active) document.documentElement.lang = active;
     });
 
-    let cardEl: HTMLDivElement | null = $state(null);
+    let cardEl: HTMLElement | null = $state(null);
 
     // Direction of the last client-side navigation, used to drive the
     // iOS-style push/pop slide: deeper routes push forward, shallower pop back.
@@ -125,10 +125,17 @@
     <MapComponent />
 </div>
 
-<main class="pointer-events-none relative z-10 flex h-full w-full flex-col p-4">
-    <div
+<!-- Everything drawn on top of the map lives in one grid laid over it, rather
+     than each overlay positioning itself against the viewport: the card spans
+     the whole grid (it sizes itself), the two controls sit in the right-hand
+     column's top and bottom row. Overlays that share a cell keep painting in
+     DOM order, so the controls stay above the card exactly as before. -->
+<div
+        class="pointer-events-none fixed inset-0 z-10 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_minmax(0,1fr)_auto] p-4"
+>
+    <main
             bind:this={cardEl}
-            class="xl-card pointer-events-auto relative h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
+            class="xl-card pointer-events-auto relative col-span-full row-span-full h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
                md:w-1/2
                lg:w-1/3
                xl:mt-auto
@@ -162,8 +169,20 @@
                 </div>
             </div>
         {/if}
-    </div>
-</main>
+    </main>
+
+    {#if $currentUser}
+        <!-- The extra padding on small screens is what the icon used to carry on
+             top of the overlay inset, so it keeps its distance from the corner. -->
+        <div class="pointer-events-auto relative col-start-2 row-start-1 justify-self-end max-md:p-4">
+            <UserIcon />
+        </div>
+
+        <div class="pointer-events-auto relative col-start-2 row-start-3 self-end justify-self-end">
+            <CameraModeSwitch />
+        </div>
+    {/if}
+</div>
 
 <style>
     @media (min-width: 1280px) and (max-height: 600px) {
@@ -172,13 +191,3 @@
         }
     }
 </style>
-
-{#if $currentUser}
-    <div class="fixed right-0 top-0 z-20 max-md:p-8 md:p-4">
-        <UserIcon />
-    </div>
-
-    <div class="fixed bottom-0 right-0 z-20 p-4">
-        <CameraModeSwitch />
-    </div>
-{/if}
