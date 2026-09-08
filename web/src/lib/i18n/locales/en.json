@@ -199,5 +199,16 @@
     "bundle": {
       "label": "{count} devices at this spot"
     }
+  },
+  "timeline": {
+    "label": "History timeline",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "fit": "Show the whole history",
+    "scrollbar": {
+      "window": "Visible window",
+      "start": "Start of the visible window",
+      "end": "End of the visible window"
+    }
   }
 }

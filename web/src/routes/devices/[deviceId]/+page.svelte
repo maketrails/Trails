@@ -12,6 +12,7 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import {_} from "svelte-i18n";
+    import Timeline from "$lib/components/timeline/Timeline.svelte";
 
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
@@ -104,8 +105,15 @@
     {/if}
 </div>
 
+<!-- Nothing to lay a timeline over until the history has arrived, and the two
+     ends below would read past the end of an empty list. -->
 {#snippet timeline()}
-    <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 p-4 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
-        timeline
-    </div>
+    {#if history.points.length > 0}
+        <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+            <Timeline
+                    oldestPoint={new Date(history.points[0].timestamp)}
+                    newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+            />
+        </div>
+    {/if}
 {/snippet}

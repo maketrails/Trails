@@ -199,5 +199,16 @@
     "bundle": {
       "label": "{count} Geräte an dieser Stelle"
     }
+  },
+  "timeline": {
+    "label": "Verlaufszeitleiste",
+    "zoom_in": "Vergrößern",
+    "zoom_out": "Verkleinern",
+    "fit": "Gesamten Verlauf anzeigen",
+    "scrollbar": {
+      "window": "Sichtbarer Ausschnitt",
+      "start": "Beginn des sichtbaren Ausschnitts",
+      "end": "Ende des sichtbaren Ausschnitts"
+    }
   }
 }
