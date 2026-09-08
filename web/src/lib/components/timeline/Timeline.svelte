@@ -210,60 +210,6 @@
             : mode === WheelEvent.DOM_DELTA_PAGE ? delta * width
                 : delta;
 
-    /**
-     * WebKit's take on a trackpad gesture, which is the one macOS apps themselves
-     * work with: `scale` grows as the fingers spread, and the event follows their
-     * centre while they travel. Zooming and moving therefore arrive together.
-     *
-     * Chromium has no equivalent. It splits the same gesture into a pinch (a wheel
-     * event with ctrlKey) and a scroll, and hands over only one of them at a time —
-     * which is why zooming and moving at once can only be approximated there.
-     */
-    interface GestureEventLike extends Event {
-        scale: number;
-        clientX: number;
-    }
-
-    /** The running WebKit gesture: what its scale and centre were the last time. */
-    let gesture: {scale: number; x: number} | null = null;
-
-    function onGestureStart(event: GestureEventLike) {
-        // Otherwise Safari zooms the page rather than the timeline.
-        event.preventDefault();
-        gesture = {scale: event.scale, x: event.clientX};
-    }
-
-    function onGestureChange(event: GestureEventLike) {
-        event.preventDefault();
-        if (gesture == null || event.scale <= 0) return;
-
-        // Measured before the zoom, at the scale the fingers moved on. Dragging the
-        // centre to the right pulls earlier moments into view, exactly as a one-finger
-        // drag does.
-        const shift = -(event.clientX - gesture.x) * msPerPixel;
-        zoomBy(gesture.scale / event.scale, anchorOf(event));
-        panBy(shift);
-        gesture = {scale: event.scale, x: event.clientX};
-    }
-
-    function onGestureEnd(event: GestureEventLike) {
-        event.preventDefault();
-        gesture = null;
-    }
-
-    /**
-     * The centre of the last pinch wheel event. Chromium moves it with the fingers
-     * even while it withholds the scroll, so the difference between two of them is
-     * the travel the gesture would otherwise lose.
-     */
-    let pinchCentre: {x: number; at: number} | null = null;
-
-    /** Longest pause that still counts as the same gesture, in milliseconds. */
-    const PINCH_GAP = 120;
-
-    /** Travel above this in one event is a jump, not fingers — a moved mouse, say. */
-    const PINCH_TRAVEL = 40;
-
     function onWheel(event: WheelEvent) {
         event.preventDefault();
 
@@ -271,21 +217,7 @@
         // held modifier, are the zoom gestures. Everything else scrolls sideways,
         // whichever axis the gesture came in on, so a two-finger swipe pans.
         if (event.ctrlKey || event.metaKey) {
-            // Safari sends both its gesture events and these; the gesture is the
-            // richer one, so while it runs this is a duplicate of it.
-            if (gesture != null) return;
-
-            const continued = pinchCentre != null && event.timeStamp - pinchCentre.at < PINCH_GAP;
-            const travel = continued ? event.clientX - pinchCentre!.x : 0;
-            pinchCentre = {x: event.clientX, at: event.timeStamp};
-
-            // Whatever the browser does give up of the fingers' travel — as deltaX, or
-            // as its centre moving between two events — is applied along with the zoom.
-            const travelled = Math.abs(travel) <= PINCH_TRAVEL ? travel : 0;
-            const shift = (wheelPixels(event.deltaX, event.deltaMode) - travelled) * msPerPixel;
-
             zoomBy(Math.exp(wheelPixels(event.deltaY, event.deltaMode) * 0.01), anchorOf(event));
-            if (shift !== 0) panBy(shift);
             return;
         }
 
@@ -293,25 +225,14 @@
         panBy(wheelPixels(delta, event.deltaMode) * msPerPixel);
     }
 
-    // The listeners are attached by hand because they have to be non-passive: only
-    // then can they keep a trackpad pinch from zooming the whole page instead.
+    // The listener is attached by hand because it has to be non-passive: only then
+    // can it keep a trackpad pinch from zooming the whole page instead.
     $effect(() => {
         const node = trackEl;
         if (node == null) return;
 
-        const gestures: [string, EventListener][] = [
-            ["gesturestart", onGestureStart as EventListener],
-            ["gesturechange", onGestureChange as EventListener],
-            ["gestureend", onGestureEnd as EventListener],
-        ];
-
         node.addEventListener("wheel", onWheel, {passive: false});
-        for (const [name, listener] of gestures) node.addEventListener(name, listener, {passive: false});
-
-        return () => {
-            node.removeEventListener("wheel", onWheel);
-            for (const [name, listener] of gestures) node.removeEventListener(name, listener);
-        };
+        return () => node.removeEventListener("wheel", onWheel);
     });
 
     // Where each pressed pointer currently is. One of them drags the timeline, two
