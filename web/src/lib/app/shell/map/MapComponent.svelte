@@ -7,7 +7,7 @@
     import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
-    import { mapTrail } from "$lib/state/map_trail.svelte";
+    import { mapTrail, type TrailRange } from "$lib/state/map_trail.svelte";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
@@ -83,6 +83,25 @@
      */
     const trailRawColor = $derived(darkMode.current ? "#a78bfa" : "#7c3aed");
 
+    /** Which stretch of the trail a segment belongs to, seen from the timeline. */
+    type TrailBand = "before" | "window" | "after" | "selected";
+
+    /**
+     * How the line answers the timeline: what the window shows is white, what lies
+     * before it recedes into the map as dark grey, what lies after it stays light but
+     * quiet, and a marked range is the one stretch that carries colour.
+     *
+     * The highlight is a colour of its own rather than the theme's `--primary`: that
+     * token is near-black in light mode and near-white in dark, and neither would be
+     * seen on a map. It is the same amber the timeline marks a range in.
+     */
+    const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
+        window: "#ffffff",
+        before: "rgba(51,65,85,0.55)",
+        after: "rgba(255,255,255,0.5)",
+        selected: "#f59e0b"
+    };
+
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
@@ -99,7 +118,7 @@
     // mapbox-gl's own typings reference is unavailable here.
     type TrailFeature = {
         type: "Feature";
-        properties: { gap: boolean; raw: boolean };
+        properties: { gap: boolean; raw: boolean; band: TrailBand };
         geometry: { type: "LineString"; coordinates: number[][] };
     };
     type TrailData = { type: "FeatureCollection"; features: TrailFeature[] };
@@ -130,26 +149,53 @@
         return points.map((point, i) => i > 0 && point.is_raw);
     }
 
+    /** Which band [time] falls into. Without a window the whole trail is on show. */
+    function bandOf(time: number, window: TrailRange | null, selection: TrailRange | null): TrailBand {
+        if (selection != null && time >= selection.start.getTime() && time <= selection.end.getTime()) {
+            return "selected";
+        }
+        if (window == null) return "window";
+        if (time < window.start.getTime()) return "before";
+        if (time > window.end.getTime()) return "after";
+        return "window";
+    }
+
+    /**
+     * Per-point flag in the same "incoming segment" convention as {@link gapFlags}:
+     * the segment ending in point `i` is coloured for the band that point falls in.
+     */
+    function bandFlags(points: HistoryPoint[], window: TrailRange | null, selection: TrailRange | null): TrailBand[] {
+        return points.map((point) => bandOf(point.timestamp, window, selection));
+    }
+
     /**
      * Splits the coordinates into one LineString per run of same-kind segments, so
      * the solid and the dotted layer can each filter for their own features. Runs
      * share their boundary point, which keeps the line visually continuous.
      */
-    function trailData(coordinates: number[][], gaps: boolean[], raws: boolean[] = []): TrailData {
+    function trailData(
+        coordinates: number[][],
+        gaps: boolean[],
+        raws: boolean[] = [],
+        bands: TrailBand[] = []
+    ): TrailData {
         const features: TrailFeature[] = [];
         // A LineString needs at least two positions; fewer means nothing to draw.
         let runStart = 1;
         for (let segment = 1; segment < coordinates.length; segment++) {
             const gap = gaps[segment] ?? false;
             const raw = raws[segment] ?? false;
+            const band = bands[segment] ?? "window";
             const isLast = segment === coordinates.length - 1;
             const sameKind =
-                (gaps[segment + 1] ?? false) === gap && (raws[segment + 1] ?? false) === raw;
+                (gaps[segment + 1] ?? false) === gap
+                && (raws[segment + 1] ?? false) === raw
+                && (bands[segment + 1] ?? "window") === band;
             if (!isLast && sameKind) continue;
 
             features.push({
                 type: "Feature",
-                properties: { gap, raw },
+                properties: { gap, raw, band },
                 geometry: { type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1) }
             });
             runStart = segment + 1;
@@ -176,15 +222,18 @@
         if (currentMap.getSource(TRAIL_SOURCE) != null) return true;
 
         try {
-            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], []) });
+            currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], [], []) });
 
-            // Violet where the track is still raw, the theme colour where it is
-            // optimized. One expression, so a stretch cannot end up in both.
+            // The band decides the colour; only inside the window does the track's own
+            // state still show through, violet where it is raw. One expression, so a
+            // stretch cannot end up in two of them.
             const lineColor: mapboxgl.ExpressionSpecification = [
-                "case",
-                ["get", "raw"],
-                trailRawColor,
-                trailColors.line
+                "match",
+                ["get", "band"],
+                "before", TRAIL_BAND_COLORS.before,
+                "after", TRAIL_BAND_COLORS.after,
+                "selected", TRAIL_BAND_COLORS.selected,
+                ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
             ];
 
             // `slot` positions the layers in the v3 "standard" style (which imports
@@ -198,7 +247,14 @@
                 type: "line",
                 slot: "middle",
                 source: TRAIL_SOURCE,
-                filter: ["!", ["get", "gap"]],
+                // Only under what is on show: the casing is there to hold a bright line
+                // off the map, and drawing it under the dimmed stretches would give them
+                // back the weight they were just relieved of.
+                filter: [
+                    "all",
+                    ["!", ["get", "gap"]],
+                    ["match", ["get", "band"], ["window", "selected"], true, false]
+                ],
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
@@ -239,10 +295,11 @@
         currentMap: mapboxgl.Map,
         coordinates: number[][],
         gaps: boolean[] = [],
-        raws: boolean[] = []
+        raws: boolean[] = [],
+        bands: TrailBand[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws));
+        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands));
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -318,15 +375,21 @@
      * from [animateFrom]. Passing the start of an animation that is already running
      * carries it on with the new geometry; null draws the finished line at once.
      */
-    function drawTrail(currentMap: mapboxgl.Map, points: HistoryPoint[], animateFrom: number | null) {
+    function drawTrail(
+        currentMap: mapboxgl.Map,
+        points: HistoryPoint[],
+        animateFrom: number | null,
+        focus: { window: TrailRange | null; selection: TrailRange | null }
+    ) {
         cancelTrailAnimation();
 
         const coordinates = toCoordinates(points);
         const gaps = gapFlags(points);
         const raws = rawFlags(points);
+        const bands = bandFlags(points, focus.window, focus.selection);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
-            setTrailCoordinates(currentMap, coordinates, gaps, raws);
+            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
             return;
         }
 
@@ -336,7 +399,7 @@
         // in the segment it replaces), so `gaps` still lines up.
         const drawUpTo = (now: number) => {
             const t = Math.min(1, (now - animateFrom) / TRAIL_ANIMATION_MS);
-            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws);
+            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands);
             return t;
         };
         const step = (now: number) => {
@@ -421,6 +484,10 @@
         const epoch = styleEpoch;
         const points = mapTrail.points;
         const trailKey = mapTrail.key;
+        // Read here so that moving the timeline re-runs this and recolours the line.
+        // The key has not changed then, so it is redrawn where its animation left it
+        // rather than growing in again.
+        const focus = { window: mapTrail.window, selection: mapTrail.selection };
 
         // `style.load` (epoch > 0) is the signal that a style is in place, and
         // deliberately not isStyleLoaded() — that one also waits for every tile to
@@ -454,7 +521,7 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
-        drawTrail(currentMap, points, animateFrom);
+        drawTrail(currentMap, points, animateFrom, focus);
 
         return () => {
             cancelTrailAnimation();

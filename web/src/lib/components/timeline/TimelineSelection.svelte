@@ -92,8 +92,10 @@
 <div class="pointer-events-none absolute inset-y-0 left-0 bg-background/50" style:width="{box.left}px"></div>
 <div class="pointer-events-none absolute inset-y-0 right-0 bg-background/50" style:width="{Math.max(0, width - box.right)}px"></div>
 
+<!-- Amber rather than the theme's `--primary`: that token is near-black in light
+     mode and near-white in dark, and the map draws the same marked range. -->
 <div
-        class="pointer-events-none absolute inset-y-0 border-x border-primary bg-primary/15"
+        class="pointer-events-none absolute inset-y-0 border-x border-amber-500 bg-amber-500/15"
         style:left="{box.left}px"
         style:width="{Math.max(0, box.right - box.left)}px"
 ></div>
@@ -113,12 +115,12 @@
                 onpointerup={onHandleUp}
                 onpointercancel={onHandleUp}
                 onkeydown={(event) => onHandleKey(handle.edge, event)}
-                class="absolute inset-y-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                class="absolute inset-y-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
                 style:left="{handle.x}px"
         >
             <!-- The grab area is wider than the mark, so the end can be caught with a
                  finger without the line having to be thick. -->
-            <div class="mx-auto h-full w-1 rounded-full bg-primary"></div>
+            <div class="mx-auto h-full w-1 rounded-full bg-amber-500"></div>
         </div>
     {/if}
 {/each}

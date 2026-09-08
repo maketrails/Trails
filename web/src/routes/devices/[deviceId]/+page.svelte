@@ -12,7 +12,7 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import {_} from "svelte-i18n";
-    import {Timeline} from "$lib/components/timeline";
+    import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
 
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
@@ -57,6 +57,15 @@
     $effect(() => {
         mapTrail.set(history.points, deviceId ? `device:${deviceId}:${historySource}` : null);
         return () => mapTrail.release();
+    });
+
+    // What the timeline shows and what is marked in it, kept on the trail: the line
+    // is coloured by it, so reading the timeline and reading the map are the same act.
+    let timelineView = $state<TimelineView | null>(null);
+    let timelineSelection = $state<TimelineRange | null>(null);
+
+    $effect(() => {
+        mapTrail.focus(timelineView, timelineSelection);
     });
 
     let imageUrl = $derived(device ? `/api/v1/devices/image/${device.manufacturer}-${device.model}` : null);
@@ -113,6 +122,8 @@
             <Timeline
                     oldestPoint={new Date(history.points[0].timestamp)}
                     newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+                    bind:view={timelineView}
+                    bind:selection={timelineSelection}
             />
         </div>
     {/if}
