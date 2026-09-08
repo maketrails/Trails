@@ -1,6 +1,6 @@
 <script lang="ts">
     import {_} from "svelte-i18n";
-    import type {DragModifiers} from "./timeline_gestures";
+    import {TIMELINE_GRIP, type DragModifiers} from "./timeline_gestures";
     import type {TimelineRange} from "./timeline_window";
 
     let {
@@ -57,8 +57,8 @@
     let held: Edge | null = null;
 
     function onHandleDown(edge: Edge, event: PointerEvent) {
-        // The track sweeps out a new selection on pointerdown; this one is meant for
-        // the end being grabbed, so it stops there.
+        // The track leaves presses on a grip alone (see TIMELINE_GRIP); stopping the
+        // event here would be too late for its listener either way.
         event.stopPropagation();
         (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
         held = edge;
@@ -103,6 +103,7 @@
 {#each [{edge: "start" as Edge, x: box.left, label: $_("timeline.selection.start"), time: range.start}, {edge: "end" as Edge, x: box.right, label: $_("timeline.selection.end"), time: range.end}] as handle (handle.edge)}
     {#if visible[handle.edge]}
         <div
+                {...{[TIMELINE_GRIP]: ""}}
                 role="slider"
                 tabindex="0"
                 aria-label={handle.label}

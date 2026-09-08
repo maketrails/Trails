@@ -38,6 +38,17 @@ export interface TimelineGestures {
     drag?: TimelineDrag;
 }
 
+/**
+ * Marks an element inside the track that handles its own drags — the ends of a
+ * marked range, say. A press that starts there is left alone.
+ *
+ * It takes an attribute rather than the child stopping the event, because Svelte
+ * delegates a component's own handlers to the document root: the listener here
+ * sits on the track itself and would see the press first, whatever the child does
+ * about it afterwards.
+ */
+export const TIMELINE_GRIP = "data-timeline-grip";
+
 /** How hard a pinch or a held-modifier wheel zooms, per pixel of travel. */
 const ZOOM_RATE = 0.01;
 
@@ -99,6 +110,9 @@ export function timelineGestures(node: HTMLElement, gestures: TimelineGestures) 
     });
 
     function onPointerDown(event: PointerEvent) {
+        const target = event.target;
+        if (target instanceof Element && target.closest(`[${TIMELINE_GRIP}]`) != null) return;
+
         // Capturing keeps the gesture alive when a finger leaves the element, and
         // stops the browser from claiming it as a scroll or a text selection.
         node.setPointerCapture(event.pointerId);
