@@ -15,7 +15,7 @@
     import {beforeNavigate} from "$app/navigation";
     import {cubicOut} from "svelte/easing";
     import {locale} from "svelte-i18n";
-    import { fly } from 'svelte/transition';
+    import { fade, fly } from 'svelte/transition';
 
     let { children } = $props();
 
@@ -29,6 +29,9 @@
 
     let cardEl: HTMLElement | null = $state(null);
     let stripEl: HTMLElement | null = $state(null);
+
+    /** How long the strip beside the card takes to come and go, in milliseconds. */
+    const STRIP_FADE = 220;
 
     // Direction of the last client-side navigation, used to drive the
     // iOS-style push/pop slide: deeper routes push forward, shallower pop back.
@@ -183,13 +186,19 @@
         {/if}
     </main>
 
-    <!-- The strip a page can fill, between the card and the camera switch. -->
+    <!-- The strip a page can fill, between the card and the camera switch. It fades
+         with the navigation that brings it: a page slides in over 320 ms, and a strip
+         cutting in at the start of that (or out at its end) reads as a separate,
+         unrelated thing happening. Two pages that both fill it hand it over without a
+         fade — the strip stays, only its contents change. -->
     <div
             bind:this={stripEl}
             class="pointer-events-none relative col-start-2 row-start-3 hidden self-end md:block"
     >
         {#if mapOverlay.content}
-            {@render mapOverlay.content()}
+            <div transition:fade={{duration: reducedMotion ? 0 : STRIP_FADE, easing: cubicOut}}>
+                {@render mapOverlay.content()}
+            </div>
         {/if}
     </div>
 
