@@ -7,7 +7,7 @@
     import UserIcon from "$lib/app/shell/UserIcon.svelte";
     import {isReconnecting, startWebappSocket} from "$lib/state/webapp_socket.svelte";
     import {startForeignShareSync} from "$lib/state/share_socket.svelte";
-    import {setContentRect} from "$lib/state/map_camera.svelte";
+    import {setContentRect, setOverlayRect, type ContentRect} from "$lib/state/map_camera.svelte";
     import {mapOverlay} from "$lib/state/map_overlay.svelte";
     import CameraModeSwitch from "$lib/app/shell/map/CameraModeSwitch.svelte";
     import {CircleNotchIcon} from "phosphor-svelte";
@@ -28,6 +28,7 @@
     });
 
     let cardEl: HTMLElement | null = $state(null);
+    let stripEl: HTMLElement | null = $state(null);
 
     // Direction of the last client-side navigation, used to drive the
     // iOS-style push/pop slide: deeper routes push forward, shallower pop back.
@@ -93,15 +94,20 @@
         return () => mq.removeEventListener("change", onChange);
     })
 
-    // Keep the store in sync with the card's position/size so the map can inset
-    // its viewport padding to avoid placing pins behind the card.
-    $effect(() => {
-        const el = cardEl;
+    // Keep the store in sync with what the overlays cover, so the map can inset its
+    // viewport padding and never place pins behind them. An element that is not
+    // drawn — the strip while it is empty or hidden — measures 0 and is published
+    // as "covers nothing" rather than as a box at the origin.
+    const trackRect = (el: HTMLElement | null, publish: (rect: ContentRect | null) => void) => {
         if (el == null) return;
 
         const update = () => {
             const rect = el.getBoundingClientRect();
-            setContentRect({ top: rect.top, left: rect.left, width: rect.width, height: rect.height });
+            publish(
+                rect.width === 0 || rect.height === 0
+                    ? null
+                    : { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+            );
         };
         update();
 
@@ -112,9 +118,12 @@
         return () => {
             observer.disconnect();
             window.removeEventListener("resize", update);
-            setContentRect(null);
+            publish(null);
         };
-    });
+    };
+
+    $effect(() => trackRect(cardEl, setContentRect));
+    $effect(() => trackRect(stripEl, setOverlayRect));
 </script>
 
 <svelte:head>
@@ -175,7 +184,10 @@
     </main>
 
     <!-- The strip a page can fill, between the card and the camera switch. -->
-    <div class="pointer-events-none relative col-start-2 row-start-3 hidden self-end md:block">
+    <div
+            bind:this={stripEl}
+            class="pointer-events-none relative col-start-2 row-start-3 hidden self-end md:block"
+    >
         {#if mapOverlay.content}
             {@render mapOverlay.content()}
         {/if}

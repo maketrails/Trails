@@ -838,6 +838,7 @@
         const pinX = PIN_WIDTH / 2; // pin half-width around its anchor
         const pinTop = PIN_HEIGHT;  // pin height above its anchor
         const rect = mapCamera.contentRect;
+        const overlay = mapCamera.overlayRect;
 
         const padding = {
             top: gap + pinTop,
@@ -845,20 +846,29 @@
             bottom: gap, // anchor sits at the pin's bottom tip → no overhang below
             left: gap + pinX
         };
-        if (rect == null || rect.width === 0 || rect.height === 0) return padding;
 
         const { clientWidth: w, clientHeight: h } = currentMap.getContainer();
-        const cardRight = rect.left + rect.width;
-        const cardBottom = rect.top + rect.height;
 
-        if (rect.width <= rect.height) {
-            // Tall card → a vertical strip; reserve the left or right column.
-            if (rect.left <= w - cardRight) padding.left = cardRight + gap + pinX;
-            else padding.right = w - rect.left + gap + pinX;
-        } else {
-            // Wide card → a horizontal strip; reserve the top or bottom row.
-            if (rect.top <= h - cardBottom) padding.top = cardBottom + gap + pinTop;
-            else padding.bottom = h - rect.top + gap;
+        if (rect != null && rect.width > 0 && rect.height > 0) {
+            const cardRight = rect.left + rect.width;
+            const cardBottom = rect.top + rect.height;
+
+            if (rect.width <= rect.height) {
+                // Tall card → a vertical strip; reserve the left or right column.
+                if (rect.left <= w - cardRight) padding.left = cardRight + gap + pinX;
+                else padding.right = w - rect.left + gap + pinX;
+            } else {
+                // Wide card → a horizontal strip; reserve the top or bottom row.
+                if (rect.top <= h - cardBottom) padding.top = cardBottom + gap + pinTop;
+                else padding.bottom = h - rect.top + gap;
+            }
+        }
+
+        // The strip a page draws beside the card (see map_overlay) is docked to the
+        // bottom edge, so it takes the row it stands in out of the free area — on top
+        // of whatever edge the card already claimed.
+        if (overlay != null) {
+            padding.bottom = Math.max(padding.bottom, h - overlay.top + gap);
         }
 
         // If the card covers (almost) the whole viewport there is no free area
