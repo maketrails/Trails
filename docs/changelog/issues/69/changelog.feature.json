@@ -1,0 +1,10 @@
+{
+  "title": "GPX export",
+  "description": "A stretch of a device's history can be downloaded as a GPX file, ready to open in any other map or route planner.",
+  "localized": {
+    "de": {
+      "title": "GPX-Export",
+      "description": "Ein Abschnitt des Geräteverlaufs lässt sich als GPX-Datei herunterladen und in jeder anderen Karte oder Routenplanung öffnen."
+    }
+  }
+}
