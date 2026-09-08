@@ -32,7 +32,7 @@
 	},
 	"dependencies": {
 		"@Julius-Babies/authentikt-svelte": "^0.3.1",
-		"@lucide/svelte": "^1.27.0",
+		"@lucide/svelte": "^1.43.0",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"dayjs": "^1.11.21",
 		"dexie": "^4.4.4",
