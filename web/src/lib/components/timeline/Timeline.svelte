@@ -217,7 +217,13 @@
         // held modifier, are the zoom gestures. Everything else scrolls sideways,
         // whichever axis the gesture came in on, so a two-finger swipe pans.
         if (event.ctrlKey || event.metaKey) {
+            // Fingers that spread and travel at the same time report both at once: the
+            // spread as deltaY, the travel as deltaX. Zooming and leaving the travel
+            // on the floor would drop half of the gesture, so both are applied — the
+            // shift is measured before the zoom, at the scale the fingers moved on.
+            const shift = wheelPixels(event.deltaX, event.deltaMode) * msPerPixel;
             zoomBy(Math.exp(wheelPixels(event.deltaY, event.deltaMode) * 0.01), anchorOf(event));
+            if (shift !== 0) panBy(shift);
             return;
         }
 
