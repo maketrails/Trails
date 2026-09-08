@@ -78,6 +78,8 @@
     const TRAIL_CASING_LAYER = "location-history-casing";
     const TRAIL_LINE_LAYER = "location-history-line";
     const TRAIL_GAP_LAYER = "location-history-gap";
+    const TRAIL_FOCUS_LINE_LAYER = "location-history-focus-line";
+    const TRAIL_FOCUS_GAP_LAYER = "location-history-focus-gap";
     const trailColors = $derived(
         darkMode.current
             ? { line: "#e2e8f0", casing: "#020617" }
@@ -148,9 +150,42 @@
                 ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
             ];
 
+            // Which stretches are on show, and which have stepped back. A trail crosses
+            // itself, so the two are drawn in two passes: the dimmed ones first, the
+            // highlighted ones last and therefore on top, where they cannot be painted
+            // over by a stretch that was meant to recede.
+            const FOCUS_BANDS = ["window", "selected"];
+            const DIMMED_BANDS = ["before", "after"];
+            const inBands = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["match", ["get", "band"], bands, true, false];
+            const solid = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["all", ["!", ["get", "gap"]], inBands(bands)];
+            const dotted = (bands: string[]): mapboxgl.ExpressionSpecification =>
+                ["all", ["get", "gap"], inBands(bands)];
+
+            // Recording gaps are drawn as dots: round caps plus a zero-length dash.
+            // Dash lengths are multiples of the line width, so 2 = one dot diameter of
+            // spacing. `line-dasharray` takes no data-driven expression, hence a layer
+            // of its own rather than a filter on the solid one.
+            const line = (id: string, filter: mapboxgl.ExpressionSpecification, gap: boolean): mapboxgl.LayerSpecification => ({
+                id,
+                type: "line",
+                slot: "middle",
+                source: TRAIL_SOURCE,
+                filter,
+                layout: { "line-cap": "round", "line-join": "round" },
+                paint: {
+                    "line-color": lineColor,
+                    "line-width": 3.5,
+                    "line-opacity": gap ? 0.45 : 0.9,
+                    ...(gap ? { "line-dasharray": [0, 2] as [number, number] } : {})
+                }
+            });
+
             // `slot` positions the layers in the v3 "standard" style (which imports
             // its basemap, so it exposes no symbol layers to sort against); the
-            // beforeId does the same job in the classic night style.
+            // beforeId does the same job in the classic night style. Inserting several
+            // layers before the same one stacks them in insertion order.
             const beforeId = firstSymbolLayerId(currentMap);
             // Solid stretches only — a solid casing under the dots would undo the
             // point of drawing them faintly.
@@ -162,41 +197,15 @@
                 // Only under what is on show: the casing is there to hold a bright line
                 // off the map, and drawing it under the dimmed stretches would give them
                 // back the weight they were just relieved of.
-                filter: [
-                    "all",
-                    ["!", ["get", "gap"]],
-                    ["match", ["get", "band"], ["window", "selected"], true, false]
-                ],
+                filter: solid(FOCUS_BANDS),
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
-            currentMap.addLayer({
-                id: TRAIL_LINE_LAYER,
-                type: "line",
-                slot: "middle",
-                source: TRAIL_SOURCE,
-                filter: ["!", ["get", "gap"]],
-                layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": lineColor, "line-width": 3.5, "line-opacity": 0.9 }
-            }, beforeId);
-            // Recording gaps: round caps plus a zero-length dash renders as dots.
-            // Dash lengths are multiples of the line width, so 2 = one dot diameter
-            // of spacing. `line-dasharray` takes no data-driven expression, hence a
-            // layer of its own rather than a filter on the one above.
-            currentMap.addLayer({
-                id: TRAIL_GAP_LAYER,
-                type: "line",
-                slot: "middle",
-                source: TRAIL_SOURCE,
-                filter: ["get", "gap"],
-                layout: { "line-cap": "round", "line-join": "round" },
-                paint: {
-                    "line-color": lineColor,
-                    "line-width": 3.5,
-                    "line-opacity": 0.45,
-                    "line-dasharray": [0, 2]
-                }
-            }, beforeId);
+
+            currentMap.addLayer(line(TRAIL_LINE_LAYER, solid(DIMMED_BANDS), false), beforeId);
+            currentMap.addLayer(line(TRAIL_GAP_LAYER, dotted(DIMMED_BANDS), true), beforeId);
+            currentMap.addLayer(line(TRAIL_FOCUS_LINE_LAYER, solid(FOCUS_BANDS), false), beforeId);
+            currentMap.addLayer(line(TRAIL_FOCUS_GAP_LAYER, dotted(FOCUS_BANDS), true), beforeId);
             return true;
         } catch {
             return false;

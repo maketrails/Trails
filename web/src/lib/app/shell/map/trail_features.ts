@@ -56,16 +56,24 @@ export function rawFlags(points: HistoryPoint[]): boolean[] {
     return points.map((point, i) => i > 0 && point.is_raw);
 }
 
-/** Which band [time] falls into. Without a window the whole trail is on show. */
+/**
+ * Which band [time] falls into.
+ *
+ * There is one highlighted stretch at a time: the marked range if there is one,
+ * the window otherwise. Everything else reads as before or after it — a marked
+ * range takes the emphasis off the rest of the window too, because two highlights
+ * at once say nothing about which of them was asked for.
+ *
+ * With neither a window nor a range the whole trail is on show.
+ */
 export function bandOf(time: number, focus: TrailFocus): TrailBand {
-    const {window, selection} = focus;
-    if (selection != null && time >= selection.start.getTime() && time <= selection.end.getTime()) {
-        return "selected";
-    }
-    if (window == null) return "window";
-    if (time < window.start.getTime()) return "before";
-    if (time > window.end.getTime()) return "after";
-    return "window";
+    const marked = focus.selection != null;
+    const range = focus.selection ?? focus.window;
+    if (range == null) return "window";
+
+    if (time < range.start.getTime()) return "before";
+    if (time > range.end.getTime()) return "after";
+    return marked ? "selected" : "window";
 }
 
 /**
