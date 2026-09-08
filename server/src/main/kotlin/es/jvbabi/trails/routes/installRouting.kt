@@ -15,6 +15,7 @@ import es.jvbabi.trails.routes.devices.devices
 import es.jvbabi.trails.routes.devices.image.deviceImage
 import es.jvbabi.trails.routes.devices.item.deleteDevice
 import es.jvbabi.trails.routes.devices.item.getDevice
+import es.jvbabi.trails.routes.devices.item.history.getDeviceGpx
 import es.jvbabi.trails.routes.devices.item.history.getDeviceHistory
 import es.jvbabi.trails.routes.devices.item.optimization.getDeviceOptimization
 import es.jvbabi.trails.routes.devices.item.optimization.reoptimizeDevice
@@ -89,6 +90,10 @@ fun Application.installRouting() {
 
                     route("/history") {
                         getDeviceHistory()
+
+                        route("/gpx") {
+                            getDeviceGpx()
+                        }
                     }
 
                     route("/optimization") {
