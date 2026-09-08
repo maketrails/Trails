@@ -435,16 +435,11 @@
 
         drawTrail(currentMap, points, animateFrom, focus);
 
-        return () => {
-            cancelTrailAnimation();
-            // The map (or just its style) may already be gone — on component
-            // teardown, or mid-swap between two styles.
-            try {
-                setTrailCoordinates(currentMap, []);
-            } catch {
-                // Nothing to clear.
-            }
-        };
+        // Only the animation is stopped here. Clearing the line as well would blank it
+        // on every re-run — and this effect re-runs whenever the timeline moves, which
+        // read as a flicker. A trail that is really gone publishes an empty list (see
+        // the trail claim's release), and that draws as nothing by itself.
+        return cancelTrailAnimation;
     });
 
     /*
