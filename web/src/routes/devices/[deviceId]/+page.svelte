@@ -10,6 +10,7 @@
     import type {HistorySource} from "$lib/api/history/history_repository";
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
+    import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import {_} from "svelte-i18n";
 
     let deviceId = $derived(page.params.deviceId);
@@ -33,12 +34,20 @@
     // time, and only the claim keeps this one from taking the map back on teardown.
     const cameraTarget = claimCameraTarget();
     const mapTrail = claimMapTrail();
+    const mapOverlay = claimMapOverlay();
 
     // Hand the camera to the detail scope while the page is open, and give it back
     // to the overview on leave.
     $effect(() => {
         cameraTarget.set(deviceId ?? null);
         return () => cameraTarget.release();
+    });
+
+    // Fill the strip the layout leaves between card and camera switch while the
+    // page is open. It only exists where the card does not span the whole width.
+    $effect(() => {
+        mapOverlay.set(timeline);
+        return () => mapOverlay.release();
     });
 
     // Draw the history as a line on the map while the page is open. The key names the
@@ -68,7 +77,7 @@
     {#if device}
         {#snippet deviceActions()}
             <div class="mt-1">
-                <DeviceActions deviceId={device.id} />
+                <DeviceActions deviceId={device.id}/>
             </div>
         {/snippet}
         <div class="flex flex-col gap-2 px-4">
@@ -86,11 +95,17 @@
             <!-- The optimization is only readable for own devices: a share hands
                  out a track, not the state of the machinery behind it. -->
             {#if isOwnDevice}
-                <HistorySourceTabs bind:source={historySource} />
-                <DeviceOptimization deviceId={device.id} />
+                <HistorySourceTabs bind:source={historySource}/>
+                <DeviceOptimization deviceId={device.id}/>
             {/if}
         </div>
     {:else}
         <p class="px-2 mt-4 text-sm text-muted-foreground">{$_("devices.not_found")}</p>
     {/if}
 </div>
+
+{#snippet timeline()}
+    <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 p-4 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+        timeline
+    </div>
+{/snippet}

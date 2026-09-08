@@ -8,6 +8,7 @@
     import {isReconnecting, startWebappSocket} from "$lib/state/webapp_socket.svelte";
     import {startForeignShareSync} from "$lib/state/share_socket.svelte";
     import {setContentRect} from "$lib/state/map_camera.svelte";
+    import {mapOverlay} from "$lib/state/map_overlay.svelte";
     import CameraModeSwitch from "$lib/app/shell/map/CameraModeSwitch.svelte";
     import {CircleNotchIcon} from "phosphor-svelte";
     import {page} from "$app/state";
@@ -126,21 +127,23 @@
 </div>
 
 <!-- Everything drawn on top of the map lives in one grid laid over it, rather
-     than each overlay positioning itself against the viewport: the card spans
-     the whole grid (it sizes itself), the two controls sit in the right-hand
-     column's top and bottom row. Overlays that share a cell keep painting in
-     DOM order, so the controls stay above the card exactly as before. -->
+     than each overlay positioning itself against the viewport. The columns are
+     what used to be the card's own widths, so the card fills the first one and
+     the space it leaves is a track a page can draw into (see mapOverlay). Below
+     md the card takes the full width and that middle track does not exist, so
+     the grid drops to card + controls and the strip stays hidden. -->
 <div
-        class="pointer-events-none fixed inset-0 z-10 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_minmax(0,1fr)_auto] p-4"
+        class="pointer-events-none fixed inset-0 z-10 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 p-4
+           md:grid-cols-[min(50%,25rem)_minmax(0,1fr)_auto]
+           lg:grid-cols-[min(33.333%,25rem)_minmax(0,1fr)_auto]
+           xl:grid-cols-[25rem_minmax(0,1fr)_auto]"
 >
     <main
             bind:this={cardEl}
-            class="xl-card pointer-events-auto relative col-span-full row-span-full h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
-               md:w-1/2
-               lg:w-1/3
+            class="xl-card pointer-events-auto relative col-start-1 col-end-[-1] row-span-full h-full w-full max-w-100 overflow-hidden rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg
+               md:col-end-2
                xl:mt-auto
-               xl:h-[66.666dvh]
-               xl:w-100"
+               xl:h-[66.666dvh]"
     >
         {#if !$authInitialized}
             <div class="absolute inset-0 flex items-center justify-center">
@@ -171,14 +174,21 @@
         {/if}
     </main>
 
+    <!-- The strip a page can fill, between the card and the camera switch. -->
+    <div class="pointer-events-none relative col-start-2 row-start-3 hidden self-end md:block">
+        {#if mapOverlay.content}
+            {@render mapOverlay.content()}
+        {/if}
+    </div>
+
     {#if $currentUser}
         <!-- The extra padding on small screens is what the icon used to carry on
              top of the overlay inset, so it keeps its distance from the corner. -->
-        <div class="pointer-events-auto relative col-start-2 row-start-1 justify-self-end max-md:p-4">
+        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-1 justify-self-end max-md:p-4">
             <UserIcon />
         </div>
 
-        <div class="pointer-events-auto relative col-start-2 row-start-3 self-end justify-self-end">
+        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-3 self-end justify-self-end">
             <CameraModeSwitch />
         </div>
     {/if}
