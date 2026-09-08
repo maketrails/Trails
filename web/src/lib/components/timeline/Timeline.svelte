@@ -3,13 +3,17 @@
     import {_, locale} from "svelte-i18n";
     import TimelineAxis from "./TimelineAxis.svelte";
     import TimelineScrollbar from "./TimelineScrollbar.svelte";
-    import {timelineGestures} from "./timeline_gestures";
-    import {createTimelineWindow, type TimelineView} from "./timeline_window";
+    import TimelineSelection from "./TimelineSelection.svelte";
+    import {type DragModifiers, timelineGestures} from "./timeline_gestures";
+    import {axisFor} from "./timeline_scale";
+    import {isMeaningful, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
+    import {createTimelineWindow, type TimelineRange, type TimelineView} from "./timeline_window";
 
     let {
         oldestPoint,
         newestPoint,
         view = $bindable(null),
+        selection = $bindable(null),
     }: {
         /** First moment there is data for. */
         oldestPoint: Date;
@@ -22,6 +26,12 @@
          * until the track has been measured, and is filled with the opening window.
          */
         view?: TimelineView | null;
+        /**
+         * The stretch the user has marked, or `null` while nothing is marked. Also
+         * bindable both ways: it is what a reader of the timeline acts on, and
+         * assigning to it marks a range from the outside.
+         */
+        selection?: TimelineRange | null;
     } = $props();
 
     /** How much history the timeline opens on, at most. */
@@ -44,13 +54,58 @@
     let width = $state(0);
     let msPerPixel = $derived(width > 0 ? timeline.span / width : 0);
 
+    let axis = $derived(axisFor({start: timeline.start, end: timeline.end, width, locale: $locale}));
+
+    /** Which moment sits at [anchor], a 0…1 position across the track. */
+    const timeAt = (anchor: number) => timeline.start + anchor * timeline.span;
+
+    /**
+     * Where an end dragged to [anchor] lands. It is pulled onto the nearest mark the
+     * axis is drawing, unless a modifier is held: holding control (or command) is
+     * how a reader says they mean exactly this moment, not the tidy one next to it.
+     */
+    function edgeAt(anchor: number, modifiers: DragModifiers): number {
+        const time = timeAt(anchor);
+        if (modifiers.ctrlKey || modifiers.metaKey) return time;
+        return snapToTargets(time, snapTargets(axis, {oldest: timeline.oldest, newest: timeline.newest}), msPerPixel);
+    }
+
+    /** Where the running sweep began, or null while none is running. */
+    let sweepFrom: number | null = null;
+
     // Gestures speak pixels; turning those into time is this component's job. The
     // handlers are stable and read the scale as they run, so the action never has to
     // be torn down and set up again.
     const gestures = {
         pan: (pixels: number) => timeline.panBy(pixels * msPerPixel),
         zoom: (factor: number, anchor: number) => timeline.zoomBy(factor, anchor),
+        // Dragging the track marks a range rather than moving the window; the window
+        // is moved with the wheel, a pinch or the scrollbar below.
+        drag: {
+            start(anchor: number, modifiers: DragModifiers) {
+                sweepFrom = edgeAt(anchor, modifiers);
+                selection = rangeOf(sweepFrom, sweepFrom);
+            },
+            move(anchor: number, modifiers: DragModifiers) {
+                if (sweepFrom == null) return;
+                selection = rangeOf(sweepFrom, edgeAt(anchor, modifiers));
+            },
+            end() {
+                sweepFrom = null;
+                // A press that went nowhere is a click, and a click on the track is how
+                // a marked range is dropped again.
+                if (selection != null && !isMeaningful(selection, msPerPixel)) selection = null;
+            },
+        },
     };
+
+    /** Moves one end of the marked range, keeping the other where it is. */
+    function resizeSelection(edge: "start" | "end", anchor: number, modifiers: DragModifiers) {
+        if (selection == null) return;
+
+        const fixed = edge === "start" ? selection.end.getTime() : selection.start.getTime();
+        selection = rangeOf(fixed, edgeAt(anchor, modifiers));
+    }
 
     // Open on the most recent week, or on the whole history if it is shorter: months
     // of points squeezed into one strip say nothing, and what a device did lately is
@@ -105,13 +160,24 @@
     <div
             bind:clientWidth={width}
             use:timelineGestures={gestures}
+            data-timeline-track
             role="region"
             tabindex="0"
             aria-label={$_("timeline.label")}
             onkeydown={onKeyDown}
             class="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden rounded-2xl bg-card/40 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:cursor-grabbing"
     >
-        <TimelineAxis start={timeline.start} end={timeline.end} {width} />
+        <TimelineAxis {axis} start={timeline.start} end={timeline.end} {width} />
+
+        {#if selection != null}
+            <TimelineSelection
+                    range={selection}
+                    start={timeline.start}
+                    end={timeline.end}
+                    {width}
+                    onresize={resizeSelection}
+            />
+        {/if}
     </div>
 
     <TimelineScrollbar {timeline} />

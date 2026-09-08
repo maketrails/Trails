@@ -1,18 +1,20 @@
 <script lang="ts">
     import {MediaQuery} from "svelte/reactivity";
     import {fade} from "svelte/transition";
-    import {locale} from "svelte-i18n";
-    import {axisFor} from "./timeline_scale";
+    import type {Axis} from "./timeline_scale";
 
     let {
+        axis,
         start,
         end,
         width,
     }: {
-        /** The window to divide, as epoch milliseconds. */
+        /** What to draw, as computed by `axisFor`. */
+        axis: Axis;
+        /** The window it divides, as epoch milliseconds. */
         start: number;
         end: number;
-        /** How wide it is drawn. Zero draws nothing, which is the state before measuring. */
+        /** How wide that window is drawn. */
         width: number;
     } = $props();
 
@@ -28,8 +30,6 @@
 
     const reducedMotion = new MediaQuery("(prefers-reduced-motion: reduce)");
     let fadeDuration = $derived(reducedMotion.current ? 0 : FADE);
-
-    let axis = $derived(axisFor({start, end, width, locale: $locale}));
 
     /** Where a moment sits, in pixels from the left edge. */
     let msPerPixel = $derived(width > 0 ? (end - start) / width : 0);

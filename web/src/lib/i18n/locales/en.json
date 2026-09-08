@@ -209,6 +209,11 @@
       "window": "Visible window",
       "start": "Start of the visible window",
       "end": "End of the visible window"
+    },
+    "selection": {
+      "start": "Start of the marked range",
+      "end": "End of the marked range",
+      "clear": "Clear the marked range"
     }
   }
 }

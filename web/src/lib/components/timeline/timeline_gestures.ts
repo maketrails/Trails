@@ -5,6 +5,27 @@
  * business, which keeps this usable for any track that scrolls sideways and zooms.
  */
 
+/** What a pointer was doing while it dragged, for gestures that care. */
+export interface DragModifiers {
+    ctrlKey: boolean;
+    metaKey: boolean;
+    shiftKey: boolean;
+}
+
+/**
+ * What one pointer dragging across the track does. Leave it out and a drag pans;
+ * supply it and the drag is yours — sweeping out a selection, say — while panning
+ * stays on the wheel, the pinch and whatever else the caller offers.
+ *
+ * Positions are 0…1 across the node, the same anchors {@link TimelineGestures.zoom}
+ * speaks in.
+ */
+export interface TimelineDrag {
+    start(anchor: number, modifiers: DragModifiers): void;
+    move(anchor: number, modifiers: DragModifiers): void;
+    end(): void;
+}
+
 export interface TimelineGestures {
     /** Move the content by [pixels]; positive scrolls towards the right-hand end. */
     pan(pixels: number): void;
@@ -13,6 +34,8 @@ export interface TimelineGestures {
      * the node.
      */
     zoom(factor: number, anchor: number): void;
+    /** Takes over one-pointer drags. Without it, they pan. */
+    drag?: TimelineDrag;
 }
 
 /** How hard a pinch or a held-modifier wheel zooms, per pixel of travel. */
@@ -61,6 +84,15 @@ export function timelineGestures(node: HTMLElement, gestures: TimelineGestures) 
     /** Distance and centre of the two-finger gesture, as of the last move. */
     let pinch: {distance: number; centre: number} | null = null;
 
+    /** Whether the one pointer on the node is currently handed to {@link TimelineDrag}. */
+    let dragging = false;
+
+    const modifiersOf = (event: PointerEvent): DragModifiers => ({
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+    });
+
     const pinchOf = (points: {x: number; y: number}[]) => ({
         distance: Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y),
         centre: (points[0].x + points[1].x) / 2,
@@ -72,6 +104,18 @@ export function timelineGestures(node: HTMLElement, gestures: TimelineGestures) 
         node.setPointerCapture(event.pointerId);
         pointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
         pinch = pointers.size === 2 ? pinchOf([...pointers.values()]) : null;
+
+        // A second finger turns a drag into a pinch, so whatever the first one had
+        // started is called off rather than left half-finished.
+        if (pointers.size > 1) {
+            if (dragging) handlers.drag?.end();
+            dragging = false;
+            return;
+        }
+
+        if (handlers.drag == null) return;
+        dragging = true;
+        handlers.drag.start(anchorOf(event.clientX), modifiersOf(event));
     }
 
     function onPointerMove(event: PointerEvent) {
@@ -92,12 +136,21 @@ export function timelineGestures(node: HTMLElement, gestures: TimelineGestures) 
             return;
         }
 
+        if (dragging) {
+            handlers.drag?.move(anchorOf(current.x), modifiersOf(event));
+            return;
+        }
+
         // Dragging the track to the right pulls the left-hand end into view.
         handlers.pan(-(current.x - previous.x));
     }
 
     function onPointerUp(event: PointerEvent) {
         pointers.delete(event.pointerId);
+        if (dragging) {
+            handlers.drag?.end();
+            dragging = false;
+        }
         // Whatever is left has moved on since the pinch started; a fresh baseline is
         // taken on the next move rather than jumping by the difference.
         pinch = null;

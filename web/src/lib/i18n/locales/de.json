@@ -209,6 +209,11 @@
       "window": "Sichtbarer Ausschnitt",
       "start": "Beginn des sichtbaren Ausschnitts",
       "end": "Ende des sichtbaren Ausschnitts"
+    },
+    "selection": {
+      "start": "Beginn des markierten Bereichs",
+      "end": "Ende des markierten Bereichs",
+      "clear": "Markierung aufheben"
     }
   }
 }

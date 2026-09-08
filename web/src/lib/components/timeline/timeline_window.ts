@@ -8,11 +8,14 @@
  * bindable prop, say — and stay the single source of truth.
  */
 
-/** The stretch of time a timeline shows. */
-export interface TimelineView {
+/** A stretch of time, as the two moments that bound it. */
+export interface TimelineRange {
     start: Date;
     end: Date;
 }
+
+/** The stretch of time a timeline shows. */
+export type TimelineView = TimelineRange;
 
 export interface TimelineWindowOptions {
     /** Everything there is data for. The window can neither leave it nor exceed it. */

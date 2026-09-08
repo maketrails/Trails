@@ -6,8 +6,10 @@
 export {default as Timeline} from "./Timeline.svelte";
 export {default as TimelineAxis} from "./TimelineAxis.svelte";
 export {default as TimelineScrollbar} from "./TimelineScrollbar.svelte";
-export {createTimelineWindow, type TimelineView, type TimelineWindow, type TimelineWindowOptions} from "./timeline_window";
-export {timelineGestures, type TimelineGestures} from "./timeline_gestures";
+export {default as TimelineSelection} from "./TimelineSelection.svelte";
+export {createTimelineWindow, type TimelineRange, type TimelineView, type TimelineWindow, type TimelineWindowOptions} from "./timeline_window";
+export {isMeaningful, rangeOf, snapTargets, snapToTargets, SNAP_DISTANCE} from "./timeline_selection";
+export {timelineGestures, type DragModifiers, type TimelineDrag, type TimelineGestures} from "./timeline_gestures";
 export {
     axisFor,
     calendarFor,
