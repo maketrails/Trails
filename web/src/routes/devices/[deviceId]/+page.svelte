@@ -12,7 +12,7 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import {_} from "svelte-i18n";
-    import Timeline from "$lib/components/timeline/Timeline.svelte";
+    import {Timeline} from "$lib/components/timeline";
 
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
