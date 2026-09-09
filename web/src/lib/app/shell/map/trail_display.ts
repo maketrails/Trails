@@ -25,6 +25,16 @@ export const DISPLAY_BUDGET = 20_000;
  */
 export const TRAIL_GAP_MS = 60_000;
 
+/**
+ * Where a position sits *on* a drawn track: the stretch starting at [index], and how
+ * far along it. Anywhere between two kept points, which is what a cursor resolves to.
+ */
+export interface TrackPosition {
+    index: number;
+    /** 0 at the stretch's start, 1 at its end. */
+    fraction: number;
+}
+
 /** A history thinned down to what a map can draw, in parallel arrays. */
 export interface DisplayTrack {
     /** `[longitude, latitude]` per kept point, in order. */
@@ -35,6 +45,12 @@ export interface DisplayTrack {
     gaps: Uint8Array;
     /** `raws[i]` marks that same stretch as an unoptimized measurement. */
     raws: Uint8Array;
+    /**
+     * Where each kept point sits in the history it was thinned from. Thinning drops
+     * points but nothing else about them, so this is how a drawn position is traded
+     * back for everything it was recorded with — accuracy, bearing, charge level.
+     */
+    sources: Int32Array;
     /** How many points the history held before thinning. */
     recorded: number;
 }
@@ -44,6 +60,7 @@ export const EMPTY_TRACK: DisplayTrack = {
     times: new Float64Array(0),
     gaps: new Uint8Array(0),
     raws: new Uint8Array(0),
+    sources: new Int32Array(0),
     recorded: 0,
 };
 
@@ -114,6 +131,7 @@ function thin(points: HistoryPoint[], tolerance: number, scale: number): Display
     const times: number[] = [];
     const gaps: number[] = [];
     const raws: number[] = [];
+    const sources: number[] = [];
 
     const squared = tolerance * tolerance;
     let lastLng = 0;
@@ -141,6 +159,7 @@ function thin(points: HistoryPoint[], tolerance: number, scale: number): Display
 
         coordinates.push([point.longitude, point.latitude]);
         times.push(point.timestamp);
+        sources.push(i);
         gaps.push(coordinates.length === 1 ? 0 : pendingGap ? 1 : 0);
         raws.push(coordinates.length === 1 ? 0 : pendingRaw ? 1 : 0);
         lastLng = point.longitude;
@@ -154,6 +173,53 @@ function thin(points: HistoryPoint[], tolerance: number, scale: number): Display
         times: Float64Array.from(times),
         gaps: Uint8Array.from(gaps),
         raws: Uint8Array.from(raws),
+        sources: Int32Array.from(sources),
         recorded: points.length,
     };
+}
+
+/**
+ * Where [time] falls on the track: the stretch that contains it and how far along it
+ * that moment sits, or `null` when the track does not reach it.
+ *
+ * A binary search rather than a scan — this answers a cursor moving along a timeline,
+ * so it runs as often as the pointer moves.
+ */
+export function positionAtTime(track: DisplayTrack, time: number): TrackPosition | null {
+    const {times} = track;
+    if (times.length === 0) return null;
+    if (time <= times[0]) return {index: 0, fraction: 0};
+    if (time >= times[times.length - 1]) return {index: Math.max(0, times.length - 2), fraction: 1};
+
+    let low = 0;
+    let high = times.length - 1;
+    while (high - low > 1) {
+        const middle = (low + high) >> 1;
+        if (times[middle] <= time) low = middle;
+        else high = middle;
+    }
+
+    const span = times[high] - times[low];
+    return {index: low, fraction: span > 0 ? (time - times[low]) / span : 0};
+}
+
+/** The coordinate [position] stands at, interpolated along its stretch. */
+export function coordinateAt(track: DisplayTrack, position: TrackPosition): [number, number] | null {
+    const from = track.coordinates[position.index];
+    if (from == null) return null;
+
+    const to = track.coordinates[position.index + 1];
+    if (to == null) return [from[0], from[1]];
+
+    return [
+        from[0] + (to[0] - from[0]) * position.fraction,
+        from[1] + (to[1] - from[1]) * position.fraction,
+    ];
+}
+
+/** The recorded point a drawn position stands closest to — the whole of it, not just where. */
+export function recordedAt(track: DisplayTrack, points: HistoryPoint[], position: TrackPosition): HistoryPoint | null {
+    const index = position.fraction >= 0.5 ? position.index + 1 : position.index;
+    const source = track.sources[Math.min(index, track.sources.length - 1)];
+    return points[source] ?? null;
 }
