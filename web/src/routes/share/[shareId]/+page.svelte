@@ -141,6 +141,7 @@
                     newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
                     bind:view={timelineView}
                     bind:selection={timelineSelection}
+                    onhover={(at) => mapTrail.hover(at)}
             />
         </div>
     {/if}
