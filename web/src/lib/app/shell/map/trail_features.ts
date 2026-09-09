@@ -83,33 +83,56 @@ export function bandFlags(times: ArrayLike<number>, focus: TrailFocus): TrailBan
  * Splits the coordinates into one LineString per run of same-kind segments, so the
  * solid, the dotted and the casing layer can each filter for their own features.
  * Runs share their boundary point, which keeps the line visually continuous.
+ *
+ * A stretch marked in [breaks] is not drawn at all: what lay between those two
+ * points was clipped away for being off screen (see trail_display), and a line
+ * across it would claim a journey that never happened. The run ends there and the
+ * next one starts on the far side.
  */
 export function trailData(
     coordinates: number[][],
     gaps: ArrayLike<number | boolean>,
     raws: ArrayLike<number | boolean> = [],
     bands: TrailBand[] = [],
+    breaks: ArrayLike<number | boolean> = [],
 ): TrailData {
     const features: TrailFeature[] = [];
-    // A LineString needs at least two positions; fewer means nothing to draw.
-    let runStart = 1;
-    for (let segment = 1; segment < coordinates.length; segment++) {
-        const gap = Boolean(gaps[segment]);
-        const raw = Boolean(raws[segment]);
-        const band = bands[segment] ?? "window";
-        const isLast = segment === coordinates.length - 1;
-        const sameKind =
-            Boolean(gaps[segment + 1]) === gap
-            && Boolean(raws[segment + 1]) === raw
-            && (bands[segment + 1] ?? "window") === band;
-        if (!isLast && sameKind) continue;
+    const kindOf = (segment: number) => ({
+        gap: Boolean(gaps[segment]),
+        raw: Boolean(raws[segment]),
+        band: bands[segment] ?? "window",
+    });
 
+    // A LineString needs two positions, so a run of one point is nothing to draw.
+    const emit = (from: number, to: number, kind: ReturnType<typeof kindOf>) => {
+        if (to - from < 1) return;
         features.push({
             type: "Feature",
-            properties: {gap, raw, band},
-            geometry: {type: "LineString", coordinates: coordinates.slice(runStart - 1, segment + 1)},
+            properties: kind,
+            geometry: {type: "LineString", coordinates: coordinates.slice(from, to + 1)},
         });
-        runStart = segment + 1;
+    };
+
+    let runStart = 0;
+    let kind = coordinates.length > 1 ? kindOf(1) : null;
+
+    for (let segment = 1; segment < coordinates.length; segment++) {
+        if (Boolean(breaks[segment])) {
+            if (kind != null) emit(runStart, segment - 1, kind);
+            runStart = segment;
+            kind = segment + 1 < coordinates.length ? kindOf(segment + 1) : null;
+            continue;
+        }
+
+        const here = kindOf(segment);
+        if (kind == null) kind = here;
+        if (here.gap !== kind.gap || here.raw !== kind.raw || here.band !== kind.band) {
+            emit(runStart, segment - 1, kind);
+            runStart = segment - 1;
+            kind = here;
+        }
     }
+
+    if (kind != null) emit(runStart, coordinates.length - 1, kind);
     return {type: "FeatureCollection", features};
 }

@@ -10,12 +10,15 @@
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import {
         coordinateAt,
-        displayTrack,
+        createTrailSource,
         EMPTY_TRACK,
         positionAtTime,
         recordedAt,
+        toleranceFor,
         type DisplayTrack,
-        type TrackPosition
+        type TrackPosition,
+        type TrailSource,
+        type TrailView
     } from "./trail_display";
     import TrailPointPopover from "./TrailPointPopover.svelte";
     import {
@@ -127,6 +130,9 @@
     // space, so panning, zooming, rotating or tilting alone can bundle them or pull
     // them apart again — this is what tells the pin effect to look anew.
     let cameraEpoch = $state(0);
+
+    /** How far past the edge of the screen the trail is still drawn, as a share of it. */
+    const VIEW_PADDING = 0.25;
 
     /** Keeps the trail below the style's labels so road/place names stay readable. */
     function firstSymbolLayerId(currentMap: mapboxgl.Map): string | undefined {
@@ -275,10 +281,11 @@
         coordinates: number[][],
         gaps: ArrayLike<number | boolean> = [],
         raws: ArrayLike<number | boolean> = [],
-        bands: TrailBand[] = []
+        bands: TrailBand[] = [],
+        breaks: ArrayLike<number | boolean> = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands));
+        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands, breaks));
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -505,7 +512,7 @@
         const source = currentMap.getSource(TRAIL_PUCK_SOURCE);
         if (source?.type === "geojson") source.setData(trailPuckData(coordinates));
 
-        puckState.point = position == null ? null : recordedAt(drawn, drawnFrom ?? [], position);
+        puckState.point = position == null ? null : recordedAt(drawn, sourceFrom ?? [], position);
 
         if (coordinates == null) return;
 
@@ -542,6 +549,27 @@
         });
     }
 
+    /** What the last draw was made of, so a camera move can ask for it again. */
+    let lastDrawn: {points: HistoryPoint[]; focus: TrailFocus} | null = null;
+
+    /**
+     * Redraws at the detail the camera has come to rest at.
+     *
+     * Deliberately not a piece of state the trail effect reads: `fitBounds` fires
+     * `moveend` synchronously when the camera is already where it was asked to go, and
+     * that happens *inside* the camera effect — so a state written here would
+     * invalidate an effect from within another one, which is the loop Svelte refuses
+     * to run (effect_update_depth_exceeded). Calling the draw directly keeps the
+     * viewport where it belongs: on the map, not in the graph.
+     */
+    function redrawForView() {
+        const currentMap = map;
+        const last = lastDrawn;
+        if (currentMap == null || last == null) return;
+
+        scheduleDraw(() => drawTrail(currentMap, last.points, trailAnimationStart, last.focus));
+    }
+
     function cancelScheduledDraw() {
         if (drawFrame != null) cancelAnimationFrame(drawFrame);
         drawFrame = null;
@@ -560,28 +588,66 @@
      * carries it on with the new geometry; null draws the finished line at once.
      */
     /**
-     * The last history that was thinned, and what came out. A recolour must not thin
-     * again — the timeline moves at sixty frames a second and the history behind it
-     * does not change at all — so the result is kept for as long as the same list of
-     * points keeps being published.
+     * The history a view is answered from, and the stretch last chosen out of it. A
+     * recolour must not choose again — the timeline moves at sixty frames a second
+     * while neither the history nor the camera has moved at all.
      */
-    let drawnFrom: HistoryPoint[] | null = null;
+    let trailSource: TrailSource | null = null;
+    let sourceFrom: HistoryPoint[] | null = null;
     let drawn: DisplayTrack = EMPTY_TRACK;
 
+    /** Which view the drawn stretch was chosen for, so an unchanged one is not redone. */
+    let drawnFor: string | null = null;
+
+    /**
+     * What the map is looking at. The bounds are padded, so panning a little does not
+     * run past the end of the line, and so a stretch entering the view comes in from
+     * off screen rather than starting at its edge.
+     */
+    function viewOf(currentMap: mapboxgl.Map): TrailView {
+        const bounds = currentMap.getBounds();
+        if (bounds == null) return {tolerance: 0, bounds: null};
+
+        const west = bounds.getWest();
+        const east = bounds.getEast();
+        const south = bounds.getSouth();
+        const north = bounds.getNorth();
+        const padLng = (east - west) * VIEW_PADDING;
+        const padLat = (north - south) * VIEW_PADDING;
+
+        return {
+            tolerance: toleranceFor(currentMap.getZoom(), currentMap.getCenter().lat),
+            bounds: [west - padLng, south - padLat, east + padLng, north + padLat]
+        };
+    }
+
+    /**
+     * The stretch to draw: as much detail as this zoom can show, over what is on
+     * screen. Recomputed when the history changes or the camera has come to rest, and
+     * reused for everything else — moving the timeline recolours the same geometry.
+     */
     function trackOf(currentMap: mapboxgl.Map, points: HistoryPoint[]): DisplayTrack {
-        if (points === drawnFrom) return drawn;
+        if (points !== sourceFrom) {
+            trailSource = createTrailSource(points);
+            sourceFrom = points;
+            drawnFor = null;
+        }
 
-        drawn = displayTrack(points);
-        drawnFrom = points;
+        const view = viewOf(currentMap);
+        const signature = `${view.tolerance.toExponential(3)}|${view.bounds?.map((v) => v.toFixed(5)).join(",")}`;
+        if (signature === drawnFor) return drawn;
 
-        // The positions the hover is measured against are published once per track, not
-        // per frame: the line's own data is rewritten while it grows in, and rebuilding
-        // thousands of point features at that rate would stall the map.
+        drawn = trailSource?.drawnFor(view) ?? EMPTY_TRACK;
+        drawnFor = signature;
+
+        // The positions the hover is measured against are the ones on screen, published
+        // whenever that changes rather than per frame: the line's own data is rewritten
+        // while it grows in, and rebuilding thousands of point features at that rate
+        // would stall the map.
         const source = currentMap.getSource(TRAIL_POINT_SOURCE);
         if (source?.type === "geojson") source.setData(trailPointData(drawn));
 
-        // Whatever the puck was standing on belonged to the track that has just been
-        // replaced.
+        // Whatever the puck was standing on belonged to the stretch just replaced.
         pointerHover = null;
         return drawn;
     }
@@ -594,11 +660,11 @@
     ) {
         cancelTrailAnimation();
 
-        const {coordinates, times, gaps, raws} = trackOf(currentMap, points);
+        const {coordinates, times, gaps, raws, breaks} = trackOf(currentMap, points);
         const bands = bandFlags(times, focus);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
-            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
+            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands, breaks);
             return;
         }
 
@@ -608,7 +674,7 @@
         // in the segment it replaces), so `gaps` still lines up.
         const drawUpTo = (now: number) => {
             const t = Math.min(1, (now - animateFrom) / TRAIL_ANIMATION_MS);
-            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands);
+            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands, breaks);
             return t;
         };
         const step = (now: number) => {
@@ -660,6 +726,7 @@
             // Fires for every camera change, including each frame of an animated one,
             // so the bundling keeps up with a flyTo instead of snapping at its end.
             map.on("move", () => cameraEpoch++);
+            map.on("moveend", redrawForView);
 
             // Following the cursor along the trail. `mouseout` is what lets go when the
             // pointer leaves the map altogether rather than merely the line.
@@ -753,6 +820,9 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
+        // Kept so the camera can ask for the same line again at a new zoom, without
+        // the view being part of the reactive graph (see redrawForView).
+        lastDrawn = {points, focus};
         scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus));
 
         // Only the drawing is stopped here. Clearing the line as well would blank it
