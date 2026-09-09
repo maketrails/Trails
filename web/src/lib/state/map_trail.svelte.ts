@@ -6,13 +6,24 @@ export interface TrailRange {
     end: Date;
 }
 
-let points = $state<HistoryPoint[]>([]);
+// Raw, not deep-reactive: a history runs to hundreds of thousands of points, and a
+// reactive proxy over it makes every read of every point go through a trap — walking
+// one costs about eighteen times what walking a plain array does. The list is only
+// ever replaced, never edited in place, so nothing here needs the proxy.
+let points = $state.raw<HistoryPoint[]>([]);
 let key = $state<string | null>(null);
 
 // What the trail is being read through: the stretch a timeline shows, and the range
 // marked inside it. Neither changes what the line contains, only how it is coloured.
 let window = $state<TrailRange | null>(null);
 let selection = $state<TrailRange | null>(null);
+
+/**
+ * The moment a reader is pointing at on the timeline, or null while they are not.
+ * The map answers it by putting its puck at that spot on the line — which is the
+ * whole point of a timeline standing next to a map.
+ */
+let hoveredAt = $state<number | null>(null);
 
 /**
  * The detail view the trail currently belongs to. Switching between two detail
@@ -45,6 +56,12 @@ export interface MapTrailClaim {
      * there is none — with no window at all the whole line reads as being on show.
      */
     focus(window: TrailRange | null, selection: TrailRange | null): void;
+    /**
+     * Points at a moment, or at nothing. Unlike the window and the range this is not
+     * a state anyone acts on, only one they look at, so it is published on its own and
+     * cleared as soon as the pointer leaves.
+     */
+    hover(at: Date | null): void;
     /** Takes the trail off the map again. */
     release(): void;
 }
@@ -70,8 +87,13 @@ export function claimMapTrail(): MapTrailClaim {
             window = nextWindow;
             selection = nextSelection;
         },
+        hover(at: Date | null) {
+            if (owner !== claim) return;
+            hoveredAt = at?.getTime() ?? null;
+        },
         release() {
             if (owner !== claim) return;
+            hoveredAt = null;
             points = [];
             key = null;
             window = null;
@@ -84,6 +106,10 @@ export function claimMapTrail(): MapTrailClaim {
 export const mapTrail = {
     get points() {
         return points;
+    },
+    /** The moment being pointed at on the timeline, or null. */
+    get hoveredAt() {
+        return hoveredAt;
     },
     /** Which track [points] belong to; `null` when there is no trail. */
     get key() {

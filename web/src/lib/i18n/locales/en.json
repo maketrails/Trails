@@ -185,6 +185,10 @@
       "days": "{count, plural, one {Last day} other {Last # days}}",
       "hours": "{count, plural, one {Last hour} other {Last # hours}}",
       "minutes": "Last {count} min"
+    },
+    "point": {
+      "location_accuracy": "±{meters} m",
+      "bearing": "{degrees}° ±{accuracy}°"
     }
   },
   "map": {
@@ -220,6 +224,13 @@
       "edit": "Edit the marked range",
       "from": "From",
       "to": "To"
+    },
+    "legend": {
+      "label": "What the colours on the line mean",
+      "on_show": "On show",
+      "before": "Earlier",
+      "after": "Later",
+      "marked": "Marked"
     }
   }
 }

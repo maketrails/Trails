@@ -1,0 +1,10 @@
+{
+  "title": "Legend for the trail",
+  "description": "The timeline says what the colours of the line mean: what is on show, what lies before and after it, and what is marked.",
+  "localized": {
+    "de": {
+      "title": "Legende für den Verlauf",
+      "description": "Die Zeitleiste erklärt die Farben der Linie: was angezeigt wird, was davor und danach liegt und was markiert ist."
+    }
+  }
+}

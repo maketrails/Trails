@@ -11,6 +11,7 @@
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
+    import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
     import {DownloadSimpleIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
     import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
@@ -130,6 +131,8 @@
 <!-- The server names the file after the device and the window, so the link carries
      no name of its own. -->
 {#snippet exportAction()}
+    <TrailLegend marked={timelineSelection != null} />
+
     {#if gpxUrl != null}
         <a
                 href={gpxUrl}
@@ -153,6 +156,7 @@
                     newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
                     bind:view={timelineView}
                     bind:selection={timelineSelection}
+                    onhover={(at) => mapTrail.hover(at)}
                     actions={exportAction}
             />
         </div>

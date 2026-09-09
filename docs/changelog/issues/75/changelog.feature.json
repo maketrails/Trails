@@ -1,0 +1,10 @@
+{
+  "title": "Details at a spot on the trail",
+  "description": "Pointing at the trail — on the map or on the timeline — marks the spot and says when it was recorded, how precise it is, which way the device was heading and what the battery was at.",
+  "localized": {
+    "de": {
+      "title": "Details zu einem Punkt des Verlaufs",
+      "description": "Wer auf den Verlauf zeigt — auf der Karte oder auf der Zeitleiste — markiert die Stelle und sieht, wann sie aufgezeichnet wurde, wie genau sie ist, wohin das Gerät unterwegs war und wie der Akku stand."
+    }
+  }
+}

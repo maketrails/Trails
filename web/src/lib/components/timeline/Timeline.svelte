@@ -17,6 +17,7 @@
         view = $bindable(null),
         selection = $bindable(null),
         actions,
+        onhover,
     }: {
         /** First moment there is data for. */
         oldestPoint: Date;
@@ -41,6 +42,12 @@
          * marked, say.
          */
         actions?: Snippet<[]>;
+        /**
+         * The moment the pointer is over, or `null` once it leaves. Not part of the
+         * window or the range: it is nothing anyone acts on, only something they look
+         * at — which is why it is reported rather than bound.
+         */
+        onhover?: (at: Date | null) => void;
     } = $props();
 
     /** How much history the timeline opens on, at most. */
@@ -137,6 +144,44 @@
         if (view == null && width > 0) timeline.openOn(OPENING_SPAN);
     });
 
+    /** The moment under the pointer, drawn as a line across the track. */
+    let hoverAt = $state<number | null>(null);
+
+    let hoverX = $derived(hoverAt == null || msPerPixel === 0 ? null : (hoverAt - timeline.start) / msPerPixel);
+
+    /**
+     * The clock time, with the day in front of it once the window is wide enough for
+     * a bare time of day to be ambiguous.
+     */
+    let hoverFormat = $derived(
+        new Intl.DateTimeFormat($locale ?? undefined, {
+            ...(timeline.span >= 24 * 60 * 60 * 1_000 ? {day: "numeric", month: "short"} : {}),
+            hour: "2-digit",
+            minute: "2-digit",
+        }),
+    );
+
+    /**
+     * Reports where the pointer is, in time. A press is on its way to marking a range,
+     * and answering both at once would put the puck somewhere the reader is no longer
+     * looking, so a running sweep keeps the report on its own moving end.
+     */
+    function onPointerMove(event: PointerEvent) {
+        const rect = event.currentTarget instanceof HTMLElement
+            ? event.currentTarget.getBoundingClientRect()
+            : null;
+        if (rect == null || rect.width === 0) return;
+
+        const anchor = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+        hoverAt = timeAt(anchor);
+        onhover?.(new Date(hoverAt));
+    }
+
+    function onPointerLeave() {
+        hoverAt = null;
+        onhover?.(null);
+    }
+
     function onKeyDown(event: KeyboardEvent) {
         const handlers: Record<string, () => void> = {
             ArrowLeft: () => timeline.panBy(-timeline.span * PAN_STEP),
@@ -212,9 +257,28 @@
             tabindex="0"
             aria-label={$_("timeline.label")}
             onkeydown={onKeyDown}
+            onpointermove={onPointerMove}
+            onpointerleave={onPointerLeave}
             class="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden rounded-2xl bg-card/40 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:cursor-grabbing"
     >
         <TimelineAxis {axis} start={timeline.start} end={timeline.end} {width} />
+
+        <!-- Where the pointer is. The same moment the map puts its puck at, so the two
+             read as one gesture rather than two things happening at once. -->
+        {#if hoverX != null}
+            <div
+                    class="pointer-events-none absolute inset-y-0 w-px bg-muted-foreground/50"
+                    style:left="{hoverX}px"
+            ></div>
+            <div
+                    class="pointer-events-none absolute top-0 whitespace-nowrap rounded bg-card/90 px-1 text-[10px] tabular-nums text-foreground/80
+                           {hoverX > width - 60 ? '-translate-x-full -ml-1' : 'ml-1'}"
+                    style:left="{hoverX}px"
+            >
+                {hoverFormat.format(hoverAt ?? 0)}
+            </div>
+        {/if}
+
 
         {#if selection != null}
             <TimelineSelection

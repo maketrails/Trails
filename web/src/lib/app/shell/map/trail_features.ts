@@ -1,4 +1,3 @@
-import type {HistoryPoint} from "$lib/api/history/history_repository";
 import type {TrailRange} from "$lib/state/map_trail.svelte";
 
 /**
@@ -9,15 +8,27 @@ import type {TrailRange} from "$lib/state/map_trail.svelte";
  * Free of Svelte and of mapbox-gl, so it can be read and tested on its own.
  */
 
-/**
- * Anything longer than this between two consecutive points is a recording gap:
- * where the device actually went in between is unknown, so that stretch is drawn
- * as a faint dotted hint instead of a solid line.
- */
-export const TRAIL_GAP_MS = 60_000;
-
 /** Which stretch of the trail a segment belongs to, seen from the timeline. */
 export type TrailBand = "before" | "window" | "after" | "selected";
+
+/**
+ * What each band is drawn in. Here rather than in the map component because a
+ * legend has to say the same thing the line does, and two lists of colours drift
+ * apart the moment one of them is touched.
+ *
+ * These are read against the *basemap*, which is light in one theme and near-black
+ * in the other — so the grey of a stretch that has stepped back has to turn with it,
+ * or it disappears into the ground it is drawn on. White and amber carry themselves
+ * on both, and the outline under them (see the map's casing) does the rest.
+ */
+export function trailBandColors(dark: boolean): Record<TrailBand, string> {
+    return {
+        window: "#ffffff",
+        before: dark ? "rgba(148,163,184,0.6)" : "rgba(51,65,85,0.55)",
+        after: "rgba(255,255,255,0.8)",
+        selected: "#f59e0b"
+    };
+}
 
 /** What the timeline is showing and what is marked in it. */
 export interface TrailFocus {
@@ -32,29 +43,6 @@ export type TrailFeature = {
 };
 
 export type TrailData = {type: "FeatureCollection"; features: TrailFeature[]};
-
-export function toCoordinates(points: HistoryPoint[]): number[][] {
-    return points.map((point) => [point.longitude, point.latitude]);
-}
-
-/**
- * Per-point flag: `gaps[i]` marks the segment from point `i - 1` to `i` as a gap.
- * Index 0 has no incoming segment and is always false, which keeps the flags
- * aligned with {@link toCoordinates} — the grow-in animation relies on that.
- */
-export function gapFlags(points: HistoryPoint[]): boolean[] {
-    return points.map((point, i) => i > 0 && point.timestamp - points[i - 1].timestamp > TRAIL_GAP_MS);
-}
-
-/**
- * Per-point flag in the same "incoming segment" convention as {@link gapFlags}:
- * `raws[i]` marks the segment from point `i - 1` to `i` as unoptimized. The
- * changeover segment counts as unoptimized — it is the one connection no optimizer
- * has looked at.
- */
-export function rawFlags(points: HistoryPoint[]): boolean[] {
-    return points.map((point, i) => i > 0 && point.is_raw);
-}
 
 /**
  * Which band [time] falls into.
@@ -77,11 +65,18 @@ export function bandOf(time: number, focus: TrailFocus): TrailBand {
 }
 
 /**
- * Per-point flag in the same convention again: the segment ending in point `i` is
- * coloured for the band that point falls in.
+ * Per-point flag: the stretch ending in point `i` is coloured for the band that
+ * point falls in. Index 0 has no incoming stretch, but carries a band anyway so the
+ * array lines up with the coordinates.
+ *
+ * This is the one thing recomputed on every move of the timeline, so it runs over
+ * the drawn track's times (see trail_display) rather than over the recorded points —
+ * a few thousand numbers in a typed array instead of a million objects.
  */
-export function bandFlags(points: HistoryPoint[], focus: TrailFocus): TrailBand[] {
-    return points.map((point) => bandOf(point.timestamp, focus));
+export function bandFlags(times: ArrayLike<number>, focus: TrailFocus): TrailBand[] {
+    const bands: TrailBand[] = new Array(times.length);
+    for (let i = 0; i < times.length; i++) bands[i] = bandOf(times[i], focus);
+    return bands;
 }
 
 /**
@@ -91,21 +86,21 @@ export function bandFlags(points: HistoryPoint[], focus: TrailFocus): TrailBand[
  */
 export function trailData(
     coordinates: number[][],
-    gaps: boolean[],
-    raws: boolean[] = [],
+    gaps: ArrayLike<number | boolean>,
+    raws: ArrayLike<number | boolean> = [],
     bands: TrailBand[] = [],
 ): TrailData {
     const features: TrailFeature[] = [];
     // A LineString needs at least two positions; fewer means nothing to draw.
     let runStart = 1;
     for (let segment = 1; segment < coordinates.length; segment++) {
-        const gap = gaps[segment] ?? false;
-        const raw = raws[segment] ?? false;
+        const gap = Boolean(gaps[segment]);
+        const raw = Boolean(raws[segment]);
         const band = bands[segment] ?? "window";
         const isLast = segment === coordinates.length - 1;
         const sameKind =
-            (gaps[segment + 1] ?? false) === gap
-            && (raws[segment + 1] ?? false) === raw
+            Boolean(gaps[segment + 1]) === gap
+            && Boolean(raws[segment + 1]) === raw
             && (bands[segment + 1] ?? "window") === band;
         if (!isLast && sameKind) continue;
 

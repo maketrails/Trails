@@ -9,10 +9,18 @@
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import {
+        coordinateAt,
+        displayTrack,
+        EMPTY_TRACK,
+        positionAtTime,
+        recordedAt,
+        type DisplayTrack,
+        type TrackPosition
+    } from "./trail_display";
+    import TrailPointPopover from "./TrailPointPopover.svelte";
+    import {
         bandFlags,
-        gapFlags,
-        rawFlags,
-        toCoordinates,
+        trailBandColors,
         trailData,
         type TrailBand,
         type TrailFocus
@@ -80,10 +88,16 @@
     const TRAIL_GAP_LAYER = "location-history-gap";
     const TRAIL_FOCUS_LINE_LAYER = "location-history-focus-line";
     const TRAIL_FOCUS_GAP_LAYER = "location-history-focus-gap";
+    const TRAIL_POINT_SOURCE = "location-history-points";
+    const TRAIL_POINT_LAYER = "location-history-points-hover";
+    const TRAIL_PUCK_SOURCE = "location-history-puck";
+    const TRAIL_PUCK_LAYER = "location-history-puck-dot";
+    const TRAIL_BAND_COLORS = $derived(trailBandColors(darkMode.current));
+
     const trailColors = $derived(
         darkMode.current
-            ? { line: "#e2e8f0", casing: "#020617" }
-            : { line: "#0f172a", casing: "#ffffff" }
+            ? { primary: "#e2e8f0", casing: "#020617", outline: "rgba(226,232,240,0.5)" }
+            : { primary: "#0f172a", casing: "#ffffff", outline: "rgba(15,23,42,0.5)" }
     );
 
     /**
@@ -103,13 +117,6 @@
      * token is near-black in light mode and near-white in dark, and neither would be
      * seen on a map. It is the same amber the timeline marks a range in.
      */
-    const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
-        window: "#ffffff",
-        before: "rgba(51,65,85,0.55)",
-        after: "rgba(255,255,255,0.5)",
-        selected: "#f59e0b"
-    };
-
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
@@ -148,6 +155,22 @@
                 "after", TRAIL_BAND_COLORS.after,
                 "selected", TRAIL_BAND_COLORS.selected,
                 ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
+            ];
+
+            /*
+             * What is drawn under the line. White on a light basemap is barely there,
+             * so the outline is what gives it an edge to be read against — at full
+             * strength for the stretch on show, at half for the ones that have stepped
+             * back, which is what keeps them legible without pulling the eye. The
+             * marked range keeps the neutral casing: it carries its own colour and a
+             * second one around it would only compete with it.
+             */
+            const casingColor: mapboxgl.ExpressionSpecification = [
+                "match",
+                ["get", "band"],
+                "window", trailColors.primary,
+                "selected", trailColors.casing,
+                trailColors.outline
             ];
 
             // Which stretches are on show, and which have stepped back. A trail crosses
@@ -197,15 +220,50 @@
                 // Only under what is on show: the casing is there to hold a bright line
                 // off the map, and drawing it under the dimmed stretches would give them
                 // back the weight they were just relieved of.
-                filter: solid(FOCUS_BANDS),
+                filter: ["!", ["get", "gap"]],
                 layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
+                paint: { "line-color": casingColor, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
 
             currentMap.addLayer(line(TRAIL_LINE_LAYER, solid(DIMMED_BANDS), false), beforeId);
             currentMap.addLayer(line(TRAIL_GAP_LAYER, dotted(DIMMED_BANDS), true), beforeId);
             currentMap.addLayer(line(TRAIL_FOCUS_LINE_LAYER, solid(FOCUS_BANDS), false), beforeId);
             currentMap.addLayer(line(TRAIL_FOCUS_GAP_LAYER, dotted(FOCUS_BANDS), true), beforeId);
+
+            /*
+             * The drawn positions as invisible features, so hovering can report which
+             * one the cursor is near: the trail is drawn as lines, and a line cannot say
+             * *where* along itself it was touched. Its own source, because the line's
+             * data is rewritten on every frame of the grow-in animation and rebuilding
+             * these at that rate would stall the map.
+             *
+             * The radius is deliberately tiny — what counts as near is decided by
+             * measuring against the cursor (see TRAIL_HOVER_RADIUS), not by how big
+             * these are.
+             */
+            currentMap.addSource(TRAIL_POINT_SOURCE, {type: "geojson", data: trailPointData(EMPTY_TRACK)});
+            currentMap.addLayer({
+                id: TRAIL_POINT_LAYER,
+                type: "circle",
+                slot: "middle",
+                source: TRAIL_POINT_SOURCE,
+                paint: {"circle-radius": 1, "circle-opacity": 0, "circle-stroke-width": 0}
+            }, beforeId);
+
+            // The puck itself, added last so it sits on top of the line it marks.
+            currentMap.addSource(TRAIL_PUCK_SOURCE, {type: "geojson", data: trailPuckData(null)});
+            currentMap.addLayer({
+                id: TRAIL_PUCK_LAYER,
+                type: "circle",
+                slot: "middle",
+                source: TRAIL_PUCK_SOURCE,
+                paint: {
+                    "circle-radius": 7,
+                    "circle-color": trailColors.primary,
+                    "circle-stroke-width": 3,
+                    "circle-stroke-color": trailColors.casing
+                }
+            }, beforeId);
             return true;
         } catch {
             return false;
@@ -215,8 +273,8 @@
     function setTrailCoordinates(
         currentMap: mapboxgl.Map,
         coordinates: number[][],
-        gaps: boolean[] = [],
-        raws: boolean[] = [],
+        gaps: ArrayLike<number | boolean> = [],
+        raws: ArrayLike<number | boolean> = [],
         bands: TrailBand[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
@@ -291,11 +349,243 @@
         trailFrame = null;
     }
 
+
+    /*
+     * ── The hover puck ──────────────────────────────────────────────────────────
+     * A trail is a line, and a line cannot say where along itself it was touched.
+     * The drawn positions are published a second time as invisible point features so
+     * that mapbox's own spatial index can answer which of them the cursor is near;
+     * the answer is then measured properly, against the segments between them.
+     */
+
+    /** The drawn positions as their own features, carrying only their place in the track. */
+    type TrailPointFeature = {
+        type: "Feature";
+        properties: {index: number};
+        geometry: {type: "Point"; coordinates: number[]};
+    };
+    type TrailPointData = {type: "FeatureCollection"; features: TrailPointFeature[]};
+
+    function trailPointData(track: DisplayTrack): TrailPointData {
+        return {
+            type: "FeatureCollection",
+            features: track.coordinates.map((coordinates, index) => ({
+                type: "Feature",
+                properties: {index},
+                geometry: {type: "Point", coordinates}
+            }))
+        };
+    }
+
+    function trailPuckData(coordinates: [number, number] | null) {
+        return {
+            type: "FeatureCollection" as const,
+            features: coordinates == null
+                ? []
+                : [{
+                    type: "Feature" as const,
+                    properties: {},
+                    geometry: {type: "Point" as const, coordinates}
+                }]
+        };
+    }
+
+    /**
+     * How close to the *trail* the cursor has to be to count as hovering it, in screen
+     * pixels. It applies to the segments between the positions exactly as it does to
+     * the positions themselves — the line is what is visible, so that is what is aimed
+     * at.
+     */
+    const TRAIL_HOVER_RADIUS = 6;
+
+    /**
+     * How far to look for candidates when the cursor is near none of the positions
+     * themselves. A long straight stretch has its ends far apart, and the cursor can
+     * sit on the line while being hundreds of pixels from either of them.
+     */
+    const TRAIL_HOVER_SEGMENT_SEARCH = 250;
+
+    /** Where the cursor put the puck, and where the timeline did. The timeline wins. */
+    let pointerHover: TrackPosition | null = $state(null);
+
+    /** What the popover above the puck reads, mutated rather than replaced (see its props). */
+    const puckState = $state<{point: HistoryPoint | null}>({point: null});
+
+    let puckMarker: mapboxgl.Marker | null = null;
+    let puckPopover: Record<string, any> | null = null;
+
+    /**
+     * Where on the segment [from]→[to] the cursor sits: how far along it (0–1, clamped
+     * to the segment) and how far off it, both in screen pixels.
+     */
+    function nearestOnSegment(from: mapboxgl.Point, to: mapboxgl.Point, cursor: mapboxgl.Point) {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const lengthSquared = dx * dx + dy * dy;
+        // Two positions on the same pixel are their own start rather than a division by 0.
+        const fraction = lengthSquared === 0
+            ? 0
+            : Math.min(1, Math.max(0, ((cursor.x - from.x) * dx + (cursor.y - from.y) * dy) / lengthSquared));
+
+        return {
+            fraction,
+            distance: Math.hypot(from.x + dx * fraction - cursor.x, from.y + dy * fraction - cursor.y)
+        };
+    }
+
+    /** Follows the cursor along the trail, or lets go once it is too far from the line. */
+    function updateHover(event: mapboxgl.MapMouseEvent) {
+        const currentMap = map;
+        // Bound to the map rather than to the layer, so it also fires beside the trail.
+        // The layer is gone between style swaps and while no trail is shown.
+        if (currentMap == null || currentMap.getLayer(TRAIL_POINT_LAYER) == null) return;
+
+        const coordinates = drawn.coordinates;
+        const cursor = event.point;
+
+        // A box is what the query takes. Asking mapbox rather than walking the track
+        // also keeps positions on the far side of the globe out of it: they are not
+        // rendered, so they are not returned.
+        const positionsWithin = (radius: number) => currentMap.queryRenderedFeatures(
+            [[cursor.x - radius, cursor.y - radius], [cursor.x + radius, cursor.y + radius]],
+            {layers: [TRAIL_POINT_LAYER]}
+        ) as unknown as TrailPointFeature[];
+
+        // Close by first; only if the cursor is near no position at all is it worth
+        // looking for the far-apart ends of a long segment.
+        const candidates = positionsWithin(TRAIL_HOVER_RADIUS);
+        const searched = candidates.length > 0 ? candidates : positionsWithin(TRAIL_HOVER_SEGMENT_SEARCH);
+
+        // Neighbouring candidates share endpoints, so each position is projected once.
+        const projected = new Map<number, mapboxgl.Point>();
+        const project = (index: number) => {
+            let point = projected.get(index);
+            if (point == null) {
+                point = currentMap.project(coordinates[index] as [number, number]);
+                projected.set(index, point);
+            }
+            return point;
+        };
+
+        // In a container, because TypeScript does not follow assignments made inside the
+        // closure below and would otherwise take the result for `null` here.
+        const nearest: {found: TrackPosition & {distance: number} | null} = {found: null};
+        const consider = (index: number) => {
+            if (coordinates[index] == null) return;
+
+            const from = project(index);
+            const {fraction, distance} = coordinates[index + 1] == null
+                ? {fraction: 0, distance: Math.hypot(from.x - cursor.x, from.y - cursor.y)}
+                : nearestOnSegment(from, project(index + 1), cursor);
+
+            if (distance > TRAIL_HOVER_RADIUS) return;
+            if (nearest.found == null || distance < nearest.found.distance) {
+                nearest.found = {index, fraction, distance};
+            }
+        };
+
+        for (const candidate of searched) {
+            const index = candidate.properties.index;
+            // The track may have been replaced since the query — an index is only an index.
+            if (coordinates[index] == null) continue;
+
+            consider(index - 1);
+            consider(index);
+        }
+
+        pointerHover = nearest.found == null
+            ? null
+            : {index: nearest.found.index, fraction: nearest.found.fraction};
+    }
+
+    /** Puts the puck where the timeline points, or else where the cursor does. */
+    function showPuck(currentMap: mapboxgl.Map, position: TrackPosition | null) {
+        const coordinates = position == null ? null : coordinateAt(drawn, position);
+
+        const source = currentMap.getSource(TRAIL_PUCK_SOURCE);
+        if (source?.type === "geojson") source.setData(trailPuckData(coordinates));
+
+        puckState.point = position == null ? null : recordedAt(drawn, drawnFrom ?? [], position);
+
+        if (coordinates == null) return;
+
+        if (puckMarker == null) {
+            const element = document.createElement("div");
+            puckPopover = mount(TrailPointPopover, {target: element, props: {state: puckState}});
+            // Anchored above the puck, clear of the line it marks. It renders nothing
+            // while there is no point, so the marker can simply stay put.
+            puckMarker = new mapboxgl.Marker({element, anchor: "bottom", offset: [0, -14]})
+                .setLngLat(coordinates)
+                .addTo(currentMap);
+            return;
+        }
+        puckMarker.setLngLat(coordinates);
+    }
+
+    /**
+     * A redraw waiting for the next frame. One wheel gesture publishes several windows
+     * per frame, and each of them would otherwise cost a rebuild and a hand-off to
+     * mapbox — of which only the last is ever seen.
+     */
+    let pendingDraw: (() => void) | null = null;
+    let drawFrame: number | null = null;
+
+    function scheduleDraw(draw: () => void) {
+        pendingDraw = draw;
+        if (drawFrame != null) return;
+
+        drawFrame = requestAnimationFrame(() => {
+            drawFrame = null;
+            const run = pendingDraw;
+            pendingDraw = null;
+            run?.();
+        });
+    }
+
+    function cancelScheduledDraw() {
+        if (drawFrame != null) cancelAnimationFrame(drawFrame);
+        drawFrame = null;
+        pendingDraw = null;
+    }
+
+    /** Both of the above: nothing left running, nothing left waiting. */
+    function stopTrailDrawing() {
+        cancelTrailAnimation();
+        cancelScheduledDraw();
+    }
+
     /**
      * Grows the trail in from its oldest point over {@link TRAIL_ANIMATION_MS}, counted
      * from [animateFrom]. Passing the start of an animation that is already running
      * carries it on with the new geometry; null draws the finished line at once.
      */
+    /**
+     * The last history that was thinned, and what came out. A recolour must not thin
+     * again — the timeline moves at sixty frames a second and the history behind it
+     * does not change at all — so the result is kept for as long as the same list of
+     * points keeps being published.
+     */
+    let drawnFrom: HistoryPoint[] | null = null;
+    let drawn: DisplayTrack = EMPTY_TRACK;
+
+    function trackOf(currentMap: mapboxgl.Map, points: HistoryPoint[]): DisplayTrack {
+        if (points === drawnFrom) return drawn;
+
+        drawn = displayTrack(points);
+        drawnFrom = points;
+
+        // The positions the hover is measured against are published once per track, not
+        // per frame: the line's own data is rewritten while it grows in, and rebuilding
+        // thousands of point features at that rate would stall the map.
+        const source = currentMap.getSource(TRAIL_POINT_SOURCE);
+        if (source?.type === "geojson") source.setData(trailPointData(drawn));
+
+        // Whatever the puck was standing on belonged to the track that has just been
+        // replaced.
+        pointerHover = null;
+        return drawn;
+    }
+
     function drawTrail(
         currentMap: mapboxgl.Map,
         points: HistoryPoint[],
@@ -304,10 +594,8 @@
     ) {
         cancelTrailAnimation();
 
-        const coordinates = toCoordinates(points);
-        const gaps = gapFlags(points);
-        const raws = rawFlags(points);
-        const bands = bandFlags(points, focus);
+        const {coordinates, times, gaps, raws} = trackOf(currentMap, points);
+        const bands = bandFlags(times, focus);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
             setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
@@ -372,18 +660,41 @@
             // Fires for every camera change, including each frame of an animated one,
             // so the bundling keeps up with a flyTo instead of snapping at its end.
             map.on("move", () => cameraEpoch++);
+
+            // Following the cursor along the trail. `mouseout` is what lets go when the
+            // pointer leaves the map altogether rather than merely the line.
+            map.on("mousemove", updateHover);
+            map.on("mouseout", () => (pointerHover = null));
         });
 
         return () => {
             cancelTrailAnimation();
             cancelSpreadAnimation();
             for (const key of [...pins.keys()]) removePin(key, false);
+            if (puckPopover != null) void unmount(puckPopover);
+            puckMarker?.remove();
+            puckMarker = null;
+            puckPopover = null;
             map?.remove();
         };
     });
 
     $effect(() => {
         map?.setStyle(style);
+    });
+
+    /**
+     * The puck stands wherever something is pointing: the timeline first — a reader
+     * moving along it is asking about a moment, and the map answers with a place — and
+     * the cursor on the map otherwise.
+     */
+    $effect(() => {
+        const currentMap = map;
+        const at = mapTrail.hoveredAt;
+        const pointer = pointerHover;
+        if (currentMap == null || currentMap.getLayer(TRAIL_PUCK_LAYER) == null) return;
+
+        showPuck(currentMap, at != null ? positionAtTime(drawn, at) : pointer);
     });
 
     // The track the grow-in animation last played for, so everything that re-runs the
@@ -442,13 +753,13 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
-        drawTrail(currentMap, points, animateFrom, focus);
+        scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus));
 
-        // Only the animation is stopped here. Clearing the line as well would blank it
+        // Only the drawing is stopped here. Clearing the line as well would blank it
         // on every re-run — and this effect re-runs whenever the timeline moves, which
         // read as a flicker. A trail that is really gone publishes an empty list (see
         // the trail claim's release), and that draws as nothing by itself.
-        return cancelTrailAnimation;
+        return stopTrailDrawing;
     });
 
     /*
