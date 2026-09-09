@@ -72,7 +72,10 @@ function cacheTargetFor(target: HistoryTarget): CacheTarget | null {
  * by that component, so leaving the view drops the result.
  */
 export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
-    let points = $state<HistoryPoint[]>([]);
+    // Raw, not deep-reactive: the list is replaced wholesale on every update, and
+    // proxying a history of hundreds of thousands of points would make every later
+    // read of it (drawing the trail, above all) an order of magnitude slower.
+    let points = $state.raw<HistoryPoint[]>([]);
     let historySeconds = $state<number | null>(null);
     let loading = $state(false);
     let failed = $state(false);

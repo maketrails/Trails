@@ -6,7 +6,11 @@ export interface TrailRange {
     end: Date;
 }
 
-let points = $state<HistoryPoint[]>([]);
+// Raw, not deep-reactive: a history runs to hundreds of thousands of points, and a
+// reactive proxy over it makes every read of every point go through a trap — walking
+// one costs about eighteen times what walking a plain array does. The list is only
+// ever replaced, never edited in place, so nothing here needs the proxy.
+let points = $state.raw<HistoryPoint[]>([]);
 let key = $state<string | null>(null);
 
 // What the trail is being read through: the stretch a timeline shows, and the range
