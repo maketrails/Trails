@@ -131,13 +131,6 @@
     // them apart again — this is what tells the pin effect to look anew.
     let cameraEpoch = $state(0);
 
-    /**
-     * Counts the camera coming to rest. Which detail the trail is drawn at follows the
-     * zoom, and what of it is drawn follows the viewport — both settle at `moveend`,
-     * and redoing the choice mid-gesture would cost more than it shows.
-     */
-    let trailViewEpoch = $state(0);
-
     /** How far past the edge of the screen the trail is still drawn, as a share of it. */
     const VIEW_PADDING = 0.25;
 
@@ -556,6 +549,27 @@
         });
     }
 
+    /** What the last draw was made of, so a camera move can ask for it again. */
+    let lastDrawn: {points: HistoryPoint[]; focus: TrailFocus} | null = null;
+
+    /**
+     * Redraws at the detail the camera has come to rest at.
+     *
+     * Deliberately not a piece of state the trail effect reads: `fitBounds` fires
+     * `moveend` synchronously when the camera is already where it was asked to go, and
+     * that happens *inside* the camera effect — so a state written here would
+     * invalidate an effect from within another one, which is the loop Svelte refuses
+     * to run (effect_update_depth_exceeded). Calling the draw directly keeps the
+     * viewport where it belongs: on the map, not in the graph.
+     */
+    function redrawForView() {
+        const currentMap = map;
+        const last = lastDrawn;
+        if (currentMap == null || last == null) return;
+
+        scheduleDraw(() => drawTrail(currentMap, last.points, trailAnimationStart, last.focus));
+    }
+
     function cancelScheduledDraw() {
         if (drawFrame != null) cancelAnimationFrame(drawFrame);
         drawFrame = null;
@@ -712,7 +726,7 @@
             // Fires for every camera change, including each frame of an animated one,
             // so the bundling keeps up with a flyTo instead of snapping at its end.
             map.on("move", () => cameraEpoch++);
-            map.on("moveend", () => trailViewEpoch++);
+            map.on("moveend", redrawForView);
 
             // Following the cursor along the trail. `mouseout` is what lets go when the
             // pointer leaves the map altogether rather than merely the line.
@@ -767,9 +781,6 @@
         // becomes possible once the style load bumps the epoch.
         const currentMap = map;
         const epoch = styleEpoch;
-        // Read so that coming to rest at a new zoom or over new ground redraws the
-        // line at the detail that view deserves.
-        void trailViewEpoch;
         const points = mapTrail.points;
         const trailKey = mapTrail.key;
         // Read here so that moving the timeline re-runs this and recolours the line.
@@ -809,6 +820,9 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
+        // Kept so the camera can ask for the same line again at a new zoom, without
+        // the view being part of the reactive graph (see redrawForView).
+        lastDrawn = {points, focus};
         scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus));
 
         // Only the drawing is stopped here. Clearing the line as well would blank it
