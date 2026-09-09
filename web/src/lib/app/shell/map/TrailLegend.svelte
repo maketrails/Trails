@@ -1,14 +1,18 @@
 <script lang="ts">
+    import {MediaQuery} from "svelte/reactivity";
     import {_} from "svelte-i18n";
-    import {TRAIL_BAND_COLORS, type TrailBand} from "./trail_features";
+    import {trailBandColors, type TrailBand} from "./trail_features";
 
     let {
         /** Whether a range is marked. Its entry is left out while there is none to explain. */
         marked = false,
     }: {marked?: boolean} = $props();
 
-    // Read straight from what the map paints with (see TRAIL_BAND_COLORS), so the two
-    // cannot say different things.
+    // Read straight from what the map paints with, including how it turns with the
+    // theme, so the two cannot say different things.
+    const darkMode = new MediaQuery("(prefers-color-scheme: dark)");
+    let colors = $derived(trailBandColors(darkMode.current));
+
     const ENTRIES: {band: TrailBand; label: string}[] = [
         {band: "before", label: "timeline.legend.before"},
         {band: "window", label: "timeline.legend.on_show"},
@@ -22,20 +26,21 @@
     );
 </script>
 
-<!-- What the colours on the line mean. The swatches sit on a dark patch because that
-     is what they are read against on the map, and two of them are white. -->
+<!-- What the colours on the line mean. Each swatch is drawn the way the line is: a
+     coloured core inside an outline. Two of the four are white, and white has no edge
+     of its own — on the map the casing gives it one, and here the border does. -->
 <ul
         aria-label={$_("timeline.legend.label")}
-        class="flex min-w-0 flex-row items-center gap-2 overflow-hidden rounded-full bg-slate-900/80 px-2 py-1"
+        class="flex min-w-0 flex-row items-center gap-2.5 overflow-hidden"
 >
     {#each entries as entry (entry.band)}
-        <li class="flex shrink-0 flex-row items-center gap-1">
+        <li class="flex shrink-0 flex-row items-center gap-1.5">
             <span
-                    class="h-0.5 w-4 rounded-full"
-                    style:background-color={TRAIL_BAND_COLORS[entry.band]}
+                    class="h-2.5 w-6 shrink-0 rounded-full border-2 {entry.band === 'window' ? 'border-foreground' : 'border-foreground/50'}"
+                    style:background-color={colors[entry.band]}
                     aria-hidden="true"
             ></span>
-            <span class="whitespace-nowrap text-[10px] text-slate-200">{$_(entry.label)}</span>
+            <span class="whitespace-nowrap text-[11px] text-muted-foreground">{$_(entry.label)}</span>
         </li>
     {/each}
 </ul>

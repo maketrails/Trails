@@ -16,15 +16,19 @@ export type TrailBand = "before" | "window" | "after" | "selected";
  * legend has to say the same thing the line does, and two lists of colours drift
  * apart the moment one of them is touched.
  *
- * Theme-independent on purpose: these read against the *basemap*, not against the
- * app's surfaces, and the basemap is dark in both themes' map styles.
+ * These are read against the *basemap*, which is light in one theme and near-black
+ * in the other — so the grey of a stretch that has stepped back has to turn with it,
+ * or it disappears into the ground it is drawn on. White and amber carry themselves
+ * on both, and the outline under them (see the map's casing) does the rest.
  */
-export const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
-    window: "#ffffff",
-    before: "rgba(51,65,85,0.55)",
-    after: "rgba(255,255,255,0.8)",
-    selected: "#f59e0b"
-};
+export function trailBandColors(dark: boolean): Record<TrailBand, string> {
+    return {
+        window: "#ffffff",
+        before: dark ? "rgba(148,163,184,0.6)" : "rgba(51,65,85,0.55)",
+        after: "rgba(255,255,255,0.8)",
+        selected: "#f59e0b"
+    };
+}
 
 /** What the timeline is showing and what is marked in it. */
 export interface TrailFocus {

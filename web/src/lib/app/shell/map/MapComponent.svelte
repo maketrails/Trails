@@ -20,7 +20,7 @@
     import TrailPointPopover from "./TrailPointPopover.svelte";
     import {
         bandFlags,
-        TRAIL_BAND_COLORS,
+        trailBandColors,
         trailData,
         type TrailBand,
         type TrailFocus
@@ -92,6 +92,8 @@
     const TRAIL_POINT_LAYER = "location-history-points-hover";
     const TRAIL_PUCK_SOURCE = "location-history-puck";
     const TRAIL_PUCK_LAYER = "location-history-puck-dot";
+    const TRAIL_BAND_COLORS = $derived(trailBandColors(darkMode.current));
+
     const trailColors = $derived(
         darkMode.current
             ? { primary: "#e2e8f0", casing: "#020617", outline: "rgba(226,232,240,0.5)" }
