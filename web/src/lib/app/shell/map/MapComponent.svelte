@@ -80,8 +80,8 @@
     const TRAIL_FOCUS_GAP_LAYER = "location-history-focus-gap";
     const trailColors = $derived(
         darkMode.current
-            ? { line: "#e2e8f0", casing: "#020617" }
-            : { line: "#0f172a", casing: "#ffffff" }
+            ? { primary: "#e2e8f0", casing: "#020617" }
+            : { primary: "#0f172a", casing: "#ffffff" }
     );
 
     /**
@@ -148,6 +148,20 @@
                 ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
             ];
 
+            /*
+             * What is drawn under the stretches on show. The white one gets an outline
+             * in the theme's primary colour: white on a light basemap is barely there,
+             * and the outline is what gives it an edge to be read against. The marked
+             * range keeps the neutral casing — it carries its own colour and a second
+             * one around it would only compete with it.
+             */
+            const casingColor: mapboxgl.ExpressionSpecification = [
+                "match",
+                ["get", "band"],
+                "window", trailColors.primary,
+                trailColors.casing
+            ];
+
             // Which stretches are on show, and which have stepped back. A trail crosses
             // itself, so the two are drawn in two passes: the dimmed ones first, the
             // highlighted ones last and therefore on top, where they cannot be painted
@@ -197,7 +211,7 @@
                 // back the weight they were just relieved of.
                 filter: solid(FOCUS_BANDS),
                 layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": trailColors.casing, "line-width": 7, "line-opacity": 0.7 }
+                paint: { "line-color": casingColor, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
 
             currentMap.addLayer(line(TRAIL_LINE_LAYER, solid(DIMMED_BANDS), false), beforeId);
