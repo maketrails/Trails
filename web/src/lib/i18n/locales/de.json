@@ -224,6 +224,13 @@
       "edit": "Markierten Bereich bearbeiten",
       "from": "Von",
       "to": "Bis"
+    },
+    "legend": {
+      "label": "Was die Farben der Linie bedeuten",
+      "on_show": "Angezeigt",
+      "before": "Davor",
+      "after": "Danach",
+      "marked": "Markiert"
     }
   }
 }

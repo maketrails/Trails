@@ -8,6 +8,7 @@
     import {loadHistory} from "$lib/state/history.svelte";
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
+    import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
     import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
     import {_} from "svelte-i18n";
 
@@ -142,7 +143,12 @@
                     bind:view={timelineView}
                     bind:selection={timelineSelection}
                     onhover={(at) => mapTrail.hover(at)}
+                    actions={legend}
             />
         </div>
     {/if}
+{/snippet}
+
+{#snippet legend()}
+    <TrailLegend marked={timelineSelection != null} />
 {/snippet}

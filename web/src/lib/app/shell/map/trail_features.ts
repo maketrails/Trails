@@ -11,6 +11,21 @@ import type {TrailRange} from "$lib/state/map_trail.svelte";
 /** Which stretch of the trail a segment belongs to, seen from the timeline. */
 export type TrailBand = "before" | "window" | "after" | "selected";
 
+/**
+ * What each band is drawn in. Here rather than in the map component because a
+ * legend has to say the same thing the line does, and two lists of colours drift
+ * apart the moment one of them is touched.
+ *
+ * Theme-independent on purpose: these read against the *basemap*, not against the
+ * app's surfaces, and the basemap is dark in both themes' map styles.
+ */
+export const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
+    window: "#ffffff",
+    before: "rgba(51,65,85,0.55)",
+    after: "rgba(255,255,255,0.8)",
+    selected: "#f59e0b"
+};
+
 /** What the timeline is showing and what is marked in it. */
 export interface TrailFocus {
     window: TrailRange | null;

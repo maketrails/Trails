@@ -20,6 +20,7 @@
     import TrailPointPopover from "./TrailPointPopover.svelte";
     import {
         bandFlags,
+        TRAIL_BAND_COLORS,
         trailData,
         type TrailBand,
         type TrailFocus
@@ -114,13 +115,6 @@
      * token is near-black in light mode and near-white in dark, and neither would be
      * seen on a map. It is the same amber the timeline marks a range in.
      */
-    const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
-        window: "#ffffff",
-        before: "rgba(51,65,85,0.55)",
-        after: "rgba(255,255,255,0.8)",
-        selected: "#f59e0b"
-    };
-
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
