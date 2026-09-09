@@ -8,11 +8,9 @@
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
+    import {displayTrack, EMPTY_TRACK, type DisplayTrack} from "./trail_display";
     import {
         bandFlags,
-        gapFlags,
-        rawFlags,
-        toCoordinates,
         trailData,
         type TrailBand,
         type TrailFocus
@@ -215,8 +213,8 @@
     function setTrailCoordinates(
         currentMap: mapboxgl.Map,
         coordinates: number[][],
-        gaps: boolean[] = [],
-        raws: boolean[] = [],
+        gaps: ArrayLike<number | boolean> = [],
+        raws: ArrayLike<number | boolean> = [],
         bands: TrailBand[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
@@ -292,10 +290,59 @@
     }
 
     /**
+     * A redraw waiting for the next frame. One wheel gesture publishes several windows
+     * per frame, and each of them would otherwise cost a rebuild and a hand-off to
+     * mapbox — of which only the last is ever seen.
+     */
+    let pendingDraw: (() => void) | null = null;
+    let drawFrame: number | null = null;
+
+    function scheduleDraw(draw: () => void) {
+        pendingDraw = draw;
+        if (drawFrame != null) return;
+
+        drawFrame = requestAnimationFrame(() => {
+            drawFrame = null;
+            const run = pendingDraw;
+            pendingDraw = null;
+            run?.();
+        });
+    }
+
+    function cancelScheduledDraw() {
+        if (drawFrame != null) cancelAnimationFrame(drawFrame);
+        drawFrame = null;
+        pendingDraw = null;
+    }
+
+    /** Both of the above: nothing left running, nothing left waiting. */
+    function stopTrailDrawing() {
+        cancelTrailAnimation();
+        cancelScheduledDraw();
+    }
+
+    /**
      * Grows the trail in from its oldest point over {@link TRAIL_ANIMATION_MS}, counted
      * from [animateFrom]. Passing the start of an animation that is already running
      * carries it on with the new geometry; null draws the finished line at once.
      */
+    /**
+     * The last history that was thinned, and what came out. A recolour must not thin
+     * again — the timeline moves at sixty frames a second and the history behind it
+     * does not change at all — so the result is kept for as long as the same list of
+     * points keeps being published.
+     */
+    let drawnFrom: HistoryPoint[] | null = null;
+    let drawn: DisplayTrack = EMPTY_TRACK;
+
+    function trackOf(points: HistoryPoint[]): DisplayTrack {
+        if (points !== drawnFrom) {
+            drawn = displayTrack(points);
+            drawnFrom = points;
+        }
+        return drawn;
+    }
+
     function drawTrail(
         currentMap: mapboxgl.Map,
         points: HistoryPoint[],
@@ -304,10 +351,8 @@
     ) {
         cancelTrailAnimation();
 
-        const coordinates = toCoordinates(points);
-        const gaps = gapFlags(points);
-        const raws = rawFlags(points);
-        const bands = bandFlags(points, focus);
+        const {coordinates, times, gaps, raws} = trackOf(points);
+        const bands = bandFlags(times, focus);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
             setTrailCoordinates(currentMap, coordinates, gaps, raws, bands);
@@ -442,13 +487,13 @@
                 ? (reducedMotion.current ? null : performance.now())
                 : trailAnimationStart;
 
-        drawTrail(currentMap, points, animateFrom, focus);
+        scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus));
 
-        // Only the animation is stopped here. Clearing the line as well would blank it
+        // Only the drawing is stopped here. Clearing the line as well would blank it
         // on every re-run — and this effect re-runs whenever the timeline moves, which
         // read as a flicker. A trail that is really gone publishes an empty list (see
         // the trail claim's release), and that draws as nothing by itself.
-        return cancelTrailAnimation;
+        return stopTrailDrawing;
     });
 
     /*
