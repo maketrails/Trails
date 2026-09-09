@@ -80,8 +80,8 @@
     const TRAIL_FOCUS_GAP_LAYER = "location-history-focus-gap";
     const trailColors = $derived(
         darkMode.current
-            ? { primary: "#e2e8f0", casing: "#020617" }
-            : { primary: "#0f172a", casing: "#ffffff" }
+            ? { primary: "#e2e8f0", casing: "#020617", outline: "rgba(226,232,240,0.5)" }
+            : { primary: "#0f172a", casing: "#ffffff", outline: "rgba(15,23,42,0.5)" }
     );
 
     /**
@@ -104,7 +104,7 @@
     const TRAIL_BAND_COLORS: Record<TrailBand, string> = {
         window: "#ffffff",
         before: "rgba(51,65,85,0.55)",
-        after: "rgba(255,255,255,0.5)",
+        after: "rgba(255,255,255,0.8)",
         selected: "#f59e0b"
     };
 
@@ -149,17 +149,19 @@
             ];
 
             /*
-             * What is drawn under the stretches on show. The white one gets an outline
-             * in the theme's primary colour: white on a light basemap is barely there,
-             * and the outline is what gives it an edge to be read against. The marked
-             * range keeps the neutral casing — it carries its own colour and a second
-             * one around it would only compete with it.
+             * What is drawn under the line. White on a light basemap is barely there,
+             * so the outline is what gives it an edge to be read against — at full
+             * strength for the stretch on show, at half for the ones that have stepped
+             * back, which is what keeps them legible without pulling the eye. The
+             * marked range keeps the neutral casing: it carries its own colour and a
+             * second one around it would only compete with it.
              */
             const casingColor: mapboxgl.ExpressionSpecification = [
                 "match",
                 ["get", "band"],
                 "window", trailColors.primary,
-                trailColors.casing
+                "selected", trailColors.casing,
+                trailColors.outline
             ];
 
             // Which stretches are on show, and which have stepped back. A trail crosses
@@ -209,7 +211,7 @@
                 // Only under what is on show: the casing is there to hold a bright line
                 // off the map, and drawing it under the dimmed stretches would give them
                 // back the weight they were just relieved of.
-                filter: solid(FOCUS_BANDS),
+                filter: ["!", ["get", "gap"]],
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: { "line-color": casingColor, "line-width": 7, "line-opacity": 0.7 }
             }, beforeId);
