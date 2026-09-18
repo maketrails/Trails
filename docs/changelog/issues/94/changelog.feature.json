@@ -1,10 +1,10 @@
 {
   "title": "Zoom while following a device",
-  "description": "While following a device or share on the map, zooming stays centred on it and keeps following. Following starts a bit further out, and ⌥/Alt-click on \"Follow device\" keeps the current zoom. The camera mode buttons now have tooltips.",
+  "description": "While following a device or share on the map, zooming stays centred on it and keeps following. Following starts a bit further out, and Option/Alt-click on \"Follow device\" keeps the current zoom. The camera mode buttons now have tooltips.",
   "localized": {
     "de": {
       "title": "Zoomen beim Folgen eines Geräts",
-      "description": "Beim Folgen eines Geräts oder einer Freigabe bleibt der Zoom auf dieses zentriert und das Folgen aktiv. Das Folgen startet etwas weiter herausgezoomt, und ⌥/Alt-Klick auf „Gerät folgen“ behält den aktuellen Zoom bei. Die Kameramodus-Buttons haben jetzt Tooltips."
+      "description": "Beim Folgen eines Geräts oder einer Freigabe bleibt der Zoom auf dieses zentriert und das Folgen aktiv. Das Folgen startet etwas weiter herausgezoomt, und Option/Alt-Klick auf „Gerät folgen“ behält den aktuellen Zoom bei. Die Kameramodus-Buttons haben jetzt Tooltips."
     }
   }
 }
