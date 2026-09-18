@@ -30,28 +30,22 @@ data class DeviceOptimizationResponse(
     @SerialName("rebuilt_at") val rebuiltAt: Long?,
     @SerialName("state") val state: OptimizationProgress,
 ) {
-    /**
-     * How far the optimizer has got on the device, and whether a run is in progress.
-     *
-     * [progress] is the share of the settled raw positions the optimized track
-     * covers, 0..1. It only counts positions old enough to be optimized at all, so a
-     * device that is fully caught up reports 1.0 even though [unoptimizedPoints] is
-     * not zero.
-     */
+    /** Whether the optimizer is working on the device right now. */
     @Serializable
     sealed class OptimizationProgress {
-        abstract val progress: Double
-
         @Serializable
         @SerialName("idle")
-        data class Idle(
-            @SerialName("progress") override val progress: Double,
-        ) : OptimizationProgress()
+        data object Idle : OptimizationProgress()
 
+        /**
+         * [progress] is the share of the settled raw positions the optimized track
+         * covers, 0..1. It only counts positions old enough to be optimized at all,
+         * so a caught-up track reaches 1.0 even though [unoptimizedPoints] is not zero.
+         */
         @Serializable
         @SerialName("running")
         data class Running(
-            @SerialName("progress") override val progress: Double,
+            @SerialName("progress") val progress: Double,
         ) : OptimizationProgress()
     }
 }

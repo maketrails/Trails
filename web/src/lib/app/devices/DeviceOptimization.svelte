@@ -57,7 +57,7 @@
     // on the server and only read on demand.
     let live = $derived(socket?.progress[deviceId] ?? null);
     let currentProgress = $derived(live ?? optimization?.state ?? null);
-    let progress = $derived(currentProgress?.progress ?? 0);
+    let progress = $derived(currentProgress?.type === "running" ? currentProgress.progress : 0);
     let isRunning = $derived(currentProgress?.type === "running");
 
     // Guards that must not be reactive: an effect writes them, and reading a
@@ -184,9 +184,8 @@
             </div>
         </div>
 
-        <!-- A finished optimization has nothing to report, so the bar only shows
-             while there is something left to do. -->
-        {#if percentage < 100 || isRunning}
+        <!-- Only a running optimization has progress to report. -->
+        {#if isRunning}
             <div class="flex flex-col gap-1.5">
                 <div class="flex flex-row items-baseline justify-between text-sm">
                     <span class="text-muted-foreground">{$_("devices.optimization.progress")}</span>

@@ -256,7 +256,8 @@ class TrailOptimizer(
             unoptimizedDistanceMeters = unoptimizedSeries.distanceMeters,
             rawDistanceMeters = rawSeries.distanceMeters,
             rebuiltAt = TrackRebuild.findById(deviceId)?.rebuiltAt,
-            progress = progressOf(progress(optimizedUntil), isRunning = runLock.isLocked)
+            progress = if (runLock.isLocked) OptimizationProgress.Running(progress(optimizedUntil))
+            else OptimizationProgress.Idle
         )
     }
 
@@ -303,7 +304,7 @@ class TrailOptimizer(
             }
         }
 
-        publishProgress(window.progressAt(0), isRunning = true)
+        publishProgress(OptimizationProgress.Running(window.progressAt(0)))
 
         /*
          * Read, optimize and write one batch at a time: the whole history of a
@@ -330,7 +331,7 @@ class TrailOptimizer(
             cursor = batch.last().timestamp
             processed += batch.size
 
-            publishProgress(window.progressAt(processed), isRunning = true)
+            publishProgress(OptimizationProgress.Running(window.progressAt(processed)))
 
             if (batch.size < BATCH_SIZE) break
 
@@ -344,7 +345,7 @@ class TrailOptimizer(
             delay(BATCH_PAUSE)
         }
 
-        publishProgress(window.progressAt(processed), isRunning = false)
+        publishProgress(OptimizationProgress.Idle)
     }
 
     /**
@@ -352,16 +353,13 @@ class TrailOptimizer(
      * batch, so it costs no query at all — see [Window]. The distances of
      * [state] are a full scan and are only read when a view asks for them.
      */
-    private suspend fun publishProgress(progress: Double, isRunning: Boolean) {
+    private suspend fun publishProgress(progress: OptimizationProgress) {
         deviceRepository.reportOptimizationProgress(
             deviceId = deviceId,
             ownerId = ownerId,
-            progress = progressOf(progress, isRunning),
+            progress = progress,
         )
     }
-
-    private fun progressOf(progress: Double, isRunning: Boolean): OptimizationProgress =
-        if (isRunning) OptimizationProgress.Running(progress) else OptimizationProgress.Idle(progress)
 
     /**
      * Share of the settled raw positions that the derived series covers.

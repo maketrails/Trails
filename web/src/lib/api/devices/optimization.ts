@@ -1,11 +1,11 @@
 import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
 
 /**
- * How far the optimizer has got on a device, and whether a run is in progress.
- * `progress` is the share of the settled positions that are optimized, 0..1.
+ * Whether the optimizer is working on a device right now. While it runs, `progress`
+ * is the share of the settled positions that are optimized, 0..1.
  */
 export type OptimizationProgress =
-    | { type: "idle"; progress: number }
+    | { type: "idle" }
     | { type: "running"; progress: number };
 
 /** How far the track of one of the user's own devices has been optimized. */
