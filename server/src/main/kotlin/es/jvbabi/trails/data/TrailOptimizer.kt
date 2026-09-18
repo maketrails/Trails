@@ -3,41 +3,24 @@ package es.jvbabi.trails.data
 import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
-import es.jvbabi.trails.database.Device
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.jetbrains.exposed.v1.core.Max
-import org.jetbrains.exposed.v1.core.Op
-import org.jetbrains.exposed.v1.core.SortOrder
-import org.jetbrains.exposed.v1.core.alias
-import org.jetbrains.exposed.v1.core.and
-import org.jetbrains.exposed.v1.core.eq
-import org.jetbrains.exposed.v1.core.greater
-import org.jetbrains.exposed.v1.core.greaterEq
-import org.jetbrains.exposed.v1.core.less
-import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.datetime.KotlinInstantColumnType
-import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.sqrt
+import kotlin.math.*
 import kotlin.time.Clock
 import kotlin.time.Duration
-import kotlin.time.Instant
-import kotlin.uuid.Uuid
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
+import kotlin.uuid.Uuid
 
 /**
  * Derives a track worth drawing from the raw positions a device reported.
@@ -54,7 +37,9 @@ import kotlin.time.Duration.Companion.minutes
  *
  * Four stages, in this order:
  * 1. **Trust filter** — only positions below [MAX_ACCURACY_METERS] are used.
- *    Anything worse cannot be told apart from noise.
+ *    Anything worse cannot be told apart from noise — unless the device moves
+ *    fast enough that the error is small against the distance covered, see
+ *    [MOVING_ACCURACY_RATIO].
  * 2. **Segmenting** — a recording pause longer than [SEGMENT_GAP_SECONDS]
  *    separates two independent stretches of movement.
  * 3. **Spike removal** — a position whose two neighbours are much closer to
@@ -118,6 +103,17 @@ class TrailOptimizer(
         val BATCH_PAUSE: Duration = 50.milliseconds
 
         const val MAX_ACCURACY_METERS = 20.0
+
+        /**
+         * A worse fix is still trusted while its accuracy stays below this share
+         * of the distance between its two neighbours. On a highway those are a few
+         * hundred metres apart, so ±45 m is plain to see; standing still, they are
+         * not, and the fix stays out.
+         */
+        const val MOVING_ACCURACY_RATIO = 0.25
+
+        /** Upper bound for [MOVING_ACCURACY_RATIO], however fast the device moves. */
+        const val MAX_MOVING_ACCURACY_METERS = 75.0
         const val SEGMENT_GAP_SECONDS = 300.0
 
         /** Generous on purpose: the same pipeline has to survive planes. */
@@ -484,9 +480,31 @@ class TrailOptimizer(
     }
 
     private fun optimize(positions: List<Position>): List<Position> = positions
-        .filter { it.accuracy < MAX_ACCURACY_METERS }
+        .let(::dropUntrusted)
         .let(::splitSegments)
         .flatMap { segment -> collapseStationary(dropSpikes(segment)) }
+
+    /**
+     * Keeps the positions whose accuracy is good enough — absolutely, or relative
+     * to how far the device moved around them.
+     *
+     * The movement is measured between the two raw neighbours, not from the
+     * position itself, so its own error cannot make it look like movement. A
+     * position at a batch edge or next to a recording pause has no such pair and
+     * only passes the absolute limit.
+     */
+    private fun dropUntrusted(positions: List<Position>): List<Position> =
+        positions.filterIndexed { index, position ->
+            if (position.accuracy < MAX_ACCURACY_METERS) return@filterIndexed true
+
+            val previous = positions.getOrNull(index - 1) ?: return@filterIndexed false
+            val following = positions.getOrNull(index + 1) ?: return@filterIndexed false
+
+            if (seconds(previous, following) > SEGMENT_GAP_SECONDS) return@filterIndexed false
+
+            val limit = min(MAX_MOVING_ACCURACY_METERS, MOVING_ACCURACY_RATIO * distance(previous, following))
+            position.accuracy < limit
+        }
 
     /** Cuts the stream wherever the device stopped reporting for a while. */
     private fun splitSegments(positions: List<Position>): List<List<Position>> {
