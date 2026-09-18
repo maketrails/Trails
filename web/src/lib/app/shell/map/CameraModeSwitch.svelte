@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {CrosshairIcon, FrameCornersIcon, HandIcon, PathIcon} from "phosphor-svelte";
+    import {CrosshairIcon, FrameCornersIcon, PathIcon} from "phosphor-svelte";
     import {
         mapCamera,
         setDetailCameraMode,
@@ -12,20 +12,19 @@
     import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from "$lib/components/ui/tooltip";
 
     // Which options exist depends on the scope: the overview can only keep every
-    // device in view or hand over to the user, while a detail view can also frame
-    // the target's trail. The two scopes carry independent modes, so the switch
-    // reflects whichever one is currently driving the camera.
+    // device in view, while a detail view can also frame the target's trail. The
+    // two scopes carry independent modes, so the switch reflects whichever one is
+    // currently driving the camera. `manual` has no button: moving the map by hand
+    // enters it, and then no option is highlighted.
     type Option = { mode: GeneralCameraMode | DetailCameraMode; labelKey: string };
 
     const GENERAL_OPTIONS: Option[] = [
         {mode: "tracking", labelKey: "map.camera_mode.options.keep_all_in_view"},
-        {mode: "manual", labelKey: "map.camera_mode.options.move_manually"},
     ];
 
     const DETAIL_OPTIONS: Option[] = [
         {mode: "tracking", labelKey: "map.camera_mode.options.follow_device"},
         {mode: "trail", labelKey: "map.camera_mode.options.keep_trail_in_view"},
-        {mode: "manual", labelKey: "map.camera_mode.options.move_manually"},
     ];
 
     let isDetail = $derived(mapCamera.scope === "detail");
@@ -60,9 +59,7 @@
                                 class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors
                                    {active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}"
                         >
-                            {#if option.mode === "manual"}
-                                <HandIcon size={18} weight={active ? "fill" : "regular"} />
-                            {:else if option.mode === "trail"}
+                            {#if option.mode === "trail"}
                                 <PathIcon size={18} weight={active ? "fill" : "regular"} />
                             {:else if isDetail}
                                 <CrosshairIcon size={18} weight={active ? "fill" : "regular"} />

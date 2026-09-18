@@ -198,8 +198,7 @@
       "options": {
         "keep_all_in_view": "Alle Geräte im Blick behalten",
         "follow_device": "Gerät folgen",
-        "keep_trail_in_view": "Verlauf im Blick behalten",
-        "move_manually": "Karte selbst bewegen"
+        "keep_trail_in_view": "Verlauf im Blick behalten"
       }
     },
     "bundle": {
