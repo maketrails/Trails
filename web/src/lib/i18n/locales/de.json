@@ -194,6 +194,7 @@
   "map": {
     "camera_mode": {
       "label": "Kameramodus",
+      "keep_zoom_hint": "⌥/Alt-Klick behält den aktuellen Zoom bei",
       "options": {
         "keep_all_in_view": "Alle Geräte im Blick behalten",
         "follow_device": "Gerät folgen",

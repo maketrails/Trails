@@ -8,6 +8,7 @@
         type GeneralCameraMode,
     } from "$lib/state/map_camera.svelte";
     import {_} from "svelte-i18n";
+    import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from "$lib/components/ui/tooltip";
 
     // Which options exist depends on the scope: the overview can only keep every
     // device in view or hand over to the user, while a detail view can also frame
@@ -37,30 +38,50 @@
     }
 </script>
 
-<div
-        role="group"
-        aria-label={$_("map.camera_mode.label")}
-        class="pointer-events-auto flex flex-col items-center gap-1 rounded-full border border-border bg-accent/65 p-1 text-card-foreground shadow-2xl backdrop-blur-lg"
->
-    {#each options as option (option.mode)}
-        {@const active = option.mode === activeMode}
-        <button
-                type="button"
-                onclick={(event) => select(option.mode, event)}
-                aria-pressed={active}
-                title={$_(option.labelKey)}
-                class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors
-                   {active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}"
-        >
-            {#if option.mode === "manual"}
-                <HandIcon size={18} weight={active ? "fill" : "regular"} />
-            {:else if option.mode === "trail"}
-                <PathIcon size={18} weight={active ? "fill" : "regular"} />
-            {:else if isDetail}
-                <CrosshairIcon size={18} weight={active ? "fill" : "regular"} />
-            {:else}
-                <FrameCornersIcon size={18} weight={active ? "fill" : "regular"} />
-            {/if}
-        </button>
-    {/each}
-</div>
+<TooltipProvider>
+    <div
+            role="group"
+            aria-label={$_("map.camera_mode.label")}
+            class="pointer-events-auto flex flex-col items-center gap-1 rounded-full border border-border bg-accent/65 p-1 text-card-foreground shadow-2xl backdrop-blur-lg"
+    >
+        {#each options as option (option.mode)}
+            {@const active = option.mode === activeMode}
+            {@const follow = isDetail && option.mode === "tracking"}
+            <Tooltip>
+                <TooltipTrigger>
+                    {#snippet child({props})}
+                        <button
+                                {...props}
+                                type="button"
+                                onclick={(event) => select(option.mode, event)}
+                                aria-pressed={active}
+                                aria-label={$_(option.labelKey)}
+                                class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors
+                                   {active ? 'bg-primary text-primary-foreground' : 'hover:bg-accent'}"
+                        >
+                            {#if option.mode === "manual"}
+                                <HandIcon size={18} weight={active ? "fill" : "regular"} />
+                            {:else if option.mode === "trail"}
+                                <PathIcon size={18} weight={active ? "fill" : "regular"} />
+                            {:else if isDetail}
+                                <CrosshairIcon size={18} weight={active ? "fill" : "regular"} />
+                            {:else}
+                                <FrameCornersIcon size={18} weight={active ? "fill" : "regular"} />
+                            {/if}
+                        </button>
+                    {/snippet}
+                </TooltipTrigger>
+                <TooltipContent side="left" sideOffset={8}>
+                    {#if follow}
+                        <div class="flex flex-col">
+                            <span>{$_(option.labelKey)}</span>
+                            <span class="opacity-70">{$_("map.camera_mode.keep_zoom_hint")}</span>
+                        </div>
+                    {:else}
+                        {$_(option.labelKey)}
+                    {/if}
+                </TooltipContent>
+            </Tooltip>
+        {/each}
+    </div>
+</TooltipProvider>
