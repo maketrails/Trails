@@ -17,9 +17,11 @@ import kotlinx.serialization.Serializable
  * the measurements they came from, so a rebuilt stretch of the optimized track is new
  * data under old timestamps, and only a storage-time cursor catches it.
  *
- * Because a rebuild replaces positions instead of only adding them, an answer is not
- * merely something to append: everything the caller holds from the *first* returned
- * point's timestamp onwards has been superseded by it.
+ * An answer is merged into what the caller holds, by timestamp — a position uploaded
+ * late comes back under an old timestamp without the newer ones around it. Only the
+ * optimized positions replace: a rebuild can leave *fewer* of them, so every held
+ * optimized position from the first returned optimized one onwards is superseded, and
+ * so is every held raw position up to the last returned optimized one.
  *
  * [remaining] is only set for a `?chunked=true` read: how many points of the same
  * read come after this chunk. The next chunk continues with `?after=` set to the
