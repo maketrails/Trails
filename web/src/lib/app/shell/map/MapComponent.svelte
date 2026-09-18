@@ -6,7 +6,7 @@
     import { getMapboxToken } from "$lib/api/mapbox/get_mapbox_token";
     import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
-    import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
+    import { mapCamera, releaseCameraToUser, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import {
         coordinateAt,
@@ -1311,7 +1311,7 @@
     /** Zoom the detail `tracking` mode follows at, until the user zooms themselves. */
     const FOLLOW_ZOOM = 15;
     let followZoom = FOLLOW_ZOOM;
-    let appliedSelection: object | null = null;
+    let appliedSelection: TrackingSelection | null = null;
     let userZooming = false;
 
     function isFollowingTarget(): boolean {
@@ -1358,10 +1358,12 @@
             return;
         }
 
-        // A fresh selection of the mode starts over at the default zoom.
-        if (mapCamera.trackingSelection !== appliedSelection) {
-            appliedSelection = mapCamera.trackingSelection;
-            followZoom = FOLLOW_ZOOM;
+        // A fresh selection of the mode starts over at the default zoom, unless
+        // it asked to keep the current one.
+        const selection = mapCamera.trackingSelection;
+        if (selection !== appliedSelection) {
+            appliedSelection = selection;
+            followZoom = selection.keepZoom ? currentMap.getZoom() : FOLLOW_ZOOM;
         }
         followTarget(currentMap);
     });

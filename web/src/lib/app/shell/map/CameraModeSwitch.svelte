@@ -30,8 +30,9 @@
     let options = $derived(isDetail ? DETAIL_OPTIONS : GENERAL_OPTIONS);
     let activeMode = $derived(isDetail ? mapCamera.detailMode : mapCamera.generalMode);
 
-    function select(mode: GeneralCameraMode | DetailCameraMode) {
-        if (isDetail) setDetailCameraMode(mode as DetailCameraMode);
+    // Option/Alt-click on "follow device" keeps the current zoom.
+    function select(mode: GeneralCameraMode | DetailCameraMode, event: MouseEvent) {
+        if (isDetail) setDetailCameraMode(mode as DetailCameraMode, event.altKey);
         else setGeneralCameraMode(mode as GeneralCameraMode);
     }
 </script>
@@ -45,7 +46,7 @@
         {@const active = option.mode === activeMode}
         <button
                 type="button"
-                onclick={() => select(option.mode)}
+                onclick={(event) => select(option.mode, event)}
                 aria-pressed={active}
                 title={$_(option.labelKey)}
                 class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-colors
