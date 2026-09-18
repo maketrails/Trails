@@ -3,6 +3,7 @@ package es.jvbabi.trails.data
 import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.database.TrackRebuilds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -12,6 +13,7 @@ import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
+import org.jetbrains.exposed.v1.jdbc.upsert
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.math.*
@@ -224,9 +226,28 @@ class TrailOptimizer(
     suspend fun reoptimize() = runLock.withLock {
         db.transaction {
             DataSnapshots.deleteWhere { derived }
+
+            // Recorded with the delete, so no client can read the emptied track
+            // without also being able to see that it was reset.
+            TrackRebuilds.upsert {
+                it[device] = deviceId
+                it[rebuiltAt] = Clock.System.now()
+            }
         }
 
         rebuild()
+    }
+
+    /**
+     * When the optimized track was last rebuilt from scratch by [reoptimize], or
+     * null if it never was. A client cache older than that is stale.
+     */
+    suspend fun rebuiltAt(): Instant? = db.transaction {
+        TrackRebuilds
+            .select(TrackRebuilds.rebuiltAt)
+            .where(TrackRebuilds.device eq deviceId)
+            .singleOrNull()
+            ?.get(TrackRebuilds.rebuiltAt)
     }
 
     /** The numbers the device details view shows about this device. */
