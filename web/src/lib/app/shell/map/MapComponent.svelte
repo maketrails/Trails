@@ -1309,7 +1309,7 @@
     });
 
     /** Zoom the detail `tracking` mode follows at, until the user zooms themselves. */
-    const FOLLOW_ZOOM = 16;
+    const FOLLOW_ZOOM = 15;
     let followZoom = FOLLOW_ZOOM;
     let appliedSelection: object | null = null;
     let userZooming = false;
