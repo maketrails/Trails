@@ -15,6 +15,14 @@
      * "loading" and flickering along with every batch.
      */
     const cache = new Map<string, DeviceOptimization>();
+
+    /**
+     * `rebuilt_at` per device as last read while no run was going. A rebuild sets it
+     * when it starts, so only a finished run may count as a new generation — the
+     * history read in between would be half a track. `undefined` when the first read
+     * already found a run going, so its end counts as a change.
+     */
+    const settledRebuiltAt = new Map<string, number | null | undefined>();
 </script>
 
 <script lang="ts">
@@ -25,8 +33,11 @@
 
     let {
         deviceId,
+        onRebuilt,
     }: {
         deviceId: string;
+        /** Called when the track turns out to have been rebuilt since the last read. */
+        onRebuilt?: () => void;
     } = $props();
 
     let loaded = $state<DeviceOptimization | null>(null);
@@ -82,6 +93,14 @@
         if (device !== deviceId) return;
 
         if (result.type === "success") {
+            const {rebuilt_at, state} = result.optimization;
+            if (state.type === "idle") {
+                if (settledRebuiltAt.has(device) && settledRebuiltAt.get(device) !== rebuilt_at) onRebuilt?.();
+                settledRebuiltAt.set(device, rebuilt_at);
+            } else if (!settledRebuiltAt.has(device)) {
+                settledRebuiltAt.set(device, undefined);
+            }
+
             cache.set(device, result.optimization);
             loaded = result.optimization;
             failed = false;

@@ -120,7 +120,9 @@
                  out a track, not the state of the machinery behind it. -->
             {#if isOwnDevice}
                 <HistorySourceTabs bind:source={historySource}/>
-                <DeviceOptimization deviceId={device.id}/>
+                <!-- A rebuilt track invalidates the cached history, and reloading
+                     is what notices that. -->
+                <DeviceOptimization deviceId={device.id} onRebuilt={() => history.reload()}/>
             {/if}
         </div>
     {:else}

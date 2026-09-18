@@ -30,6 +30,11 @@ export interface HistoryLoad {
     readonly loading: boolean;
     /** True once a load finished without a result (unknown target, network error, …). */
     readonly failed: boolean;
+    /**
+     * Loads the same target again, e.g. once the optimized track was rebuilt. What is
+     * on screen stays until the new answer replaces it.
+     */
+    reload(): void;
 }
 
 function fetchFor(target: HistoryTarget, since?: number): Promise<LocationHistory | null> {
@@ -92,12 +97,24 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
     let historySeconds = $state<number | null>(null);
     let loading = $state(false);
     let failed = $state(false);
+    let reloads = $state(0);
+
+    // Which target the points on screen belong to. Not reactive: only the effect
+    // below reads and writes it.
+    let shownKey: string | null = null;
 
     $effect(() => {
         const current = target();
+        reloads;
 
-        points = [];
-        historySeconds = null;
+        // A reload keeps the old track on screen until the new one arrives; only a
+        // different target starts from an empty map.
+        const key = current == null ? null : JSON.stringify(current);
+        if (key !== shownKey) {
+            points = [];
+            historySeconds = null;
+        }
+        shownKey = key;
         failed = false;
 
         if (current == null) {
@@ -202,6 +219,9 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         },
         get failed() {
             return failed;
+        },
+        reload() {
+            reloads++;
         },
     };
 }
