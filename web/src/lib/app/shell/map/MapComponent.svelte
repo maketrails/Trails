@@ -1389,6 +1389,9 @@
         const currentMap = map;
         if (currentMap == null) return;
         const around = isFollowingTarget() ? "center" : undefined;
+        // `scrollZoom.enable` is a no-op while enabled, so the option only sticks
+        // after a disable.
+        currentMap.scrollZoom.disable();
         currentMap.scrollZoom.enable({ around });
         currentMap.touchZoomRotate.enable({ around });
     });
