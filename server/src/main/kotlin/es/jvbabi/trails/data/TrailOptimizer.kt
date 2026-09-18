@@ -2,7 +2,7 @@ package es.jvbabi.trails.data
 
 import database.DataSnapshot
 import database.DataSnapshots
-import es.jvbabi.trails.api.v1.optimization.OptimizationProgress
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.TrackRebuild
 import kotlinx.coroutines.delay

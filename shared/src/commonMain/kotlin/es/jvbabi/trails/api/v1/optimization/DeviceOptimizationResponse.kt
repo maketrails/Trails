@@ -14,7 +14,7 @@ import kotlinx.serialization.Serializable
  * jitter that was removed.
  *
  * [rebuiltAt] is when the track was last thrown away and derived again from
- * scratch, in epoch **milliseconds**, or `null` if it never was. A client that
+ * scratch, in epoch **seconds**, or `null` if it never was. A client that
  * cached the optimized track under a different value holds a stale one and has to
  * read it again in full — continuing from its cursor only covers a track that was
  * extended.
@@ -29,4 +29,29 @@ data class DeviceOptimizationResponse(
     @SerialName("raw_distance_meters") val rawDistanceMeters: Double,
     @SerialName("rebuilt_at") val rebuiltAt: Long?,
     @SerialName("state") val state: OptimizationProgress,
-)
+) {
+    /**
+     * How far the optimizer has got on the device, and whether a run is in progress.
+     *
+     * [progress] is the share of the settled raw positions the optimized track
+     * covers, 0..1. It only counts positions old enough to be optimized at all, so a
+     * device that is fully caught up reports 1.0 even though [unoptimizedPoints] is
+     * not zero.
+     */
+    @Serializable
+    sealed class OptimizationProgress {
+        abstract val progress: Double
+
+        @Serializable
+        @SerialName("idle")
+        data class Idle(
+            @SerialName("progress") override val progress: Double,
+        ) : OptimizationProgress()
+
+        @Serializable
+        @SerialName("running")
+        data class Running(
+            @SerialName("progress") override val progress: Double,
+        ) : OptimizationProgress()
+    }
+}

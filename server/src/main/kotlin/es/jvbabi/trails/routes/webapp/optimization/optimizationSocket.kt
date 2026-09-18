@@ -2,7 +2,7 @@ package es.jvbabi.trails.routes.webapp.optimization
 
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.TrailsWebappPrincipal
-import es.jvbabi.trails.api.v1.optimization.OptimizationProgress
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.data.UserRepository
 import es.jvbabi.trails.data.event.UserEvent
 import io.ktor.server.auth.*

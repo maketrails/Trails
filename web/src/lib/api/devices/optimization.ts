@@ -18,7 +18,7 @@ export interface DeviceOptimization {
     unoptimized_distance_meters: number;
     raw_distance_meters: number;
     /**
-     * When the track was last rebuilt from scratch (epoch millis), `null` if it never
+     * When the track was last rebuilt from scratch (epoch seconds), `null` if it never
      * was. A cached history read under another value is stale.
      */
     rebuilt_at: number | null;

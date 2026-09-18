@@ -44,7 +44,7 @@ fun Route.getDeviceOptimization() {
                     optimizedDistanceMeters = state.optimizedDistanceMeters,
                     unoptimizedDistanceMeters = state.unoptimizedDistanceMeters,
                     rawDistanceMeters = state.rawDistanceMeters,
-                    rebuiltAt = state.rebuiltAt?.toEpochMilliseconds(),
+                    rebuiltAt = state.rebuiltAt?.epochSeconds,
                     state = state.progress,
                 )
             )

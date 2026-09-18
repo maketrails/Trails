@@ -1,6 +1,6 @@
 package es.jvbabi.trails.data.event
 
-import es.jvbabi.trails.api.v1.optimization.OptimizationProgress
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.data.model.DeviceDeletionModel
 import es.jvbabi.trails.data.model.DeviceModel
 import kotlin.uuid.Uuid
