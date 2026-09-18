@@ -1,0 +1,8 @@
+{
+  "description": "Recalculating the optimized history now refreshes the history cached in the web app.",
+  "localized": {
+    "de": {
+      "description": "Nach einer Neuberechnung des optimierten Verlaufs lädt die Web-App den zwischengespeicherten Verlauf neu."
+    }
+  }
+}
