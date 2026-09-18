@@ -33,11 +33,25 @@ interface StoredPoint extends HistoryPoint {
     source: HistorySource;
 }
 
+/**
+ * Where an interrupted chunked read continues: the `since` it was started with, the
+ * timestamp of the last point it received, and the largest cursor seen so far. The
+ * stored `cursor` stays at the read's start until it completes — a later chunk can
+ * still hold rows stored before the cursor of an earlier one.
+ */
+export interface ResumePoint {
+    since: number | null;
+    after: number;
+    cursor: number | null;
+}
+
 /** How far one cached series has been read, and which generation of it. */
 interface StoredCursor {
     device: string;
     source: HistorySource;
-    cursor: number;
+    cursor: number | null;
+    /** Set while a chunked read is unfinished. */
+    resume?: ResumePoint;
     /**
      * The track generation the series was read under — see `TrackGenerationResponse`.
      * Missing on cursors written before it existed, which then count as stale.
@@ -93,6 +107,8 @@ export interface CachedHistory {
     cursor: number | null;
     /** The generation the series was read under; `undefined` when it is not known. */
     rebuiltAt: number | null | undefined;
+    /** Where an unfinished chunked read continues, if one was interrupted. */
+    resume: ResumePoint | null;
 }
 
 /**
@@ -118,6 +134,7 @@ export async function readCachedHistory(
             points: stored.map(({device: _device, source: _source, ...point}) => point),
             cursor: storedCursor?.cursor ?? null,
             rebuiltAt: storedCursor?.rebuiltAt,
+            resume: storedCursor?.resume ?? null,
         };
     } catch (e) {
         console.warn("Could not read the cached location history", e);
@@ -125,30 +142,44 @@ export async function readCachedHistory(
     }
 }
 
+/** Where a cached series continues, as written by [storeCachedHistory]. */
+export interface CacheProgress {
+    cursor: number | null;
+    /** The track generation the series is read under. */
+    rebuiltAt: number | null | undefined;
+    /** Set while a chunked read is unfinished, `null` once it completed. */
+    resume: ResumePoint | null;
+}
+
 /**
- * Applies an answer to the cached [source] series of [deviceId]: everything [fresh]
- * supersedes is dropped, the fresh positions take its place, and [cursor] records where
- * to continue, under the track generation [rebuiltAt]. One transaction, so the series
- * never ends up in a state between the two.
+ * Applies an answer (or one chunk of it) to the cached [source] series of [deviceId]:
+ * everything [fresh] supersedes is dropped, the fresh positions take its place, and
+ * [progress] records where to continue. One transaction, so the series never ends up
+ * in a state between the two.
  */
 export async function storeCachedHistory(
     deviceId: string,
     source: HistorySource,
     fresh: HistoryPoint[],
-    cursor: number | null,
-    rebuiltAt: number | null | undefined,
+    progress: CacheProgress,
 ): Promise<void> {
     const supersededFrom = supersededFromTimestamp(fresh);
-    if (supersededFrom == null) return;
+    const {cursor, rebuiltAt, resume} = progress;
+    // Nothing to apply and nothing to continue from: the cache already says it all.
+    if (supersededFrom == null && cursor == null && resume == null) return;
 
     const opened = open();
     if (opened == null) return;
 
     try {
         await opened.transaction("rw", opened.points, opened.cursors, async () => {
-            await seriesRange(opened, deviceId, source, supersededFrom).delete();
-            await opened.points.bulkPut(fresh.map((point) => ({...point, device: deviceId, source})));
-            if (cursor != null) await opened.cursors.put({device: deviceId, source, cursor, rebuiltAt});
+            if (supersededFrom != null) {
+                await seriesRange(opened, deviceId, source, supersededFrom).delete();
+                await opened.points.bulkPut(fresh.map((point) => ({...point, device: deviceId, source})));
+            }
+            if (cursor != null || resume != null) {
+                await opened.cursors.put({device: deviceId, source, cursor, rebuiltAt, ...(resume == null ? {} : {resume})});
+            }
         });
     } catch (e) {
         // Never silently: a cache that cannot be written means every visit downloads the

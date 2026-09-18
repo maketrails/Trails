@@ -46,6 +46,12 @@ import kotlin.uuid.Uuid
  * The bound is **inclusive**, so the rows a caller last saw come back with it. That
  * redundancy is deliberate: it lets a caller tell a history that has merely not grown
  * apart from one that was wiped behind its back (an empty answer).
+ *
+ * `?chunked=true` splits the answer into chunks of [TrackRepository.CHUNK_SIZE]
+ * points, oldest first, and reports how many points are `remaining` after each. The
+ * next chunk is asked for with `?after=<epoch millis>`, the timestamp of the last point
+ * received, alongside the unchanged `since` and `source`. A lost connection then only
+ * costs the chunk in flight. `after` is ignored without `chunked`.
  */
 fun Route.getDeviceHistory() {
     val deviceRepository by inject<DeviceRepository>()
@@ -73,7 +79,18 @@ fun Route.getDeviceHistory() {
                 ?: return@get call.respond(HttpStatusCode.Forbidden)
             if (device.isDeleted) return@get call.respond(HttpStatusCode.Forbidden)
 
-            val track = trackRepository.track(deviceId, storedSince = since, source = source)
+            val chunked = call.request.queryParameters["chunked"] == "true"
+            val after = call.request.queryParameters["after"]
+                ?.toLongOrNull()
+                ?.let(Instant::fromEpochMilliseconds)
+
+            val (track, remaining) = if (chunked) {
+                trackRepository
+                    .trackChunk(deviceId, storedSince = since, recordedAfter = after, limit = TrackRepository.CHUNK_SIZE, source = source)
+                    .let { it.points to it.remaining }
+            } else {
+                trackRepository.track(deviceId, storedSince = since, source = source) to null
+            }
 
             call.respond(
                 LocationHistoryResponse(
@@ -82,6 +99,7 @@ fun Route.getDeviceHistory() {
                     // the caller keeps the one it already has.
                     cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
                     points = track.map { it.toHistoryPoint(includeBattery = true) },
+                    remaining = remaining,
                 )
             )
         }
