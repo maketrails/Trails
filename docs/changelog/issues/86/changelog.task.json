@@ -1,0 +1,8 @@
+{
+  "description": "The location history now downloads in chunks and resumes an interrupted download instead of starting over.",
+  "localized": {
+    "de": {
+      "description": "Der Standortverlauf wird jetzt in Teilen geladen und ein abgebrochener Download wird fortgesetzt statt neu gestartet."
+    }
+  }
+}
