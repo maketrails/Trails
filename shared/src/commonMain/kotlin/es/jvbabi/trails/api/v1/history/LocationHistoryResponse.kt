@@ -20,12 +20,19 @@ import kotlinx.serialization.Serializable
  * Because a rebuild replaces positions instead of only adding them, an answer is not
  * merely something to append: everything the caller holds from the *first* returned
  * point's timestamp onwards has been superseded by it.
+ *
+ * [remaining] is only set for a `?chunked=true` read: how many points of the same
+ * read come after this chunk. The next chunk continues with `?after=` set to the
+ * timestamp of the last point; `0` means the read is complete. All chunks of one read
+ * together form the answer described above, and each reports the cursor of its own
+ * rows — the read continues from the largest of them.
  */
 @Serializable
 data class LocationHistoryResponse(
     @SerialName("history_seconds") val historySeconds: Int? = null,
     @SerialName("cursor") val cursor: Long? = null,
     @SerialName("points") val points: List<LocationHistoryPoint> = emptyList(),
+    @SerialName("remaining") val remaining: Long? = null,
 )
 
 /**

@@ -13,6 +13,7 @@ import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.greaterEq
+import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.time.Instant
@@ -56,6 +57,11 @@ sealed interface SnapshotWriteResult {
  * device with one history rather than two sources.
  */
 class TrackRepository : KoinComponent {
+    companion object {
+        /** How many positions one chunk of a `?chunked=true` history read holds. */
+        const val CHUNK_SIZE = 10_000
+    }
+
     private val db by inject<DatabaseManager>()
     private val deviceRepository by inject<DeviceRepository>()
 
@@ -161,16 +167,70 @@ class TrackRepository : KoinComponent {
         storedSince: Instant? = null,
         source: TrackSource = TrackSource.Optimized,
     ): List<SnapshotModel> = db.transaction {
+        series(deviceId, notOlderThan, storedSince, source).flatMap { condition ->
+            DataSnapshot
+                .find { condition }
+                .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
+                .map { it.toModel() }
+        }
+    }
+
+    /**
+     * One chunk of [track]: at most [limit] positions recorded after [recordedAfter],
+     * oldest first, and how many of the track come after them.
+     *
+     * The recording time is unique within a track, so the last position of one chunk
+     * is where the next one continues — unlike an offset, that stays correct while new
+     * positions arrive at the tip.
+     */
+    suspend fun trackChunk(
+        deviceId: Uuid,
+        notOlderThan: Instant? = null,
+        storedSince: Instant? = null,
+        recordedAfter: Instant? = null,
+        limit: Int,
+        source: TrackSource = TrackSource.Optimized,
+    ): TrackChunk = db.transaction {
+        val series = series(deviceId, notOlderThan, storedSince, source)
+        val after = recordedAfter?.let { DataSnapshots.createdAt greater it } ?: Op.TRUE
+
+        val points = mutableListOf<SnapshotModel>()
+        for (condition in series) {
+            if (points.size >= limit) break
+            points += DataSnapshot
+                .find { condition and after }
+                .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
+                .limit(limit - points.size)
+                .map { it.toModel() }
+        }
+
+        // A chunk that did not fill up is the last one, so only a full one is counted.
+        val remaining = if (points.size < limit) 0L else {
+            val rest = DataSnapshots.createdAt greater points.last().createdAt
+            series.sumOf { condition -> DataSnapshots.selectAll().where(condition and rest).count() }
+        }
+
+        TrackChunk(points = points, remaining = remaining)
+    }
+
+    /**
+     * The conditions selecting a track, one per series, in the order they follow each
+     * other in time — see [track] for how the optimized track is put together.
+     *
+     * Must run inside a transaction.
+     */
+    private fun series(
+        deviceId: Uuid,
+        notOlderThan: Instant?,
+        storedSince: Instant?,
+        source: TrackSource,
+    ): List<Op<Boolean>> {
         val recorded = notOlderThan?.let { DataSnapshots.createdAt greaterEq it } ?: Op.TRUE
         val stored = storedSince?.let { DataSnapshots.insertedAt greaterEq it } ?: Op.TRUE
         val window = recorded and stored
 
-        if (source == TrackSource.Raw) {
-            return@transaction DataSnapshot
-                .find { (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true) and window }
-                .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
-                .map { it.toModel() }
-        }
+        val raw = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true)
+        if (source == TrackSource.Raw) return listOf(raw and window)
 
         // Deliberately unwindowed: where the optimized series ends is a property of
         // the whole track, so the raw tail starts at the same position no matter how
@@ -182,19 +242,18 @@ class TrackRepository : KoinComponent {
             .firstOrNull()
             ?.createdAt
 
-        val optimized = DataSnapshot
-            .find { (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq false) and window }
-            .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
-            .map { it.toModel() }
+        val tail = optimizedEnd?.let { DataSnapshots.createdAt greater it } ?: Op.TRUE
 
-        val raw = DataSnapshot
-            .find {
-                val tail = optimizedEnd?.let { DataSnapshots.createdAt greater it } ?: Op.TRUE
-                (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true) and tail and window
-            }
-            .orderBy(DataSnapshots.createdAt to SortOrder.ASC)
-            .map { it.toModel() }
-
-        optimized + raw
+        return listOf(
+            (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq false) and window,
+            raw and tail and window,
+        )
     }
 }
+
+/** A part of a track and how many positions of it come after the part. */
+data class TrackChunk(
+    val points: List<SnapshotModel>,
+    val remaining: Long,
+)
+

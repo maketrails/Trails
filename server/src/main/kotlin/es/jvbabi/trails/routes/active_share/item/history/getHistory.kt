@@ -38,6 +38,9 @@ import kotlin.uuid.Uuid
  * share's window either way, since it describes the share and not one request. An
  * unparseable value is ignored.
  *
+ * `?chunked=true` and `?after=` split the answer into chunks, exactly like the
+ * device history endpoint.
+ *
  * The battery state is withheld unless the share opted in, mirroring the snapshot
  * endpoints.
  */
@@ -53,6 +56,11 @@ fun Route.getActiveShareHistory() {
             ?.toLongOrNull()
             ?.let(Instant::fromEpochMilliseconds)
 
+        val chunked = call.request.queryParameters["chunked"] == "true"
+        val after = call.request.queryParameters["after"]
+            ?.toLongOrNull()
+            ?.let(Instant::fromEpochMilliseconds)
+
         // A returned share is deleted and a removed device is soft-deleted; both are
         // answered as a plain 404 so a spent capability cannot be replayed to mine
         // history.
@@ -61,14 +69,26 @@ fun Route.getActiveShareHistory() {
         val share = shared.share
 
         val response = if (!share.revealsHistory) {
-            LocationHistoryResponse(historySeconds = 0, points = emptyList())
+            LocationHistoryResponse(historySeconds = 0, points = emptyList(), remaining = if (chunked) 0 else null)
         } else {
             val window = share.historySeconds?.let { Clock.System.now() - it.seconds }
-            val track = trackRepository.track(
-                deviceId = shared.device.id,
-                notOlderThan = window,
-                storedSince = requestedSince,
-            )
+            val (track, remaining) = if (chunked) {
+                trackRepository
+                    .trackChunk(
+                        deviceId = shared.device.id,
+                        notOlderThan = window,
+                        storedSince = requestedSince,
+                        recordedAfter = after,
+                        limit = TrackRepository.CHUNK_SIZE,
+                    )
+                    .let { it.points to it.remaining }
+            } else {
+                trackRepository.track(
+                    deviceId = shared.device.id,
+                    notOlderThan = window,
+                    storedSince = requestedSince,
+                ) to null
+            }
 
             LocationHistoryResponse(
                 historySeconds = share.historySeconds,
@@ -76,6 +96,7 @@ fun Route.getActiveShareHistory() {
                 // caller keeps the one it already has.
                 cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
                 points = track.map { it.toHistoryPoint(includeBattery = share.shareBatteryState) },
+                remaining = remaining,
             )
         }
 
