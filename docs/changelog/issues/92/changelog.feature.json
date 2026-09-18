@@ -1,0 +1,10 @@
+{
+  "title": "Switch to tracking mode by default",
+  "description": "When clicking a share or device, we default to the tracking mode instead of showing the full history.",
+  "localized": {
+    "de": {
+      "title": "Automatisch zum Tracking-Modus wechseln",
+      "description": "Wenn Sie auf eine Freigabe oder ein Gerät klicken, wechseln wir jetzt standardmäßig in den Tracking-Modus anstelle des vollständigen Verlaufs."
+    }
+  }
+}
