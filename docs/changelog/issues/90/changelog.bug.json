@@ -1,0 +1,8 @@
+{
+  "description": "Positions uploaded after being offline now show up in the optimized history and no longer push newer positions out of the cached history.",
+  "localized": {
+    "de": {
+      "description": "Nach einer Offline-Phase hochgeladene Positionen erscheinen jetzt im optimierten Verlauf und verdrängen keine neueren Positionen mehr aus dem zwischengespeicherten Verlauf."
+    }
+  }
+}
