@@ -39,9 +39,9 @@ let targetId = $state<string | null>(null);
 // device must not disturb how the overview behaves, and vice versa. Which one
 // applies is decided by `targetId` alone.
 //
-// A detail view defaults to `trail`: opening a device is usually about where it
+// A detail view defaults to `tracking`: opening a device is usually about where it
 // has been, so the whole history is framed rather than just the latest position.
-const DETAIL_DEFAULT_MODE: DetailCameraMode = "trail";
+const DETAIL_DEFAULT_MODE: DetailCameraMode = "tracking";
 
 let generalMode = $state<GeneralCameraMode>("tracking");
 let detailMode = $state<DetailCameraMode>(DETAIL_DEFAULT_MODE);
