@@ -8,6 +8,7 @@
         type GeneralCameraMode,
     } from "$lib/state/map_camera.svelte";
     import {_} from "svelte-i18n";
+    import {altKeyLabel} from "$lib/platform";
     import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from "$lib/components/ui/tooltip";
 
     // Which options exist depends on the scope: the overview can only keep every
@@ -31,7 +32,7 @@
     let options = $derived(isDetail ? DETAIL_OPTIONS : GENERAL_OPTIONS);
     let activeMode = $derived(isDetail ? mapCamera.detailMode : mapCamera.generalMode);
 
-    // Option/Alt-click on "follow device" keeps the current zoom.
+    // Option/Alt-click on "follow device" keeps the current zoom; both set `altKey`.
     function select(mode: GeneralCameraMode | DetailCameraMode, event: MouseEvent) {
         if (isDetail) setDetailCameraMode(mode as DetailCameraMode, event.altKey);
         else setGeneralCameraMode(mode as GeneralCameraMode);
@@ -75,7 +76,7 @@
                     {#if follow}
                         <div class="flex flex-col">
                             <span>{$_(option.labelKey)}</span>
-                            <span class="opacity-70">{$_("map.camera_mode.keep_zoom_hint")}</span>
+                            <span class="opacity-70">{$_("map.camera_mode.keep_zoom_hint", {values: {key: altKeyLabel()}})}</span>
                         </div>
                     {:else}
                         {$_(option.labelKey)}
