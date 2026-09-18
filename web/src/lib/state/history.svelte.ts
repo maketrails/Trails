@@ -7,9 +7,11 @@ import {
 import {
     applyFreshPoints,
     clearCachedHistory,
+    clearCachedSeries,
     readCachedHistory,
     storeCachedHistory,
 } from "$lib/api/history/history_cache";
+import {fetchDeviceOptimization} from "$lib/api/devices/optimization";
 
 /**
  * What to load a history for — one of the user's own devices, or a share
@@ -28,12 +30,28 @@ export interface HistoryLoad {
     readonly loading: boolean;
     /** True once a load finished without a result (unknown target, network error, …). */
     readonly failed: boolean;
+    /**
+     * Loads the same target again, e.g. once the optimized track was rebuilt. What is
+     * on screen stays until the new answer replaces it.
+     */
+    reload(): void;
 }
 
 function fetchFor(target: HistoryTarget, since?: number): Promise<LocationHistory | null> {
     return target.kind === "device"
         ? HistoryRepository.forDevice(target.deviceId, target.source ?? "optimized", since)
         : HistoryRepository.forShare(target.shareId, target.homeserver, since);
+}
+
+/**
+ * The generation of the optimized track [cacheTarget] reads, or `undefined` when there
+ * is none to check or it could not be asked for. The raw series is never rebuilt.
+ */
+function generationFor(cacheTarget: CacheTarget | null): Promise<number | null | undefined> {
+    if (cacheTarget == null || cacheTarget.source !== "optimized") return Promise.resolve(undefined);
+    return fetchDeviceOptimization(cacheTarget.deviceId)
+        .then((result) => result.type === "success" ? result.optimization.rebuilt_at : undefined)
+        .catch(() => undefined);
 }
 
 /** Which cached series [target] reads, or `null` when it must not be cached. */
@@ -79,12 +97,24 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
     let historySeconds = $state<number | null>(null);
     let loading = $state(false);
     let failed = $state(false);
+    let reloads = $state(0);
+
+    // Which target the points on screen belong to. Not reactive: only the effect
+    // below reads and writes it.
+    let shownKey: string | null = null;
 
     $effect(() => {
         const current = target();
+        reloads;
 
-        points = [];
-        historySeconds = null;
+        // A reload keeps the old track on screen until the new one arrives; only a
+        // different target starts from an empty map.
+        const key = current == null ? null : JSON.stringify(current);
+        if (key !== shownKey) {
+            points = [];
+            historySeconds = null;
+        }
+        shownKey = key;
         failed = false;
 
         if (current == null) {
@@ -102,10 +132,23 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         void (async () => {
             // What the response is applied to; dropped as soon as the cache turns out
             // not to describe this history any more.
-            let base = cacheTarget == null
-                ? null
-                : await readCachedHistory(cacheTarget.deviceId, cacheTarget.source);
+            let [base, rebuiltAt] = await Promise.all([
+                cacheTarget == null ? null : readCachedHistory(cacheTarget.deviceId, cacheTarget.source),
+                generationFor(cacheTarget),
+            ]);
             if (cancelled) return;
+
+            /*
+             * A cursor only covers a track that was extended. One rebuilt from scratch
+             * since the cache was filled can differ anywhere, so the cache is dropped
+             * and the track read in full. An unknown generation keeps the cache — stale
+             * positions beat none.
+             */
+            if (cacheTarget != null && base != null && rebuiltAt !== undefined && base.rebuiltAt !== rebuiltAt) {
+                base = null;
+                await clearCachedSeries(cacheTarget.deviceId, cacheTarget.source);
+                if (cancelled) return;
+            }
 
             // What the cache holds goes on the map before the request even goes out;
             // the response only has to bring what has been stored since.
@@ -154,6 +197,7 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                     cacheTarget.source,
                     history.points,
                     history.cursor,
+                    rebuiltAt,
                 );
             }
         })();
@@ -175,6 +219,9 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         },
         get failed() {
             return failed;
+        },
+        reload() {
+            reloads++;
         },
     };
 }

@@ -1,5 +1,6 @@
 package es.jvbabi.trails.data.event
 
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.data.model.DeviceDeletionModel
 import es.jvbabi.trails.data.model.DeviceModel
 import kotlin.uuid.Uuid
@@ -42,7 +43,6 @@ sealed interface UserEvent {
     data class OptimizationProgressed(
         override val userId: Uuid,
         val deviceId: Uuid,
-        val progress: Double,
-        val isRunning: Boolean,
+        val progress: OptimizationProgress,
     ) : UserEvent
 }

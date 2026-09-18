@@ -39,7 +39,7 @@ class DatabaseManager: KoinComponent {
         transaction(db = database) {
             SchemaUtils.create(Users)
             SchemaUtils.create(Devices, Sessions, DeviceDeletions)
-            SchemaUtils.create(DataSnapshots, Shares, ActiveShares)
+            SchemaUtils.create(DataSnapshots, Shares, ActiveShares, TrackRebuilds)
             SchemaUtils.create(UserShares)
         }
     }

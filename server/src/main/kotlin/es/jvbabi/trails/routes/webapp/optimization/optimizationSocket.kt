@@ -2,6 +2,7 @@ package es.jvbabi.trails.routes.webapp.optimization
 
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.TrailsWebappPrincipal
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.data.UserRepository
 import es.jvbabi.trails.data.event.UserEvent
 import io.ktor.server.auth.*
@@ -43,8 +44,7 @@ fun Route.webappOptimizationSocket() {
                     sendSerialized<OptimizationSocketMessage>(
                         OptimizationSocketMessage.Progress(
                             deviceId = event.deviceId,
-                            progress = event.progress,
-                            isRunning = event.isRunning,
+                            state = event.progress,
                         )
                     )
                 }
@@ -64,8 +64,6 @@ sealed class OptimizationSocketMessage {
     @Serializable
     data class Progress(
         @SerialName("device_id") val deviceId: Uuid,
-        /** Share of the settled positions that are optimized, 0..1. */
-        @SerialName("progress") val progress: Double,
-        @SerialName("is_running") val isRunning: Boolean,
+        @SerialName("state") val state: OptimizationProgress,
     ) : OptimizationSocketMessage()
 }

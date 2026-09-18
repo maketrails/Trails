@@ -15,6 +15,14 @@
      * "loading" and flickering along with every batch.
      */
     const cache = new Map<string, DeviceOptimization>();
+
+    /**
+     * `rebuilt_at` per device as last read while no run was going. A rebuild sets it
+     * when it starts, so only a finished run may count as a new generation — the
+     * history read in between would be half a track. `undefined` when the first read
+     * already found a run going, so its end counts as a change.
+     */
+    const settledRebuiltAt = new Map<string, number | null | undefined>();
 </script>
 
 <script lang="ts">
@@ -25,8 +33,11 @@
 
     let {
         deviceId,
+        onRebuilt,
     }: {
         deviceId: string;
+        /** Called when the track turns out to have been rebuilt since the last read. */
+        onRebuilt?: () => void;
     } = $props();
 
     let loaded = $state<DeviceOptimization | null>(null);
@@ -56,8 +67,9 @@
     // Progress arrives over the socket; the counts and distances are a full scan
     // on the server and only read on demand.
     let live = $derived(socket?.progress[deviceId] ?? null);
-    let progress = $derived(live?.progress ?? optimization?.progress ?? 0);
-    let isRunning = $derived(live?.is_running ?? optimization?.is_running ?? false);
+    let currentProgress = $derived(live ?? optimization?.state ?? null);
+    let progress = $derived(currentProgress?.type === "running" ? currentProgress.progress : 0);
+    let isRunning = $derived(currentProgress?.type === "running");
 
     // Guards that must not be reactive: an effect writes them, and reading a
     // reactive value it writes would make the effect re-trigger itself.
@@ -81,6 +93,14 @@
         if (device !== deviceId) return;
 
         if (result.type === "success") {
+            const {rebuilt_at, state} = result.optimization;
+            if (state.type === "idle") {
+                if (settledRebuiltAt.has(device) && settledRebuiltAt.get(device) !== rebuilt_at) onRebuilt?.();
+                settledRebuiltAt.set(device, rebuilt_at);
+            } else if (!settledRebuiltAt.has(device)) {
+                settledRebuiltAt.set(device, undefined);
+            }
+
             cache.set(device, result.optimization);
             loaded = result.optimization;
             failed = false;
@@ -104,7 +124,7 @@
     // only the socket, never `optimization` — otherwise the load below would
     // re-trigger this effect through it.
     $effect(() => {
-        const running = socket?.progress[deviceId]?.is_running ?? false;
+        const running = socket?.progress[deviceId]?.type === "running";
 
         if (wasRunning && !running) load(deviceId);
         wasRunning = running;
@@ -183,9 +203,8 @@
             </div>
         </div>
 
-        <!-- A finished optimization has nothing to report, so the bar only shows
-             while there is something left to do. -->
-        {#if percentage < 100 || isRunning}
+        <!-- Only a running optimization has progress to report. -->
+        {#if isRunning}
             <div class="flex flex-col gap-1.5">
                 <div class="flex flex-row items-baseline justify-between text-sm">
                     <span class="text-muted-foreground">{$_("devices.optimization.progress")}</span>

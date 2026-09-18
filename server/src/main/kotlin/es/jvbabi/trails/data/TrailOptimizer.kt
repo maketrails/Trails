@@ -2,7 +2,9 @@ package es.jvbabi.trails.data
 
 import database.DataSnapshot
 import database.DataSnapshots
+import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
 import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.database.TrackRebuild
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -158,9 +160,9 @@ class TrailOptimizer(
         val optimizedDistanceMeters: Double,
         val unoptimizedDistanceMeters: Double,
         val rawDistanceMeters: Double,
-        /** Share of the settled raw positions the optimizer has covered, 0..1. */
-        val progress: Double,
-        val isRunning: Boolean
+        /** When [reoptimize] last rebuilt the track from scratch, null if never. */
+        val rebuiltAt: Instant?,
+        val progress: OptimizationProgress
     )
 
     /** How many positions a series holds and how far it runs. */
@@ -224,6 +226,12 @@ class TrailOptimizer(
     suspend fun reoptimize() = runLock.withLock {
         db.transaction {
             DataSnapshots.deleteWhere { derived }
+
+            // Recorded with the delete, so no client can read the emptied track
+            // without also being able to see that it was reset.
+            val now = Clock.System.now()
+            TrackRebuild.findById(deviceId)?.apply { rebuiltAt = now }
+                ?: TrackRebuild.new(deviceId) { rebuiltAt = now }
         }
 
         rebuild()
@@ -247,8 +255,9 @@ class TrailOptimizer(
             optimizedDistanceMeters = optimizedSeries.distanceMeters,
             unoptimizedDistanceMeters = unoptimizedSeries.distanceMeters,
             rawDistanceMeters = rawSeries.distanceMeters,
-            progress = progress(optimizedUntil),
-            isRunning = runLock.isLocked
+            rebuiltAt = TrackRebuild.findById(deviceId)?.rebuiltAt,
+            progress = if (runLock.isLocked) OptimizationProgress.Running(progress(optimizedUntil))
+            else OptimizationProgress.Idle
         )
     }
 
@@ -295,7 +304,7 @@ class TrailOptimizer(
             }
         }
 
-        publishProgress(window.progressAt(0), isRunning = true)
+        publishProgress(OptimizationProgress.Running(window.progressAt(0)))
 
         /*
          * Read, optimize and write one batch at a time: the whole history of a
@@ -322,7 +331,7 @@ class TrailOptimizer(
             cursor = batch.last().timestamp
             processed += batch.size
 
-            publishProgress(window.progressAt(processed), isRunning = true)
+            publishProgress(OptimizationProgress.Running(window.progressAt(processed)))
 
             if (batch.size < BATCH_SIZE) break
 
@@ -336,7 +345,7 @@ class TrailOptimizer(
             delay(BATCH_PAUSE)
         }
 
-        publishProgress(window.progressAt(processed), isRunning = false)
+        publishProgress(OptimizationProgress.Idle)
     }
 
     /**
@@ -344,12 +353,11 @@ class TrailOptimizer(
      * batch, so it costs no query at all — see [Window]. The distances of
      * [state] are a full scan and are only read when a view asks for them.
      */
-    private suspend fun publishProgress(progress: Double, isRunning: Boolean) {
+    private suspend fun publishProgress(progress: OptimizationProgress) {
         deviceRepository.reportOptimizationProgress(
             deviceId = deviceId,
             ownerId = ownerId,
             progress = progress,
-            isRunning = isRunning,
         )
     }
 

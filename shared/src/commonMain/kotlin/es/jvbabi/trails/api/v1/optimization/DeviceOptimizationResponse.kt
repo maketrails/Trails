@@ -13,9 +13,11 @@ import kotlinx.serialization.Serializable
  * shorter distance than the measurements it came from, and the difference is the
  * jitter that was removed.
  *
- * [progress] only counts positions old enough to be optimized at all — the
- * newest minutes are held back on purpose — so a device that is fully caught up
- * reports 1.0 even though [unoptimizedPoints] is not zero.
+ * [rebuiltAt] is when the track was last thrown away and derived again from
+ * scratch, in epoch **seconds**, or `null` if it never was. A client that
+ * cached the optimized track under a different value holds a stale one and has to
+ * read it again in full — continuing from its cursor only covers a track that was
+ * extended.
  */
 @Serializable
 data class DeviceOptimizationResponse(
@@ -25,6 +27,25 @@ data class DeviceOptimizationResponse(
     @SerialName("optimized_distance_meters") val optimizedDistanceMeters: Double,
     @SerialName("unoptimized_distance_meters") val unoptimizedDistanceMeters: Double,
     @SerialName("raw_distance_meters") val rawDistanceMeters: Double,
-    @SerialName("progress") val progress: Double,
-    @SerialName("is_running") val isRunning: Boolean,
-)
+    @SerialName("rebuilt_at") val rebuiltAt: Long?,
+    @SerialName("state") val state: OptimizationProgress,
+) {
+    /** Whether the optimizer is working on the device right now. */
+    @Serializable
+    sealed class OptimizationProgress {
+        @Serializable
+        @SerialName("idle")
+        data object Idle : OptimizationProgress()
+
+        /**
+         * [progress] is the share of the settled raw positions the optimized track
+         * covers, 0..1. It only counts positions old enough to be optimized at all,
+         * so a caught-up track reaches 1.0 even though [unoptimizedPoints] is not zero.
+         */
+        @Serializable
+        @SerialName("running")
+        data class Running(
+            @SerialName("progress") val progress: Double,
+        ) : OptimizationProgress()
+    }
+}
