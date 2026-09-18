@@ -1,0 +1,8 @@
+{
+  "description": "The optimized history no longer drops positions on highways or trains that are less accurate but clearly moving.",
+  "localized": {
+    "de": {
+      "description": "Der optimierte Verlauf verwirft auf Autobahnen und in Zügen keine ungenaueren, aber eindeutig fahrenden Positionen mehr."
+    }
+  }
+}
