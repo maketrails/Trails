@@ -35,7 +35,9 @@ import kotlin.uuid.Uuid
  * A run only touches what is not optimized yet, plus the last
  * [REBUILD_OVERLAP] of what is: a pause that has grown since the previous run
  * has to be recomputed together with the positions it started with, and those
- * were already written.
+ * were already written. A position uploaded late — a device catching up after
+ * being offline — reaches further back: the run then starts [REBUILD_OVERLAP]
+ * before the oldest position stored since the previous run.
  *
  * Four stages, in this order:
  * 1. **Trust filter** — only positions below [MAX_ACCURACY_METERS] are used.
@@ -139,7 +141,24 @@ class TrailOptimizer(
             DataSnapshots.createdAt,
             columnType = KotlinInstantColumnType()
         ).alias("max_created_at")
+
+        private val MIN_CREATED_AT = Min(
+            DataSnapshots.createdAt,
+            columnType = KotlinInstantColumnType()
+        ).alias("min_created_at")
+
+        private val MAX_INSERTED_AT = Max(
+            DataSnapshots.insertedAt,
+            columnType = KotlinInstantColumnType()
+        ).alias("max_inserted_at")
     }
+
+    /**
+     * When the previous successful run started. Raw positions stored since then are
+     * new to the optimizer, however long ago they were recorded. Only touched under
+     * [runLock]; null after a restart, see [storedSinceLastRun].
+     */
+    private var lastRunStartedAt: Instant? = null
 
     /**
      * What the device details view shows about the optimization.
@@ -262,8 +281,10 @@ class TrailOptimizer(
     }
 
     private suspend fun rebuild() {
+        val startedAt = Clock.System.now()
+
         // Everything younger than this may still change and is left raw.
-        val upperOptimizationBound = Clock.System.now() - IGNORE_LATEST
+        val upperOptimizationBound = startedAt - IGNORE_LATEST
 
         val window = db.transaction {
             val settled = DataSnapshots
@@ -273,7 +294,12 @@ class TrailOptimizer(
 
             // Null means nothing has been optimized yet, and the whole history
             // is up for it.
-            val lowerBound = derivedEnd()?.minus(REBUILD_OVERLAP)
+            val lowerBound = derivedEnd()
+                ?.minus(REBUILD_OVERLAP)
+                ?.let { overlap ->
+                    val oldestLate = oldestStoredSince(storedSinceLastRun(), recordedBefore = overlap)
+                    oldestLate?.minus(REBUILD_OVERLAP)?.coerceAtMost(overlap) ?: overlap
+                }
 
             Window(
                 lowerBound = lowerBound,
@@ -288,7 +314,10 @@ class TrailOptimizer(
 
         // Nothing has settled yet, so the derived series stays as it is - it
         // must not be deleted without being rebuilt right after.
-        if (window.settledPoints == 0L) return
+        if (window.settledPoints == 0L) {
+            lastRunStartedAt = startedAt
+            return
+        }
 
         /*
          * Whatever this optimizer produced from the bound onwards is discarded
@@ -345,7 +374,41 @@ class TrailOptimizer(
             delay(BATCH_PAUSE)
         }
 
+        // Only a run that got through moves the mark: a failed one leaves the late
+        // positions for the next run to find again.
+        lastRunStartedAt = startedAt
+
         publishProgress(OptimizationProgress.Idle)
+    }
+
+    /**
+     * Since when raw positions count as new to the optimizer. After a restart the
+     * in-memory mark is gone, and the last write of the derived series is the closest
+     * substitute — it can miss what arrived while that run was going, nothing more.
+     */
+    private fun storedSinceLastRun(): Instant? = lastRunStartedAt ?: DataSnapshots
+        .select(MAX_INSERTED_AT)
+        .where(derived)
+        .singleOrNull()
+        ?.get(MAX_INSERTED_AT)
+
+    /**
+     * The oldest recording time among the raw positions stored since [storedSince]
+     * that were recorded before [recordedBefore] — the late ones a run from the
+     * regular bound on would never read.
+     */
+    private fun oldestStoredSince(storedSince: Instant?, recordedBefore: Instant): Instant? {
+        if (storedSince == null) return null
+
+        return DataSnapshots
+            .select(MIN_CREATED_AT)
+            .where(
+                raw and
+                        (DataSnapshots.insertedAt greaterEq storedSince) and
+                        (DataSnapshots.createdAt less recordedBefore)
+            )
+            .singleOrNull()
+            ?.get(MIN_CREATED_AT)
     }
 
     /**

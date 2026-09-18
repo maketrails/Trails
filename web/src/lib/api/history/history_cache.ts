@@ -1,5 +1,5 @@
 import {browser} from "$app/environment";
-import Dexie, {type Table} from "dexie";
+import Dexie, {type IndexableType, type Table} from "dexie";
 import type {HistoryPoint, HistorySource} from "$lib/api/history/history_repository";
 
 /**
@@ -93,10 +93,16 @@ function open(): HistoryDatabase | null {
 }
 
 /** The key range covering one cached series, from its first timestamp to its last. */
-function seriesRange(opened: HistoryDatabase, deviceId: string, source: HistorySource, from = Dexie.minKey) {
+function seriesRange(
+    opened: HistoryDatabase,
+    deviceId: string,
+    source: HistorySource,
+    from: IndexableType = Dexie.minKey,
+    to: IndexableType = Dexie.maxKey,
+) {
     return opened.points
         .where("[device+source+timestamp]")
-        .between([deviceId, source, from], [deviceId, source, Dexie.maxKey], true, true);
+        .between([deviceId, source, from], [deviceId, source, to], true, true);
 }
 
 /** A cached series and the cursor to continue it from. */
@@ -163,18 +169,25 @@ export async function storeCachedHistory(
     fresh: HistoryPoint[],
     progress: CacheProgress,
 ): Promise<void> {
-    const supersededFrom = supersededFromTimestamp(fresh);
     const {cursor, rebuiltAt, resume} = progress;
     // Nothing to apply and nothing to continue from: the cache already says it all.
-    if (supersededFrom == null && cursor == null && resume == null) return;
+    if (fresh.length === 0 && cursor == null && resume == null) return;
+    const superseded = supersededBy(fresh);
 
     const opened = open();
     if (opened == null) return;
 
     try {
         await opened.transaction("rw", opened.points, opened.cursors, async () => {
-            if (supersededFrom != null) {
-                await seriesRange(opened, deviceId, source, supersededFrom).delete();
+            if (superseded != null) {
+                const {derivedFrom, derivedUntil} = superseded;
+                await seriesRange(opened, deviceId, source, derivedFrom).filter((point) => !point.is_raw).delete();
+                await seriesRange(opened, deviceId, source, Dexie.minKey, derivedUntil)
+                    .filter((point) => point.is_raw)
+                    .delete();
+            }
+            // Keyed by timestamp, so a fresh position overwrites the one it replaces.
+            if (fresh.length > 0) {
                 await opened.points.bulkPut(fresh.map((point) => ({...point, device: deviceId, source})));
             }
             if (cursor != null || resume != null) {
@@ -277,30 +290,50 @@ export async function pruneCachedHistories(knownDeviceIds: Iterable<string>): Pr
 }
 
 /**
- * The timestamp from which [fresh] supersedes what a cache holds, or `null` when it
- * supersedes nothing because it is empty.
+ * What the optimized positions in [fresh] take away from a cache, or `null` when it
+ * holds none and is a pure addition.
  *
- * An answer from the history endpoints is not a pure addition. The optimizer rebuilds
- * stretches of the optimized track, and a rebuild can end up with *fewer* positions
- * than the generation before it, so everything from the first fresh position onwards
- * has to give way to what came back rather than being merged with it.
+ * An answer is otherwise merged, not cut: a position uploaded late comes back under an
+ * old timestamp, and must not take the newer positions the cache already holds with it
+ * — the server does not send those again. Only the optimizer really replaces:
+ * - a rebuilt stretch can hold *fewer* positions than the one before it, so every
+ *   cached optimized position from [derivedFrom] on gives way,
+ * - and raw positions up to [derivedUntil] are covered by the optimized ones now — the
+ *   optimized track only shows raw positions after its optimized end.
  */
-function supersededFromTimestamp(fresh: HistoryPoint[]): number | null {
-    return fresh.length === 0 ? null : fresh[0].timestamp;
+function supersededBy(fresh: HistoryPoint[]): { derivedFrom: number; derivedUntil: number } | null {
+    const derived = fresh.filter((point) => !point.is_raw);
+    if (derived.length === 0) return null;
+    return {derivedFrom: derived[0].timestamp, derivedUntil: derived[derived.length - 1].timestamp};
 }
 
 /**
  * The cached points with [fresh] applied on top, oldest first — the in-memory twin of
- * what [storeCachedHistory] does to the cache.
- *
- * Both sides are ordered oldest first and [fresh] replaces the cached tail from its own
- * first position onwards, so cutting there and appending needs no sorting.
+ * what [storeCachedHistory] does to the cache. Both sides are ordered oldest first, so
+ * they are merged in one pass.
  */
 export function applyFreshPoints(cached: HistoryPoint[], fresh: HistoryPoint[]): HistoryPoint[] {
-    const supersededFrom = supersededFromTimestamp(fresh);
-    if (supersededFrom == null) return cached;
+    if (fresh.length === 0) return cached;
 
-    return [...cached.filter((point) => point.timestamp < supersededFrom), ...fresh];
+    const superseded = supersededBy(fresh);
+    const kept = cached.filter((point) =>
+        superseded == null ||
+        (point.is_raw ? point.timestamp > superseded.derivedUntil : point.timestamp < superseded.derivedFrom),
+    );
+
+    // The common case — the answer only continues the cache — needs no merge.
+    if (kept.length === 0 || kept[kept.length - 1].timestamp < fresh[0].timestamp) return [...kept, ...fresh];
+
+    const merged: HistoryPoint[] = [];
+    let index = 0;
+    for (const point of fresh) {
+        while (index < kept.length && kept[index].timestamp < point.timestamp) merged.push(kept[index++]);
+        // Same timestamp: the fresh position replaces the cached one.
+        if (index < kept.length && kept[index].timestamp === point.timestamp) index++;
+        merged.push(point);
+    }
+    while (index < kept.length) merged.push(kept[index++]);
+    return merged;
 }
 
 /**

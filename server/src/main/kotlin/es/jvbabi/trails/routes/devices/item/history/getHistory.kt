@@ -40,8 +40,7 @@ import kotlin.uuid.Uuid
  * Because the storage time is what is filtered, this works for the optimized series
  * too, not just the append-only raw one: a rebuilt stretch carries the timestamps of
  * the measurements it came from but a fresh `inserted_at`, so it comes back as the new
- * data it is. What the caller must do with it is replace, not append — see
- * [LocationHistoryResponse].
+ * data it is. How the caller merges it is described on [LocationHistoryResponse].
  *
  * The bound is **inclusive**, so the rows a caller last saw come back with it. That
  * redundancy is deliberate: it lets a caller tell a history that has merely not grown
