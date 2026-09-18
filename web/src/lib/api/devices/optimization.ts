@@ -1,5 +1,13 @@
 import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
 
+/**
+ * How far the optimizer has got on a device, and whether a run is in progress.
+ * `progress` is the share of the settled positions that are optimized, 0..1.
+ */
+export type OptimizationProgress =
+    | { type: "idle"; progress: number }
+    | { type: "running"; progress: number };
+
 /** How far the track of one of the user's own devices has been optimized. */
 export interface DeviceOptimization {
     optimized_points: number;
@@ -9,9 +17,12 @@ export interface DeviceOptimization {
     optimized_distance_meters: number;
     unoptimized_distance_meters: number;
     raw_distance_meters: number;
-    /** Share of the settled positions that are optimized, 0..1. */
-    progress: number;
-    is_running: boolean;
+    /**
+     * When the track was last rebuilt from scratch (epoch millis), `null` if it never
+     * was. A cached history read under another value is stale.
+     */
+    rebuilt_at: number | null;
+    state: OptimizationProgress;
 }
 
 export type DeviceOptimizationResult =

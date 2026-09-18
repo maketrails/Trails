@@ -17,7 +17,8 @@ import org.koin.ktor.ext.inject
 /**
  * `GET /devices/{deviceId}/optimization` — the state of the track optimization
  * of one of the caller's **own** devices: how much has been optimized, how much
- * is still raw, and how far a run has got.
+ * is still raw, how far a run has got, and when the track was last rebuilt from
+ * scratch — a client compares the latter with its cached history.
  *
  * Only for own devices. A share hands out a track, not the machinery behind it,
  * and the counts would leak how much history exists beyond the share's window.
@@ -43,8 +44,8 @@ fun Route.getDeviceOptimization() {
                     optimizedDistanceMeters = state.optimizedDistanceMeters,
                     unoptimizedDistanceMeters = state.unoptimizedDistanceMeters,
                     rawDistanceMeters = state.rawDistanceMeters,
-                    progress = state.progress,
-                    isRunning = state.isRunning,
+                    rebuiltAt = state.rebuiltAt?.toEpochMilliseconds(),
+                    state = state.progress,
                 )
             )
         }

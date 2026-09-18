@@ -56,8 +56,9 @@
     // Progress arrives over the socket; the counts and distances are a full scan
     // on the server and only read on demand.
     let live = $derived(socket?.progress[deviceId] ?? null);
-    let progress = $derived(live?.progress ?? optimization?.progress ?? 0);
-    let isRunning = $derived(live?.is_running ?? optimization?.is_running ?? false);
+    let currentProgress = $derived(live ?? optimization?.state ?? null);
+    let progress = $derived(currentProgress?.progress ?? 0);
+    let isRunning = $derived(currentProgress?.type === "running");
 
     // Guards that must not be reactive: an effect writes them, and reading a
     // reactive value it writes would make the effect re-trigger itself.
@@ -104,7 +105,7 @@
     // only the socket, never `optimization` — otherwise the load below would
     // re-trigger this effect through it.
     $effect(() => {
-        const running = socket?.progress[deviceId]?.is_running ?? false;
+        const running = socket?.progress[deviceId]?.type === "running";
 
         if (wasRunning && !running) load(deviceId);
         wasRunning = running;

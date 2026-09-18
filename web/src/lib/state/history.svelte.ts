@@ -11,6 +11,7 @@ import {
     readCachedHistory,
     storeCachedHistory,
 } from "$lib/api/history/history_cache";
+import {fetchDeviceOptimization} from "$lib/api/devices/optimization";
 
 /**
  * What to load a history for — one of the user's own devices, or a share
@@ -43,7 +44,9 @@ function fetchFor(target: HistoryTarget, since?: number): Promise<LocationHistor
  */
 function generationFor(cacheTarget: CacheTarget | null): Promise<number | null | undefined> {
     if (cacheTarget == null || cacheTarget.source !== "optimized") return Promise.resolve(undefined);
-    return HistoryRepository.trackGeneration(cacheTarget.deviceId).catch(() => undefined);
+    return fetchDeviceOptimization(cacheTarget.deviceId)
+        .then((result) => result.type === "success" ? result.optimization.rebuilt_at : undefined)
+        .catch(() => undefined);
 }
 
 /** Which cached series [target] reads, or `null` when it must not be cached. */

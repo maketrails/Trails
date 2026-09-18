@@ -18,7 +18,6 @@ import es.jvbabi.trails.routes.devices.item.getDevice
 import es.jvbabi.trails.routes.devices.item.history.getDeviceGpx
 import es.jvbabi.trails.routes.devices.item.history.getDeviceHistory
 import es.jvbabi.trails.routes.devices.item.optimization.getDeviceOptimization
-import es.jvbabi.trails.routes.devices.item.optimization.getTrackGeneration
 import es.jvbabi.trails.routes.devices.item.optimization.reoptimizeDevice
 import es.jvbabi.trails.routes.devices.item.pingDevice
 import es.jvbabi.trails.routes.devices.item.ringDevice
@@ -102,10 +101,6 @@ fun Application.installRouting() {
 
                         route("/reoptimize") {
                             reoptimizeDevice()
-                        }
-
-                        route("/generation") {
-                            getTrackGeneration()
                         }
                     }
 

@@ -2,6 +2,7 @@ package es.jvbabi.trails.data
 
 import database.DataSnapshot
 import database.DataSnapshots
+import es.jvbabi.trails.api.v1.optimization.OptimizationProgress
 import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.TrackRebuild
 import kotlinx.coroutines.delay
@@ -159,9 +160,9 @@ class TrailOptimizer(
         val optimizedDistanceMeters: Double,
         val unoptimizedDistanceMeters: Double,
         val rawDistanceMeters: Double,
-        /** Share of the settled raw positions the optimizer has covered, 0..1. */
-        val progress: Double,
-        val isRunning: Boolean
+        /** When [reoptimize] last rebuilt the track from scratch, null if never. */
+        val rebuiltAt: Instant?,
+        val progress: OptimizationProgress
     )
 
     /** How many positions a series holds and how far it runs. */
@@ -236,14 +237,6 @@ class TrailOptimizer(
         rebuild()
     }
 
-    /**
-     * When the optimized track was last rebuilt from scratch by [reoptimize], or
-     * null if it never was. A client cache older than that is stale.
-     */
-    suspend fun rebuiltAt(): Instant? = db.transaction {
-        TrackRebuild.findById(deviceId)?.rebuiltAt
-    }
-
     /** The numbers the device details view shows about this device. */
     suspend fun state(): OptimizationState = db.transaction {
         val optimizedUntil = derivedEnd()
@@ -262,8 +255,8 @@ class TrailOptimizer(
             optimizedDistanceMeters = optimizedSeries.distanceMeters,
             unoptimizedDistanceMeters = unoptimizedSeries.distanceMeters,
             rawDistanceMeters = rawSeries.distanceMeters,
-            progress = progress(optimizedUntil),
-            isRunning = runLock.isLocked
+            rebuiltAt = TrackRebuild.findById(deviceId)?.rebuiltAt,
+            progress = progressOf(progress(optimizedUntil), isRunning = runLock.isLocked)
         )
     }
 
@@ -363,10 +356,12 @@ class TrailOptimizer(
         deviceRepository.reportOptimizationProgress(
             deviceId = deviceId,
             ownerId = ownerId,
-            progress = progress,
-            isRunning = isRunning,
+            progress = progressOf(progress, isRunning),
         )
     }
+
+    private fun progressOf(progress: Double, isRunning: Boolean): OptimizationProgress =
+        if (isRunning) OptimizationProgress.Running(progress) else OptimizationProgress.Idle(progress)
 
     /**
      * Share of the settled raw positions that the derived series covers.

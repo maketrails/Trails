@@ -1,15 +1,9 @@
-/** How far the optimizer has got on one of the user's own devices. */
-export interface OptimizationProgress {
-    /** Share of the settled positions that are optimized, 0..1. */
-    progress: number;
-    is_running: boolean;
-}
+import type {OptimizationProgress} from "$lib/api/devices/optimization";
 
 type OptimizationSocketMessage = {
     type: "optimization.progress";
     device_id: string;
-    progress: number;
-    is_running: boolean;
+    state: OptimizationProgress;
 };
 
 function socketUrl(): string {
@@ -103,7 +97,7 @@ export class OptimizationSocket {
             // Replaced rather than mutated so readers of the record react.
             this.#progress = {
                 ...this.#progress,
-                [message.device_id]: {progress: message.progress, is_running: message.is_running},
+                [message.device_id]: message.state,
             };
         };
 
