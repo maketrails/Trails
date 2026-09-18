@@ -728,10 +728,23 @@
                 userZooming = false;
                 if (!isFollowingTarget()) return;
                 followZoom = e.target.getZoom();
-                // Double-click and tap-drag zoom around the pointer, not the anchor,
-                // and the target may have moved meanwhile — so re-centre on it.
-                followTarget(e.target);
+                // Catch up on location updates held back during the gesture.
+                if (followPending) followTarget(e.target);
             });
+
+            // Double-click and double-tap zoom have no `around` option; they ease
+            // around the pointer. While following, drop it so they anchor on the
+            // target (the padding-aware centre) like wheel and pinch do.
+            const easeTo = map.easeTo.bind(map);
+            map.easeTo = (options, eventData) => {
+                const fromUser = (eventData as { originalEvent?: unknown } | undefined)?.originalEvent != null;
+                if (fromUser && isFollowingTarget()) {
+                    const centred = { ...options };
+                    delete centred.around;
+                    return easeTo(centred, eventData);
+                }
+                return easeTo(options, eventData);
+            };
             map.on("rotatestart", onUserInteraction);
             map.on("pitchstart", onUserInteraction);
 
@@ -1313,6 +1326,7 @@
     let followZoom = FOLLOW_ZOOM;
     let appliedSelection: TrackingSelection | null = null;
     let userZooming = false;
+    let followPending = false;
 
     function isFollowingTarget(): boolean {
         return mapCamera.scope === "detail" && mapCamera.detailMode === "tracking";
@@ -1320,7 +1334,8 @@
 
     /** Centres the opened target at the current follow zoom. */
     function followTarget(currentMap: mapboxgl.Map) {
-        // A running zoom gesture must not be cut short; its `zoomend` re-centres.
+        // A running zoom gesture must not be cut short; its `zoomend` catches up.
+        followPending = userZooming;
         if (userZooming) return;
         const id = mapCamera.targetId;
         const location = id != null ? targetLocation(id) : null;
