@@ -33,11 +33,16 @@ interface StoredPoint extends HistoryPoint {
     source: HistorySource;
 }
 
-/** How far one cached series has been read. */
+/** How far one cached series has been read, and which generation of it. */
 interface StoredCursor {
     device: string;
     source: HistorySource;
     cursor: number;
+    /**
+     * The track generation the series was read under — see `TrackGenerationResponse`.
+     * Missing on cursors written before it existed, which then count as stale.
+     */
+    rebuiltAt?: number | null;
 }
 
 class HistoryDatabase extends Dexie {
@@ -86,6 +91,8 @@ export interface CachedHistory {
     points: HistoryPoint[];
     /** `null` when points are cached but no cursor is, which forces a full read. */
     cursor: number | null;
+    /** The generation the series was read under; `undefined` when it is not known. */
+    rebuiltAt: number | null | undefined;
 }
 
 /**
@@ -110,6 +117,7 @@ export async function readCachedHistory(
             // Device and series are part of the key, not of what a caller asked for.
             points: stored.map(({device: _device, source: _source, ...point}) => point),
             cursor: storedCursor?.cursor ?? null,
+            rebuiltAt: storedCursor?.rebuiltAt,
         };
     } catch (e) {
         console.warn("Could not read the cached location history", e);
@@ -120,13 +128,15 @@ export async function readCachedHistory(
 /**
  * Applies an answer to the cached [source] series of [deviceId]: everything [fresh]
  * supersedes is dropped, the fresh positions take its place, and [cursor] records where
- * to continue. One transaction, so the series never ends up in a state between the two.
+ * to continue, under the track generation [rebuiltAt]. One transaction, so the series
+ * never ends up in a state between the two.
  */
 export async function storeCachedHistory(
     deviceId: string,
     source: HistorySource,
     fresh: HistoryPoint[],
     cursor: number | null,
+    rebuiltAt: number | null | undefined,
 ): Promise<void> {
     const supersededFrom = supersededFromTimestamp(fresh);
     if (supersededFrom == null) return;
@@ -138,12 +148,27 @@ export async function storeCachedHistory(
         await opened.transaction("rw", opened.points, opened.cursors, async () => {
             await seriesRange(opened, deviceId, source, supersededFrom).delete();
             await opened.points.bulkPut(fresh.map((point) => ({...point, device: deviceId, source})));
-            if (cursor != null) await opened.cursors.put({device: deviceId, source, cursor});
+            if (cursor != null) await opened.cursors.put({device: deviceId, source, cursor, rebuiltAt});
         });
     } catch (e) {
         // Never silently: a cache that cannot be written means every visit downloads the
         // whole history again, and that should be visible rather than just slow.
         console.warn("Could not cache the location history", e);
+    }
+}
+
+/** Forgets the cached [source] series of [deviceId] and its cursor. */
+export async function clearCachedSeries(deviceId: string, source: HistorySource): Promise<void> {
+    const opened = open();
+    if (opened == null) return;
+
+    try {
+        await opened.transaction("rw", opened.points, opened.cursors, async () => {
+            await seriesRange(opened, deviceId, source).delete();
+            await opened.cursors.delete([deviceId, source]);
+        });
+    } catch (e) {
+        console.warn("Could not clear the cached location history", e);
     }
 }
 

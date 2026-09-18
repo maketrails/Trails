@@ -48,6 +48,11 @@ export interface LocationHistory {
     points: HistoryPoint[];
 }
 
+/** `GET /devices/{deviceId}/optimization/generation`. */
+interface TrackGeneration {
+    rebuilt_at: number | null;
+}
+
 /**
  * Hands the history through as the server sent it. Cleaning up positions is the
  * optimizer's job now — dropping some of them here as well would mean the
@@ -106,6 +111,27 @@ export const HistoryRepository = {
         }
         requireResponseIsFromTrails(response);
         return readHistory(response);
+    },
+
+    /**
+     * When the optimized track of one of the current user's own devices was last
+     * rebuilt from scratch (epoch millis), `null` if it never was. Resolves `undefined`
+     * on any failure, so a caller can tell "never rebuilt" apart from "unknown".
+     */
+    async trackGeneration(deviceId: string): Promise<number | null | undefined> {
+        let response: Response;
+        try {
+            response = await fetch(`/api/v1/devices/${deviceId}/optimization/generation`);
+        } catch {
+            return undefined;
+        }
+        requireResponseIsFromTrails(response);
+        if (!response.ok) return undefined;
+        try {
+            return (await response.json() as TrackGeneration).rebuilt_at;
+        } catch {
+            return undefined;
+        }
     },
 
     /**

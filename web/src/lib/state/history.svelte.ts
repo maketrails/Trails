@@ -7,6 +7,7 @@ import {
 import {
     applyFreshPoints,
     clearCachedHistory,
+    clearCachedSeries,
     readCachedHistory,
     storeCachedHistory,
 } from "$lib/api/history/history_cache";
@@ -34,6 +35,15 @@ function fetchFor(target: HistoryTarget, since?: number): Promise<LocationHistor
     return target.kind === "device"
         ? HistoryRepository.forDevice(target.deviceId, target.source ?? "optimized", since)
         : HistoryRepository.forShare(target.shareId, target.homeserver, since);
+}
+
+/**
+ * The generation of the optimized track [cacheTarget] reads, or `undefined` when there
+ * is none to check or it could not be asked for. The raw series is never rebuilt.
+ */
+function generationFor(cacheTarget: CacheTarget | null): Promise<number | null | undefined> {
+    if (cacheTarget == null || cacheTarget.source !== "optimized") return Promise.resolve(undefined);
+    return HistoryRepository.trackGeneration(cacheTarget.deviceId).catch(() => undefined);
 }
 
 /** Which cached series [target] reads, or `null` when it must not be cached. */
@@ -102,10 +112,23 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         void (async () => {
             // What the response is applied to; dropped as soon as the cache turns out
             // not to describe this history any more.
-            let base = cacheTarget == null
-                ? null
-                : await readCachedHistory(cacheTarget.deviceId, cacheTarget.source);
+            let [base, rebuiltAt] = await Promise.all([
+                cacheTarget == null ? null : readCachedHistory(cacheTarget.deviceId, cacheTarget.source),
+                generationFor(cacheTarget),
+            ]);
             if (cancelled) return;
+
+            /*
+             * A cursor only covers a track that was extended. One rebuilt from scratch
+             * since the cache was filled can differ anywhere, so the cache is dropped
+             * and the track read in full. An unknown generation keeps the cache — stale
+             * positions beat none.
+             */
+            if (cacheTarget != null && base != null && rebuiltAt !== undefined && base.rebuiltAt !== rebuiltAt) {
+                base = null;
+                await clearCachedSeries(cacheTarget.deviceId, cacheTarget.source);
+                if (cancelled) return;
+            }
 
             // What the cache holds goes on the map before the request even goes out;
             // the response only has to bring what has been stored since.
@@ -154,6 +177,7 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                     cacheTarget.source,
                     history.points,
                     history.cursor,
+                    rebuiltAt,
                 );
             }
         })();
