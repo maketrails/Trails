@@ -194,11 +194,11 @@
   "map": {
     "camera_mode": {
       "label": "Camera mode",
+      "keep_zoom_hint": "{key}-click to keep the current zoom",
       "options": {
         "keep_all_in_view": "Keep all devices in view",
         "follow_device": "Follow device",
-        "keep_trail_in_view": "Keep the trail in view",
-        "move_manually": "Move the map yourself"
+        "keep_trail_in_view": "Keep the trail in view"
       }
     },
     "bundle": {

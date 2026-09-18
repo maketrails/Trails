@@ -6,7 +6,7 @@
     import { getMapboxToken } from "$lib/api/mapbox/get_mapbox_token";
     import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
-    import { mapCamera, releaseCameraToUser } from "$lib/state/map_camera.svelte";
+    import { mapCamera, releaseCameraToUser, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import {
         coordinateAt,
@@ -716,7 +716,35 @@
                 if (e.originalEvent != null) releaseCameraToUser();
             };
             map.on("dragstart", onUserInteraction);
-            map.on("zoomstart", onUserInteraction);
+            map.on("zoomstart", (e: { originalEvent?: unknown }) => {
+                if (e.originalEvent == null) return;
+                // Following a target survives zooming: the gesture is anchored on the
+                // target (see the detail camera) and only changes how close we follow.
+                if (isFollowingTarget()) userZooming = true;
+                else releaseCameraToUser();
+            });
+            map.on("zoomend", (e) => {
+                if (!userZooming) return;
+                userZooming = false;
+                if (!isFollowingTarget()) return;
+                followZoom = e.target.getZoom();
+                // Catch up on location updates held back during the gesture.
+                if (followPending) followTarget(e.target);
+            });
+
+            // Double-click and double-tap zoom have no `around` option; they ease
+            // around the pointer. While following, drop it so they anchor on the
+            // target (the padding-aware centre) like wheel and pinch do.
+            const easeTo = map.easeTo.bind(map);
+            map.easeTo = (options, eventData) => {
+                const fromUser = (eventData as { originalEvent?: unknown } | undefined)?.originalEvent != null;
+                if (fromUser && isFollowingTarget()) {
+                    const centred = { ...options };
+                    delete centred.around;
+                    return easeTo(centred, eventData);
+                }
+                return easeTo(options, eventData);
+            };
             map.on("rotatestart", onUserInteraction);
             map.on("pitchstart", onUserInteraction);
 
@@ -1293,6 +1321,33 @@
         fitCoordinates(currentMap, allCoordinates());
     });
 
+    /** Zoom the detail `tracking` mode follows at, until the user zooms themselves. */
+    const FOLLOW_ZOOM = 15;
+    let followZoom = FOLLOW_ZOOM;
+    let appliedSelection: TrackingSelection | null = null;
+    let userZooming = false;
+    let followPending = false;
+
+    function isFollowingTarget(): boolean {
+        return mapCamera.scope === "detail" && mapCamera.detailMode === "tracking";
+    }
+
+    /** Centres the opened target at the current follow zoom. */
+    function followTarget(currentMap: mapboxgl.Map) {
+        // A running zoom gesture must not be cut short; its `zoomend` catches up.
+        followPending = userZooming;
+        if (userZooming) return;
+        const id = mapCamera.targetId;
+        const location = id != null ? targetLocation(id) : null;
+        if (location == null) return;
+        currentMap.flyTo({
+            center: [location.longitude, location.latitude],
+            zoom: followZoom,
+            padding: cameraPadding(currentMap),
+            duration: 800
+        });
+    }
+
     // Detail camera. `tracking` follows the target at a readable zoom, `trail`
     // frames its whole history, `manual` leaves the camera alone. Reading
     // mapTrail.points only in the trail branch keeps tracking from re-running on
@@ -1318,13 +1373,27 @@
             return;
         }
 
-        if (location == null) return;
-        currentMap.flyTo({
-            center: [location.longitude, location.latitude],
-            zoom: 16,
-            padding: cameraPadding(currentMap),
-            duration: 800
-        });
+        // A fresh selection of the mode starts over at the default zoom, unless
+        // it asked to keep the current one.
+        const selection = mapCamera.trackingSelection;
+        if (selection !== appliedSelection) {
+            appliedSelection = selection;
+            followZoom = selection.keepZoom ? currentMap.getZoom() : FOLLOW_ZOOM;
+        }
+        followTarget(currentMap);
+    });
+
+    // Anchor wheel and pinch zoom on the followed target (which sits at the
+    // padding-aware centre) instead of the pointer, so zooming keeps it in place.
+    $effect(() => {
+        const currentMap = map;
+        if (currentMap == null) return;
+        const around = isFollowingTarget() ? "center" : undefined;
+        // `scrollZoom.enable` is a no-op while enabled, so the option only sticks
+        // after a disable.
+        currentMap.scrollZoom.disable();
+        currentMap.scrollZoom.enable({ around });
+        currentMap.touchZoomRotate.enable({ around });
     });
 
     // The camera to fall back to when the detail scope closes.
