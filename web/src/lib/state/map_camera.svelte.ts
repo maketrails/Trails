@@ -46,6 +46,10 @@ const DETAIL_DEFAULT_MODE: DetailCameraMode = "trail";
 let generalMode = $state<GeneralCameraMode>("tracking");
 let detailMode = $state<DetailCameraMode>(DETAIL_DEFAULT_MODE);
 
+// Replaced on every switch into detail `tracking`, so the map can tell a fresh
+// selection (which picks the zoom anew) from a location update while following.
+let trackingSelection = $state({});
+
 /** Store the current bounding box of the page content. */
 export function setContentRect(rect: ContentRect | null) {
     contentRect = rect;
@@ -116,6 +120,7 @@ export function setGeneralCameraMode(mode: GeneralCameraMode) {
 }
 
 export function setDetailCameraMode(mode: DetailCameraMode) {
+    if (mode === "tracking") trackingSelection = {};
     detailMode = mode;
 }
 
@@ -148,5 +153,9 @@ export const mapCamera = {
     },
     get detailMode() {
         return detailMode;
+    },
+    /** Identity changes whenever detail `tracking` is (re)selected. */
+    get trackingSelection() {
+        return trackingSelection;
     },
 };
