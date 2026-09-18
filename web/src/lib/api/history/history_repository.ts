@@ -46,6 +46,12 @@ export interface LocationHistory {
      */
     cursor: number | null;
     points: HistoryPoint[];
+    /**
+     * How many points of the same read come after this chunk; `0` once it is complete.
+     * Continue with `after` set to the timestamp of the last point. Missing from a
+     * (foreign) server that does not chunk yet — its answer is the whole read.
+     */
+    remaining?: number | null;
 }
 
 /**
@@ -75,11 +81,15 @@ async function readHistory(response: Response): Promise<LocationHistory | null> 
  * only what has been **stored** since, which is what catches the optimizer's rebuilt
  * positions as well — they carry old recording timestamps but a new storage time. The
  * bound is inclusive, so the answer overlaps what the caller already has.
+ *
+ * Every read is chunked, oldest first: `?after=<epoch millis>` is the timestamp of the
+ * last point of the previous chunk, and a lost connection only costs one chunk.
  */
-function historyQuery(since?: number, source?: HistorySource): string {
-    const query = new URLSearchParams();
+function historyQuery(since?: number, source?: HistorySource, after?: number): string {
+    const query = new URLSearchParams({chunked: "true"});
     if (source != null) query.set("source", source);
     if (since != null) query.set("since", String(since));
+    if (after != null) query.set("after", String(after));
     const rendered = query.toString();
     return rendered === "" ? "" : `?${rendered}`;
 }
@@ -97,10 +107,11 @@ export const HistoryRepository = {
         deviceId: string,
         source: HistorySource = "optimized",
         since?: number,
+        after?: number,
     ): Promise<LocationHistory | null> {
         let response: Response;
         try {
-            response = await fetch(`/api/v1/devices/${deviceId}/history${historyQuery(since, source)}`);
+            response = await fetch(`/api/v1/devices/${deviceId}/history${historyQuery(since, source, after)}`);
         } catch {
             return null;
         }
@@ -122,11 +133,11 @@ export const HistoryRepository = {
      * [since] can only narrow that window further, never widen it — see the
      * endpoint's documentation.
      */
-    async forShare(shareId: string, homeserver: string, since?: number): Promise<LocationHistory | null> {
+    async forShare(shareId: string, homeserver: string, since?: number, after?: number): Promise<LocationHistory | null> {
         const base = shareOriginBase(homeserver);
         let response: Response;
         try {
-            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history${historyQuery(since)}`);
+            response = await fetch(`${base}/api/v1/active-shares/${shareId}/history${historyQuery(since, undefined, after)}`);
         } catch {
             return null;
         }

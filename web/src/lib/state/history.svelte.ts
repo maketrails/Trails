@@ -37,10 +37,36 @@ export interface HistoryLoad {
     reload(): void;
 }
 
-function fetchFor(target: HistoryTarget, since?: number): Promise<LocationHistory | null> {
+function fetchFor(target: HistoryTarget, since?: number, after?: number): Promise<LocationHistory | null> {
     return target.kind === "device"
-        ? HistoryRepository.forDevice(target.deviceId, target.source ?? "optimized", since)
-        : HistoryRepository.forShare(target.shareId, target.homeserver, since);
+        ? HistoryRepository.forDevice(target.deviceId, target.source ?? "optimized", since, after)
+        : HistoryRepository.forShare(target.shareId, target.homeserver, since, after);
+}
+
+/** How often one chunk is asked for before the load gives up. */
+const CHUNK_ATTEMPTS = 3;
+
+/**
+ * One chunk of the history, retried with a growing pause: a dropped connection
+ * then costs this chunk once more, not the whole history. `null` once every attempt
+ * failed or [isCancelled] turned true.
+ */
+async function fetchChunk(
+    target: HistoryTarget,
+    since: number | null,
+    after: number | null,
+    isCancelled: () => boolean,
+): Promise<LocationHistory | null> {
+    for (let attempt = 0; attempt < CHUNK_ATTEMPTS; attempt++) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 1_000 * 2 ** (attempt - 1)));
+        if (isCancelled()) return null;
+
+        // A rejection (e.g. a response that isn't from Trails) counts as a failed
+        // attempt rather than leaving `loading` stuck true forever.
+        const chunk = await fetchFor(target, since ?? undefined, after ?? undefined).catch(() => null);
+        if (chunk != null) return chunk;
+    }
+    return null;
 }
 
 /**
@@ -154,52 +180,69 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
             // the response only has to bring what has been stored since.
             if (base != null) points = base.points;
 
-            // A rejection (e.g. a response that isn't from Trails) must surface as
-            // a failed load rather than leaving `loading` stuck true forever.
-            let history = await fetchFor(current, base?.cursor ?? undefined).catch(() => null);
+            // An interrupted read picks up where it stopped instead of starting over.
+            const resume = base?.resume ?? null;
+            let since = resume != null ? resume.since : base?.cursor ?? null;
+            let after = resume?.after ?? null;
+            let cursor = resume?.cursor ?? null;
+            let accumulated = base?.points ?? [];
 
-            /*
-             * The cursor is an inclusive bound, so a server that still holds what the
-             * cache was last filled from answers with at least that much. An empty
-             * answer means it is gone — the history was wiped, the database restored —
-             * and nothing in the cache can be trusted, so it is thrown away and read
-             * in full.
-             */
-            if (!cancelled && base?.cursor != null && history?.points.length === 0) {
-                base = null;
-                points = [];
-                if (cacheTarget != null) await clearCachedHistory(cacheTarget.deviceId);
-                history = await fetchFor(current).catch(() => null);
+            while (true) {
+                let chunk = await fetchChunk(current, since, after, () => cancelled);
+                if (cancelled) return;
+
+                /*
+                 * The cursor is an inclusive bound, so a server that still holds what the
+                 * cache was last filled from answers with at least that much. An empty
+                 * answer means it is gone — the history was wiped, the database restored —
+                 * and nothing in the cache can be trusted, so it is thrown away and read
+                 * in full.
+                 */
+                if (since != null && after == null && chunk?.points.length === 0) {
+                    since = null;
+                    cursor = null;
+                    accumulated = [];
+                    points = [];
+                    if (cacheTarget != null) await clearCachedHistory(cacheTarget.deviceId);
+                    chunk = await fetchChunk(current, null, null, () => cancelled);
+                    if (cancelled) return;
+                }
+
+                if (chunk == null) {
+                    // A refresh that failed still leaves what has arrived so far on
+                    // screen — stale positions beat an empty map. What was cached so far
+                    // is kept for the next visit to continue from.
+                    loading = false;
+                    failed = true;
+                    return;
+                }
+
+                const last = chunk.points.at(-1);
+                const done = !chunk.remaining || last == null;
+                if (chunk.cursor != null) cursor = Math.max(cursor ?? chunk.cursor, chunk.cursor);
+
+                // A chunk that carried nothing leaves the list exactly as it is, identity
+                // included: consumers redraw when it changes, and there is nothing to redraw.
+                if (chunk.points.length > 0) {
+                    accumulated = applyFreshPoints(accumulated, chunk.points);
+                    points = accumulated;
+                }
+                historySeconds = chunk.history_seconds;
+
+                // Only what the chunk actually carried is written back: the cache already
+                // holds the rest, and rewriting a month of positions on every visit would
+                // be the very cost this cache exists to avoid.
+                if (cacheTarget != null) {
+                    void storeCachedHistory(cacheTarget.deviceId, cacheTarget.source, chunk.points, done
+                        ? {cursor, rebuiltAt, resume: null}
+                        : {cursor: since, rebuiltAt, resume: {since, after: last.timestamp, cursor}});
+                }
+
+                if (done) break;
+                after = last.timestamp;
             }
 
-            if (cancelled) return;
             loading = false;
-
-            if (history == null) {
-                // A refresh that failed still leaves the cached history on screen —
-                // stale positions beat an empty map.
-                failed = true;
-                return;
-            }
-
-            // An answer that carried nothing leaves the list exactly as it is, identity
-            // included: consumers redraw when it changes, and there is nothing to redraw.
-            if (history.points.length > 0) {
-                points = base == null ? history.points : applyFreshPoints(base.points, history.points);
-            }
-            historySeconds = history.history_seconds;
-            // Only what the answer actually carried is written back: the cache already
-            // holds the rest, and rewriting a month of positions on every visit would
-            // be the very cost this cache exists to avoid.
-            if (cacheTarget != null) {
-                void storeCachedHistory(
-                    cacheTarget.deviceId,
-                    cacheTarget.source,
-                    history.points,
-                    history.cursor,
-                    rebuiltAt,
-                );
-            }
         })();
 
         return () => {
