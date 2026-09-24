@@ -40,6 +40,7 @@
 
     <string name="device_ring">Anklingeln</string>
     <string name="device_ring_stop">Klingeln beenden</string>
+    <string name="device_ring_timeout">Das Gerät hat nicht reagiert.</string>
 
     <string name="device_deleted_title">Gerät entfernt</string>
     <string name="device_deleted_message">Dieses Gerät wurde von %1$s aus deinem Trails-Account entfernt. Es wird keine Standortdaten mehr an deinen Homeserver senden.</string>

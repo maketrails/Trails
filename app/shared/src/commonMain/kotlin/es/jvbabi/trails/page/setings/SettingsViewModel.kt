@@ -67,9 +67,20 @@ class SettingsViewModel(
         }
 
         viewModelScope.launch {
-            deviceRepository.hasDisabledBackgroundBatteryOptimization().collect { hasUnrestrictedBatteryBackgroundUsage ->
-                state.update { it.copy(hasUnrestrictedBatteryBackgroundUsage = hasUnrestrictedBatteryBackgroundUsage) }
-            }
+            deviceRepository.hasDisabledBackgroundBatteryOptimization()
+                .collect { hasUnrestrictedBatteryBackgroundUsage ->
+                    state.update { it.copy(hasUnrestrictedBatteryBackgroundUsage = hasUnrestrictedBatteryBackgroundUsage) }
+                }
+        }
+
+        viewModelScope.launch {
+            keyValueRepository.get(Key.ShowHomeserverInPersistentNotification)
+                .map { it ?: Key.ShowHomeserverInPersistentNotification.defaultValue }
+                .collect { showHomeserverInPersistentNotification ->
+                    state.update {
+                        it.copy(showHomeserverInPersistentNotification = showHomeserverInPersistentNotification)
+                    }
+                }
         }
 
         viewModelScope.launch {
@@ -122,11 +133,14 @@ class SettingsViewModel(
         when (event) {
             is SettingsEvent.OpenLoginDialog -> state.update { it.copy(showLoginDialog = true) }
             is SettingsEvent.CloseLoginDialog -> state.update { it.copy(showLoginDialog = false) }
-            is SettingsEvent.UpdateHomeServerUrl -> state.update { it.copy(homeServerUrl = event.url) }
+            is SettingsEvent.UpdateHomeServerUrl -> state.update { it.copy(loginDialogHomeServerUrl = event.url) }
             is SettingsEvent.Login -> {
                 state.update { it.copy(showLoginDialog = false) }
-                val url = URLBuilder(state.value.homeServerUrl).apply {
-                    if (!state.value.homeServerUrl.startsWith("http://") && !state.value.homeServerUrl.startsWith("https://")) protocol =
+                val url = URLBuilder(state.value.loginDialogHomeServerUrl).apply {
+                    if (!state.value.loginDialogHomeServerUrl.startsWith("http://") && !state.value.loginDialogHomeServerUrl.startsWith(
+                            "https://"
+                        )
+                    ) protocol =
                         URLProtocol.HTTPS
                     appendPathSegments("api", "v1", "auth", "app-authorization")
                     parameters.append("device_manufacturer", deviceRepository.getManufacturer())
@@ -172,9 +186,14 @@ class SettingsViewModel(
             is SettingsEvent.StopTracking -> backgroundServiceRepository.stopService()
             is SettingsEvent.RingDevice -> deviceRepository.startRinging("Settings") {}
 
+            is SettingsEvent.ToggleShowHomeserverInPersistentNotification -> viewModelScope.launch {
+                keyValueRepository.set(Key.ShowHomeserverInPersistentNotification, event.to)
+            }
+
             is SettingsEvent.SetAppTheme -> viewModelScope.launch {
                 keyValueRepository.set(Key.Theme, event.theme)
             }
+
             is SettingsEvent.UpdateMinimumMovementMeters -> viewModelScope.launch {
                 keyValueRepository.set(Key.MinimumMovementDistanceToNextSnapshot, event.meters)
             }
@@ -183,7 +202,7 @@ class SettingsViewModel(
 }
 
 data class SettingsState(
-    val homeServerUrl: String = "https://trailsdevelopment.jvbabi.es", // TODO remove default value for prod, just for testing
+    val loginDialogHomeServerUrl: String = "",
     val showLoginDialog: Boolean = false,
     val hasLocationPermissions: Boolean? = null,
     val hasNotificationPermissions: Boolean? = null,
@@ -191,6 +210,7 @@ data class SettingsState(
     val hasUnrestrictedBatteryBackgroundUsage: Boolean? = null,
     val isBackgroundTrackingServiceRunning: Boolean = false,
     val currentHomeserverUrl: String? = null,
+    val showHomeserverInPersistentNotification: Boolean = false,
     val userId: Uuid? = null,
     val thisDeviceId: Uuid? = null,
     val thisDevice: Device? = null,
@@ -220,6 +240,7 @@ sealed class SettingsEvent {
     data object StopTracking : SettingsEvent()
     data object RingDevice : SettingsEvent()
 
+    data class ToggleShowHomeserverInPersistentNotification(val to: Boolean): SettingsEvent()
     data class SetAppTheme(val theme: Theme) : SettingsEvent()
-    data class UpdateMinimumMovementMeters(val meters: Int): SettingsEvent()
+    data class UpdateMinimumMovementMeters(val meters: Int) : SettingsEvent()
 }

@@ -35,10 +35,13 @@ import io.ktor.serialization.*
 import io.ktor.utils.io.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.flow.*
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.io.IOException
 import org.jetbrains.compose.resources.getString
 import trails.app.shared.generated.resources.Res
 import trails.app.shared.generated.resources.notification_ping_by_browser
@@ -278,6 +281,8 @@ class TrailsServerRepositoryImpl(
                     isConnected.value = false
                     websocketSession?.close()
                     websocketSession = null
+                    // The server resends what is still ringing once the next connection subscribes.
+                    ringStates.value = emptyMap()
 
                     database.connectionEventDao.upsert(ConnectionEvent(
                         id = Uuid.random(),
@@ -286,12 +291,24 @@ class TrailsServerRepositoryImpl(
                         data = ConnectionEvent.Event.Disconnected
                     ).toEntity())
 
+                } catch (e: CancellationException) {
+                    // Cancelled from outside: tear the connection down, then let the
+                    // cancellation through so the loop ends instead of reconnecting.
+                    locationUpdater?.cancel()
+                    backlogUploader?.cancel()
+                    if (currentServerHost != null) stopCrashDetection(currentServerHost)
+                    isConnected.value = false
+                    ringStates.value = emptyMap()
+                    withContext(NonCancellable) { websocketSession?.close() }
+                    websocketSession = null
+                    throw e
                 } catch (e: Exception) {
                     Logger.e(e) { "Error connecting to WS: ${e.message}" }
                     locationUpdater?.cancel()
                     backlogUploader?.cancel()
                     if (currentServerHost != null) stopCrashDetection(currentServerHost)
                     isConnected.value = false
+                    ringStates.value = emptyMap()
                     database.connectionEventDao.upsert(ConnectionEvent(
                         id = Uuid.random(),
                         server = currentServerHost ?: "unknown",
@@ -466,16 +483,14 @@ class TrailsServerRepositoryImpl(
         val deferred = CompletableDeferred<PingResult>()
         pendingPingResults[device.id] = deferred
         val session = websocketSession
-        if (session == null || !session.isActive) return PingResult.Error("WebSocket not connected")
-        try {
-            session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.DevicePing(device.id.toString()))
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // The socket can die between the isActive check above and the write.
+        if (session == null || !session.isActive) {
             pendingPingResults.remove(device.id)
-            logger.w(e) { "Failed to send ping for device ${device.id}: ${e.message}" }
-            return PingResult.Error(e.message ?: "Failed to send ping")
+            return PingResult.Error("WebSocket not connected")
+        }
+        // The socket can die between the isActive check above and the write.
+        if (!session.sendOrLog(TrailsWebSocketAppMessage.DevicePing(device.id.toString()), logger)) {
+            pendingPingResults.remove(device.id)
+            return PingResult.Error("Failed to send ping")
         }
         val result = withTimeoutOrNull(10.seconds) { deferred.await() }
         pendingPingResults.remove(device.id)
@@ -696,6 +711,13 @@ class TrailsServerRepositoryImpl(
                 activeExternalSessions[server]?.close()
                 activeExternalSessions.remove(server)
 
+            } catch (e: CancellationException) {
+                // Cancelled from outside: tear the connection down, then let the
+                // cancellation through so the loop ends instead of reconnecting.
+                stopCrashDetection(server)
+                withContext(NonCancellable) { activeExternalSessions[server]?.close() }
+                activeExternalSessions.remove(server)
+                throw e
             } catch (e: Exception) {
                 Logger.e(e) { "Error connecting to WS: ${e.message}" }
                 stopCrashDetection(server)
@@ -847,7 +869,7 @@ private fun Snapshot.toDataSnapshotMessage() = TrailsWebSocketAppMessage.DataSna
 )
 
 /**
- * Sends [message] and logs — rather than propagates — a write failure.
+ * Sends [message] and logs — rather than propagates — a write failure. Returns whether it was sent.
  *
  * Use for fire-and-forget messages launched outside the connect loop's `try`. The socket can
  * die between the caller's `isActive` check and the write; the connect loop notices the dead
@@ -857,14 +879,18 @@ private fun Snapshot.toDataSnapshotMessage() = TrailsWebSocketAppMessage.DataSna
 private suspend fun DefaultClientWebSocketSession.sendOrLog(
     message: TrailsWebSocketAppMessage,
     logger: Logger,
-) {
+): Boolean {
     try {
         sendSerialized(message)
-    } catch (e: kotlinx.coroutines.CancellationException) {
-        throw e
-    } catch (e: Exception) {
+        return true
+    } catch (e: ClosedSendChannelException) {
+        // The session was closed normally.
+        logger.w(e) { "Dropping WS message $message: ${e.message}" }
+    } catch (e: IOException) {
+        // The connection broke; the outgoing channel is closed with that failure.
         logger.w(e) { "Dropping WS message $message: ${e.message}" }
     }
+    return false
 }
 
 private abstract class WebSocketClientBase(
@@ -930,7 +956,14 @@ private abstract class WebSocketClientBase(
     private suspend fun handleIncomingMessages(session: DefaultClientWebSocketSession) {
         for (frame in session.incoming) {
             if (frame is Frame.Text) {
-                val message = session.converter!!.deserialize<TrailsWebSocketServerMessage>(frame)
+                // A message this app cannot read (a newer or misbehaving server) is skipped:
+                // letting it escape would end the loop and take the whole connection down.
+                val message = try {
+                    session.converter!!.deserialize<TrailsWebSocketServerMessage>(frame)
+                } catch (e: ContentConvertException) {
+                    logger.w(e) { "Dropping unreadable WS message: ${e.message}" }
+                    continue
+                }
                 logger.i { "Received WS message: $message" }
 
                 when (message) {

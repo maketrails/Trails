@@ -1,0 +1,10 @@
+{
+  "title": "Home server in the tracking notification",
+  "description": "The persistent tracking notification now shows which home server your location is shared with. You can turn this off in the settings.",
+  "localized": {
+    "de": {
+      "title": "Homeserver in der Tracking-Benachrichtigung",
+      "description": "Die dauerhafte Tracking-Benachrichtigung zeigt jetzt an, mit welchem Homeserver dein Standort geteilt wird. Das lässt sich in den Einstellungen abschalten."
+    }
+  }
+}

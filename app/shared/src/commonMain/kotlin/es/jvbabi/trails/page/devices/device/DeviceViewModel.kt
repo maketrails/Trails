@@ -6,28 +6,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import es.jvbabi.trails.domain.model.ActiveShare
 import es.jvbabi.trails.domain.model.User
-import es.jvbabi.trails.domain.repository.DeviceRepository
-import es.jvbabi.trails.domain.repository.DevicesRepository
-import es.jvbabi.trails.domain.repository.FileRepository
-import es.jvbabi.trails.domain.repository.Key
-import es.jvbabi.trails.domain.repository.KeyValueRepository
-import es.jvbabi.trails.domain.repository.PingResult
-import es.jvbabi.trails.domain.repository.ShareRepository
-import es.jvbabi.trails.domain.repository.TrailsServerRepository
-import es.jvbabi.trails.domain.repository.UiRepository
-import es.jvbabi.trails.domain.repository.UserRepository
+import es.jvbabi.trails.domain.repository.*
 import es.jvbabi.trails.domain.usecase.home.GetHomeDeviceLocationsUseCase
 import es.jvbabi.trails.page.home.HomeState
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import trails.app.shared.generated.resources.*
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.Uuid
 
+/** How long a ring or stop request may go unconfirmed by the device before the UI gives up. */
+private val RING_CONFIRMATION_TIMEOUT = 10.seconds
+
 class DeviceViewModel(
-    private val deviceRepository: DeviceRepository,
     private val devicesRepository: DevicesRepository,
     private val getHomeDeviceLocationsUseCase: GetHomeDeviceLocationsUseCase,
     private val keyValueRepository: KeyValueRepository,
@@ -107,7 +99,10 @@ class DeviceViewModel(
                             else -> it.pingState
                         },
                         ringState = when {
-                            hasDeviceChanged && isOwnDevice -> DeviceState.RingState.Ready
+                            hasDeviceChanged && isOwnDevice -> {
+                                val isRinging = trailsServerRepository.ringStates.value[snapshot.device.device.id]?.isRinging == true
+                                if (isRinging) DeviceState.RingState.Ringing else DeviceState.RingState.Ready
+                            }
                             !isOwnDevice -> DeviceState.RingState.Disabled
                             else -> it.ringState
                         }
@@ -120,15 +115,39 @@ class DeviceViewModel(
                 .combine(deviceId.filterNotNull()) { states, id ->
                     states[id]
                 }
+                // The map changes whenever any device rings; only this one's state matters.
+                .distinctUntilChanged()
                 .collectLatest { deviceRingState ->
+                    ringConfirmationTimeout?.cancel()
                     state.update { it.copy(
                         ringState = when {
+                            it.ringState == null || it.ringState == DeviceState.RingState.Disabled -> it.ringState
                             deviceRingState?.isRinging == true -> DeviceState.RingState.Ringing
-                            it.ringState == DeviceState.RingState.Ringing -> DeviceState.RingState.Ready
-                            else -> it.ringState
+                            else -> DeviceState.RingState.Ready
                         }
                     ) }
                 }
+        }
+    }
+
+    /** Falls back to the confirmed ring state when the device never answers a ring request. */
+    private var ringConfirmationTimeout: Job? = null
+
+    /**
+     * Shows [DeviceState.RingState.Loading] until the device confirms the request through
+     * [TrailsServerRepository.ringStates]. The device is the source of truth, so a request
+     * it never confirms (offline, asleep) must not leave the button spinning forever.
+     */
+    private fun awaitRingConfirmation() {
+        state.update { it.copy(ringState = DeviceState.RingState.Loading) }
+        ringConfirmationTimeout?.cancel()
+        ringConfirmationTimeout = viewModelScope.launch {
+            delay(RING_CONFIRMATION_TIMEOUT)
+            val isRinging = trailsServerRepository.ringStates.value[deviceId.value]?.isRinging == true
+            state.update { it.copy(
+                ringState = if (isRinging) DeviceState.RingState.Ringing else DeviceState.RingState.Ready
+            ) }
+            if (!isRinging) uiRepository.sendSnackbar(getString(Res.string.device_ring_timeout), autoDismiss = 5.seconds)
         }
     }
 
@@ -143,6 +162,8 @@ class DeviceViewModel(
                     if (result.isSuccess) state.update { it.copy(renameState = DeviceState.RenameState.Success) }
                     else state.update { it.copy(renameState = DeviceState.RenameState.Error(result.exceptionOrNull()?.message ?: getString(Res.string.common_unknown_error))) }
                 } catch (e: Exception) {
+                    // A cancellation of this coroutine goes through; anything else is a failed request.
+                    ensureActive()
                     state.update { it.copy(renameState = DeviceState.RenameState.Error(e.message ?: getString(Res.string.common_unknown_error))) }
                 }
             }
@@ -156,6 +177,8 @@ class DeviceViewModel(
                     if (result.isSuccess) state.update { it.copy(deletionState = DeviceState.DeletionState.Success) }
                     else if (result.isFailure) state.update { it.copy(deletionState = DeviceState.DeletionState.Error(result.exceptionOrNull()?.message ?: getString(Res.string.common_unknown_error))) }
                 } catch (e: Exception) {
+                    // A cancellation of this coroutine goes through; anything else is a failed request.
+                    ensureActive()
                     state.update { it.copy(deletionState = DeviceState.DeletionState.Error(e.message ?: getString(Res.string.common_unknown_error))) }
                 }
             }
@@ -175,6 +198,8 @@ class DeviceViewModel(
                     if (failure == null) state.update { it.copy(returnState = DeviceState.ReturnState.Success) }
                     else state.update { it.copy(returnState = DeviceState.ReturnState.Error(failure.message ?: getString(Res.string.common_unknown_error))) }
                 } catch (e: Exception) {
+                    // A cancellation of this coroutine goes through; anything else is a failed request.
+                    ensureActive()
                     state.update { it.copy(returnState = DeviceState.ReturnState.Error(e.message ?: getString(Res.string.common_unknown_error))) }
                 }
             }
@@ -182,40 +207,38 @@ class DeviceViewModel(
             is DeviceEvent.Ping -> {
                 viewModelScope.launch {
                     state.update { it.copy(pingState = DeviceState.PingState.Loading) }
-                    try {
-                        when (val result = trailsServerRepository.requestPing(state.value.device!!.device)) {
-                            is PingResult.Pinged -> {
-                                uiRepository.sendSnackbar(getString(when (result.hasDeliveredNotification) {
-                                    true -> Res.string.device_ping_found
-                                    false -> Res.string.device_ping_no_notification
-                                }), autoDismiss = 5.seconds)
-                                state.update { it.copy(pingState = DeviceState.PingState.Ready) }
-                            }
-                            PingResult.NotAllowed -> {
-                                uiRepository.sendSnackbar(getString(Res.string.device_ping_not_allowed), autoDismiss = 5.seconds)
-                                state.update { it.copy(pingState = DeviceState.PingState.Disabled) }
-                            }
-                            PingResult.Timeout -> {
-                                uiRepository.sendSnackbar(getString(Res.string.device_ping_timeout), autoDismiss = 5.seconds)
-                                state.update { it.copy(pingState = DeviceState.PingState.Ready) }
-                            }
-                            is PingResult.Error -> {
-                                uiRepository.sendSnackbar(getString(Res.string.common_error_with_message, result.errorMessage), autoDismiss = 5.seconds)
-                                state.update { it.copy(pingState = DeviceState.PingState.Ready) }
-                            }
+                    // Every failure comes back as a PingResult, so there is nothing to catch here.
+                    when (val result = trailsServerRepository.requestPing(state.value.device!!.device)) {
+                        is PingResult.Pinged -> {
+                            uiRepository.sendSnackbar(getString(when (result.hasDeliveredNotification) {
+                                true -> Res.string.device_ping_found
+                                false -> Res.string.device_ping_no_notification
+                            }), autoDismiss = 5.seconds)
+                            state.update { it.copy(pingState = DeviceState.PingState.Ready) }
                         }
-                    } catch (e: Exception) {
-                        uiRepository.sendSnackbar(getString(Res.string.common_error_with_message, e.message.orEmpty()), autoDismiss = 5.seconds)
-                        state.update { it.copy(pingState = DeviceState.PingState.Ready) }
+                        PingResult.NotAllowed -> {
+                            uiRepository.sendSnackbar(getString(Res.string.device_ping_not_allowed), autoDismiss = 5.seconds)
+                            state.update { it.copy(pingState = DeviceState.PingState.Disabled) }
+                        }
+                        PingResult.Timeout -> {
+                            uiRepository.sendSnackbar(getString(Res.string.device_ping_timeout), autoDismiss = 5.seconds)
+                            state.update { it.copy(pingState = DeviceState.PingState.Ready) }
+                        }
+                        is PingResult.Error -> {
+                            uiRepository.sendSnackbar(getString(Res.string.common_error_with_message, result.errorMessage), autoDismiss = 5.seconds)
+                            state.update { it.copy(pingState = DeviceState.PingState.Ready) }
+                        }
                     }
                 }
             }
 
             is DeviceEvent.Ring -> {
+                awaitRingConfirmation()
                 trailsServerRepository.requestRing(state.value.device!!.device)
             }
 
             is DeviceEvent.StopRing -> {
+                awaitRingConfirmation()
                 trailsServerRepository.requestStopRing(state.value.device!!.device)
             }
         }
@@ -233,6 +256,11 @@ data class DeviceState(
     val deletionState: DeletionState? = null,
     val renameState: RenameState? = null,
     val returnState: ReturnState? = null,
+    /**
+     * Compared by reference on purpose: the image is only ever replaced by a freshly read
+     * array, never changed in place, so comparing its contents on every update would be waste.
+     */
+    @Suppress("ArrayInDataClass")
     val image: ByteArray? = null,
 ) {
     sealed class DeletionState {

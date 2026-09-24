@@ -41,6 +41,8 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     private val trailsServerRepository by inject<TrailsServerRepository>()
 
     companion object {
+        private const val NOTIFICATION_ID = 1
+
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
     }
@@ -56,9 +58,9 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
         val notification = createNotification()
         foregroundStarted = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
             } else {
-                startForeground(1, notification)
+                startForeground(NOTIFICATION_ID, notification)
             }
             true
         } catch (e: Exception) {
@@ -87,6 +89,18 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
 
         if (!isStarted) {
             isStarted = true
+            serviceScope.launch {
+                combine(
+                    keyValueRepository.get(Key.Host),
+                    keyValueRepository.get(Key.ShowHomeserverInPersistentNotification)
+                        .map { it ?: Key.ShowHomeserverInPersistentNotification.defaultValue },
+                ) { homeserver, showHomeserver -> homeserver.takeIf { showHomeserver } }
+                    .distinctUntilChanged()
+                    .collect { homeserver ->
+                        val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                        manager.notify(NOTIFICATION_ID, createNotification(homeserver))
+                    }
+            }
             serviceScope.launch {
                 keyValueRepository
                     .get(Key.ThisDeviceId)
@@ -120,7 +134,7 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
             )
 
         } catch (unlikely: SecurityException) {
-            Log.e("LocationService", "Keine Berechtigung: $unlikely")
+            Log.e("LocationService", "Missing permission: $unlikely")
         }
     }
 
@@ -140,7 +154,13 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     override fun onProviderEnabled(provider: String) { Log.d("LocationService", "$provider enabled") }
     override fun onProviderDisabled(provider: String) { Log.d("LocationService", "$provider disabled") }
 
-    private fun createNotification(): Notification {
+    /**
+     * Builds the persistent tracking notification.
+     *
+     * @param homeserver the home server domain to name in the notification, or `null` to keep it
+     * generic — either because it is not known yet or because the user chose to hide it.
+     */
+    private fun createNotification(homeserver: String? = null): Notification {
         val channelId = "pure_location_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -156,7 +176,10 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
 
         return NotificationCompat.Builder(this, channelId)
             .setContentTitle(getString(R.string.notification_tracking_title))
-            .setContentText(getString(R.string.notification_tracking_body))
+            .setContentText(
+                if (homeserver != null) getString(R.string.notification_tracking_body_with_homeserver, homeserver)
+                else getString(R.string.notification_tracking_body)
+            )
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setSilent(true)

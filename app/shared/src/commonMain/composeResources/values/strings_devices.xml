@@ -48,6 +48,7 @@
 
     <string name="device_ring">Ring</string>
     <string name="device_ring_stop">Stop ringing</string>
+    <string name="device_ring_timeout">The device did not respond.</string>
 
     <string name="device_deleted_title">Device removed</string>
     <!-- %1$s is the name of the device the deletion was triggered from. -->
