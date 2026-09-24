@@ -27,8 +27,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.Clipboard
+import com.phosphor.icons.regular.Link
 import es.jvbabi.trails.getClipboardText
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import trails.app.shared.generated.resources.*
@@ -62,7 +64,7 @@ fun AddScreenContent(
         onDismissRequest = onBack,
         icon = {
             Icon(
-                painter = painterResource(Res.drawable.link),
+                imageVector = PhIcons.Regular.Link,
                 contentDescription = null,
             )
         },
@@ -95,7 +97,7 @@ fun AddScreenContent(
                             }
                         ) {
                             Icon(
-                                painter = painterResource(Res.drawable.clipboard),
+                                imageVector = PhIcons.Regular.Clipboard,
                                 contentDescription = stringResource(Res.string.common_paste),
                                 modifier = Modifier.size(24.dp),
                             )

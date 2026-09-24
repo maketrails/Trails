@@ -30,10 +30,11 @@ import androidx.compose.ui.tooling.preview.PreviewWrapper
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.Vibrate
 import es.jvbabi.trails.ThemeWrapper
 import es.jvbabi.trails.ui.theme.AppTheme
 import nl.jacobras.humanreadable.HumanReadable
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 
@@ -153,7 +154,7 @@ fun RingingContent(
             Spacer(Modifier.weight(.3f))
 
             Icon(
-                painter = painterResource(Res.drawable.smartphone_nfc),
+                imageVector = PhIcons.Regular.Vibrate,
                 contentDescription = null,
                 modifier = Modifier.size(96.dp),
                 tint = MaterialTheme.colorScheme.primary,

@@ -23,6 +23,7 @@ room = "2.8.4"
 sqlite = "2.7.0"
 human-readable = "2.0.0-alpha02"
 app-jetlime = "4.3.0"
+app-phosphor-icons = "1.0.5"
 
 # Server
 server-exposed = "1.3.1"
@@ -94,6 +95,7 @@ app-haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze"
 app-haze-blur-materials = { module = "dev.chrisbanes.haze:haze-blur-materials", version.ref = "haze" }
 app-human-readable = { module = "nl.jacobras:Human-Readable", version.ref = "human-readable" }
 app-jetlime = { module = "io.github.pushpalroy:jetlime", version.ref = "app-jetlime" }
+app-phosphor-icons-regular = { module = "io.github.dev778g-me:phosphoricons-regular", version.ref = "app-phosphor-icons" }
 
 # Server - Ktor
 server-ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }

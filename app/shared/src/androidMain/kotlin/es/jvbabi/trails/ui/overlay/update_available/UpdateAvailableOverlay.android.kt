@@ -31,6 +31,9 @@ import androidx.compose.ui.util.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.ArrowRight
+import com.phosphor.icons.regular.X
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import es.jvbabi.trails.ThemeWrapper
@@ -184,7 +187,7 @@ fun UpdateAvailableOverlayContent(
                 )
 
                 Icon(
-                    painter = painterResource(Res.drawable.move_right),
+                    imageVector = PhIcons.Regular.ArrowRight,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
                     tint = MaterialTheme.colorScheme.outline,
@@ -290,7 +293,7 @@ fun UpdateAvailableOverlayContent(
                                 border = ButtonDefaults.outlinedButtonBorder(enabled = true),
                             ) {
                                 Icon(
-                                    painter = painterResource(Res.drawable.x),
+                                    imageVector = PhIcons.Regular.X,
                                     contentDescription = stringResource(Res.string.update_cancel_download),
                                     modifier = Modifier.size(20.dp),
                                 )

@@ -31,12 +31,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.Plus
+import com.phosphor.icons.regular.ShareNetwork
 import es.jvbabi.trails.page.home.bottomFadeOut
 import es.jvbabi.trails.page.shares.SharesScreen
 import es.jvbabi.trails.page.shares.add_share.AddShareScreen
 import es.jvbabi.trails.page.shares.new_share.NewShareScreen
 import es.jvbabi.trails.utils.PaddingValues
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 
@@ -114,7 +116,7 @@ fun SharesContent(
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.plus),
+                    imageVector = PhIcons.Regular.Plus,
                     contentDescription = stringResource(Res.string.shares_enter_link),
                     modifier = Modifier.size(24.dp),
                 )
@@ -125,7 +127,7 @@ fun SharesContent(
                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.share_2),
+                    imageVector = PhIcons.Regular.ShareNetwork,
                     contentDescription = stringResource(Res.string.shares_add),
                     modifier = Modifier.size(28.dp),
                 )

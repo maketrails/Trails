@@ -20,16 +20,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewWrapper
 import androidx.compose.ui.unit.dp
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.DeviceMobile
+import com.phosphor.icons.regular.Shapes
+import com.phosphor.icons.regular.Users
 import es.jvbabi.trails.ThemeWrapper
 import es.jvbabi.trails.page.devices.Screen
 import es.jvbabi.trails.page.home.HomeState
 import kotlinx.coroutines.launch
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 
@@ -52,7 +55,7 @@ fun NavigationBar(
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             Item(
-                icon = painterResource(Res.drawable.smartphone),
+                icon = PhIcons.Regular.DeviceMobile,
                 label = stringResource(Res.string.home_tab_devices),
                 isSelected = selectedTab is HomeState.Tab.MyDevices,
                 draggableCardSheetState = draggableCardSheetState,
@@ -60,7 +63,7 @@ fun NavigationBar(
             )
 
             Item(
-                icon = painterResource(Res.drawable.shapes),
+                icon = PhIcons.Regular.Shapes,
                 label = stringResource(Res.string.home_tab_things),
                 isSelected = selectedTab == HomeState.Tab.Things,
                 draggableCardSheetState = draggableCardSheetState,
@@ -68,7 +71,7 @@ fun NavigationBar(
             )
 
             Item(
-                icon = painterResource(Res.drawable.users),
+                icon = PhIcons.Regular.Users,
                 label = stringResource(Res.string.home_tab_shares),
                 isSelected = selectedTab == HomeState.Tab.Shares,
                 draggableCardSheetState = draggableCardSheetState,
@@ -80,7 +83,7 @@ fun NavigationBar(
 
 @Composable
 private fun RowScope.Item(
-    icon: Painter,
+    icon: ImageVector,
     label: String,
     isSelected: Boolean,
     draggableCardSheetState: DraggableCardSheetState?,
@@ -115,7 +118,7 @@ private fun RowScope.Item(
         })
 
         Icon(
-            painter = icon,
+            imageVector = icon,
             contentDescription = label,
             tint = contentColor,
             modifier = Modifier.size(24.dp),

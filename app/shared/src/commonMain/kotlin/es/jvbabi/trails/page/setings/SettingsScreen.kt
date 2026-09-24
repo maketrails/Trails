@@ -18,11 +18,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.ArrowLeft
+import com.phosphor.icons.regular.BellRinging
+import com.phosphor.icons.regular.Check
+import com.phosphor.icons.regular.CircleHalf
+import com.phosphor.icons.regular.Moon
+import com.phosphor.icons.regular.Path
+import com.phosphor.icons.regular.Sun
 import es.jvbabi.trails.domain.repository.Theme
 import es.jvbabi.trails.ui.components.SteppedSlider
 import nl.jacobras.humanreadable.DistanceUnit
 import nl.jacobras.humanreadable.HumanReadable
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 import kotlin.math.abs
@@ -67,7 +74,7 @@ fun SettingsContent(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
-                            painter = painterResource(Res.drawable.arrow_left),
+                            imageVector = PhIcons.Regular.ArrowLeft,
                             contentDescription = stringResource(Res.string.common_back)
                         )
                     }
@@ -105,7 +112,7 @@ fun SettingsContent(
                             targetState = state.appTheme == Theme.System,
                         ) { isSelected ->
                             Icon(
-                                painter = painterResource(if (!isSelected) Res.drawable.sun_moon else Res.drawable.check),
+                                imageVector = if (!isSelected) PhIcons.Regular.CircleHalf else PhIcons.Regular.Check,
                                 contentDescription = stringResource(Res.string.settings_theme_system),
                                 modifier = Modifier.size(16.dp),
                             )
@@ -124,7 +131,7 @@ fun SettingsContent(
                             targetState = state.appTheme == Theme.Light,
                         ) { isSelected ->
                             Icon(
-                                painter = painterResource(if (!isSelected) Res.drawable.sun else Res.drawable.check),
+                                imageVector = if (!isSelected) PhIcons.Regular.Sun else PhIcons.Regular.Check,
                                 contentDescription = stringResource(Res.string.settings_theme_light),
                                 modifier = Modifier.size(16.dp),
                             )
@@ -143,7 +150,7 @@ fun SettingsContent(
                             targetState = state.appTheme == Theme.Dark,
                         ) { isSelected ->
                             Icon(
-                                painter = painterResource(if (!isSelected) Res.drawable.moon else Res.drawable.check),
+                                imageVector = if (!isSelected) PhIcons.Regular.Moon else PhIcons.Regular.Check,
                                 contentDescription = stringResource(Res.string.settings_theme_dark),
                                 modifier = Modifier.size(16.dp),
                             )
@@ -180,7 +187,7 @@ fun SettingsContent(
                 verticalAlignment = Alignment.Top,
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.route),
+                    imageVector = PhIcons.Regular.Path,
                     contentDescription = null,
                 )
                 Column {
@@ -218,7 +225,7 @@ fun SettingsContent(
                     verticalAlignment = Alignment.Top,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.bell_ring),
+                        imageVector = PhIcons.Regular.BellRinging,
                         contentDescription = null,
                     )
                     Column(Modifier.weight(1f)) {
