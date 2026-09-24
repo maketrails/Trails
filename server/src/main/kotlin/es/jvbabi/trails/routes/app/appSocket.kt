@@ -2,11 +2,7 @@ package es.jvbabi.trails.routes.app
 
 import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TrailsAppUserPrincipal
-import es.jvbabi.trails.data.DeviceRepository
-import es.jvbabi.trails.data.ShareRepository
-import es.jvbabi.trails.data.SnapshotWriteResult
-import es.jvbabi.trails.data.TrackRepository
-import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.*
 import es.jvbabi.trails.data.event.ActiveShareEvent
 import es.jvbabi.trails.data.event.DeviceEvent
 import es.jvbabi.trails.data.event.UserEvent
@@ -168,6 +164,7 @@ fun Route.app() {
                     val shared = shareRepository.getSharedDevice(activeShareId) ?: return
 
                     sendLastKnownPosition(shared.device.id, shared.share, activeShareId)
+                    sendPresence(shared.device.id, TrailsWebSocketServerMessage.Snapshot.Target.Share(activeShareId.toString()))
 
                     shareSubscriptionRtUpdaters[activeShareId] = launch {
                         // The share's own stream, already filtered down to what this
@@ -190,6 +187,19 @@ fun Route.app() {
                     if (deviceRepository.getOwnedById(deviceId, principal.user.id) == null) return
 
                     sendLastKnownPosition(deviceId, share = null, activeShareId = null)
+                    sendPresence(deviceId, TrailsWebSocketServerMessage.Snapshot.Target.Device(deviceId.toString()))
+
+                    // The event stream only reports changes, so a client that (re)connects
+                    // while the device is ringing would otherwise never learn about it.
+                    deviceRepository.ringRequestedBy(deviceId)?.let { ringedBy ->
+                        sendSerialized<TrailsWebSocketServerMessage>(
+                            TrailsWebSocketServerMessage.RingState(
+                                deviceId = deviceId.toString(),
+                                isRinging = true,
+                                ringedByDeviceName = ringedBy,
+                            )
+                        )
+                    }
 
                     ownDeviceSubscriptionRtUpdaters[deviceId] = launch {
                         deviceRepository.events(deviceId)
@@ -362,7 +372,7 @@ fun Route.app() {
                                     if (principal == null) continue
                                     val targetDeviceId = Uuid.parse(message.deviceId)
                                     if (deviceRepository.getOwnedById(targetDeviceId, principal.user.id) == null) {
-                                        sendSerialized(
+                                        sendSerialized<TrailsWebSocketServerMessage>(
                                             TrailsWebSocketServerMessage.PingResult(
                                                 deviceId = message.deviceId,
                                                 success = false,
@@ -381,7 +391,7 @@ fun Route.app() {
                                             requestedBySource = PingSource.DEVICE,
                                         )
                                         if (ack != null) {
-                                            sendSerialized(
+                                            sendSerialized<TrailsWebSocketServerMessage>(
                                                 TrailsWebSocketServerMessage.PingResult(
                                                     deviceId = message.deviceId,
                                                     success = true,
@@ -389,7 +399,7 @@ fun Route.app() {
                                                 )
                                             )
                                         } else {
-                                            sendSerialized(
+                                            sendSerialized<TrailsWebSocketServerMessage>(
                                                 TrailsWebSocketServerMessage.PingResult(
                                                     deviceId = message.deviceId,
                                                     success = false,
@@ -417,6 +427,8 @@ fun Route.app() {
                                     deviceRepository.requestRingStop(targetDeviceId)
                                 }
                             }
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             appSocketLogger.error("""WebSocket message could not be handled:
                                 |Message: $message
@@ -501,9 +513,15 @@ private fun DeviceEvent.toAppMessage(thisDeviceId: Uuid): AppSocketMessage? = wh
         TrailsWebSocketServerMessage.RingStop
     )
 
-    // The confirmed ring state is what the *other* UIs follow; this connection is
-    // where it came from.
-    is DeviceEvent.RingStateChanged -> null
+    // The confirmed ring state is what every UI follows, including the owner's other
+    // devices showing this one's ring button.
+    is DeviceEvent.RingStateChanged -> AppSocketMessage(
+        TrailsWebSocketServerMessage.RingState(
+            deviceId = deviceId.toString(),
+            isRinging = isRinging,
+            ringedByDeviceName = requestedByName,
+        )
+    )
 
     // A rename reaches the app through the account's stream, which carries the whole
     // device.

@@ -1,0 +1,8 @@
+{
+  "description": "Pinging and ringing a device in the app now shows whether the device is ringing and what came of a ping.",
+  "localized": {
+    "de": {
+      "description": "Beim Anpingen und Anklingeln eines Geräts zeigt die App jetzt an, ob es klingelt und was der Ping ergeben hat."
+    }
+  }
+}
