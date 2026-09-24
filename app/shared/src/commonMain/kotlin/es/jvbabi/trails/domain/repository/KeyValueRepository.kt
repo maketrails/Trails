@@ -1,6 +1,5 @@
 package es.jvbabi.trails.domain.repository
 
-import io.ktor.util.StringValues
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
@@ -53,6 +52,10 @@ sealed class Key<VALUE>(val key: String) {
 
     data object MinimumMovementDistanceToNextSnapshot: IntKey("trails.minimumMovementDistanceToNextSnapshot") {
         override val defaultValue: Int = 10
+    }
+
+    data object ShowHomeserverInPersistentNotification: BooleanKey("trails.notification.persistence.showHomeserver") {
+        override val defaultValue: Boolean = true
     }
 
     /**

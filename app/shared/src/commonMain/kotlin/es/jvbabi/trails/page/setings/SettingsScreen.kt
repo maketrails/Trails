@@ -3,13 +3,16 @@
 package es.jvbabi.trails.page.setings
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
@@ -204,6 +207,39 @@ fun SettingsContent(
 
             Spacer(Modifier.height(16.dp))
 
+            if (state.currentHomeserverUrl != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { onEvent(SettingsEvent.ToggleShowHomeserverInPersistentNotification(!state.showHomeserverInPersistentNotification)) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        painter = painterResource(Res.drawable.bell_ring),
+                        contentDescription = null,
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = "Zeige Homeserver in Benachrichtigung",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            text = "Zeigt deinen Homeserver (" + state.currentHomeserverUrl + ") in der Benachrichtigung an.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Checkbox(
+                        checked = state.showHomeserverInPersistentNotification,
+                        onCheckedChange = { onEvent(SettingsEvent.ToggleShowHomeserverInPersistentNotification(it)) },
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+            }
+
             Button(
                 onClick = { onEvent(SettingsEvent.RequestLocationPermissions) },
                 enabled = state.hasLocationPermissions == false
@@ -269,7 +305,7 @@ fun SettingsContent(
             text = {
                 Column {
                     TextField(
-                        value = state.homeServerUrl,
+                        value = state.loginDialogHomeServerUrl,
                         onValueChange = { onEvent(SettingsEvent.UpdateHomeServerUrl(it)) },
                         label = { Text(stringResource(Res.string.settings_login_homeserver_label)) }
                     )
@@ -293,7 +329,7 @@ private fun SettingsPreview() {
         onBack = {},
         state = SettingsState(
             showLoginDialog = false,
-            homeServerUrl = "https://trails.werkbank.space",
+            loginDialogHomeServerUrl = "https://trails.werkbank.space",
             hasLocationPermissions = true,
 
             appTheme = Theme.Light,
