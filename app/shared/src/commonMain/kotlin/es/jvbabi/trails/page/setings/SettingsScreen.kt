@@ -223,11 +223,11 @@ fun SettingsContent(
                     )
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = "Zeige Homeserver in Benachrichtigung",
+                            text = stringResource(Res.string.settings_show_homeserver_in_notification_title),
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            text = "Zeigt deinen Homeserver (" + state.currentHomeserverUrl + ") in der Benachrichtigung an.",
+                            text = stringResource(Res.string.settings_show_homeserver_in_notification_description, state.currentHomeserverUrl),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }

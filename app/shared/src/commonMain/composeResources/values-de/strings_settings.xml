@@ -11,6 +11,9 @@
     <string name="settings_minimum_movement_title">Minimal erforderliche Bewegung</string>
     <string name="settings_minimum_movement_description">Die minimale Distanz, die zurückgelegt werden muss, bevor ein neuer Punkt erstellt wird.</string>
 
+    <string name="settings_show_homeserver_in_notification_title">Homeserver in Benachrichtigung anzeigen</string>
+    <string name="settings_show_homeserver_in_notification_description">Zeigt deinen Homeserver (%1$s) in der Tracking-Benachrichtigung an.</string>
+
     <string name="settings_request_location_permissions">Standortberechtigungen anfordern</string>
     <string name="settings_request_notification_permissions">Benachrichtigungen erlauben</string>
     <string name="settings_request_fullscreen_permissions">Vollbildaktivitäten erlauben</string>

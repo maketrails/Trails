@@ -14,4 +14,5 @@
     <string name="notification_channel_tracking_name">GPS tracking</string>
     <string name="notification_tracking_title">GPS tracking is running</string>
     <string name="notification_tracking_body">Your location is being shared with your Trails home server.</string>
+    <string name="notification_tracking_body_with_homeserver">Your location is being shared with your Trails home server (%1$s).</string>
 </resources>

@@ -11,6 +11,9 @@
     <string name="settings_minimum_movement_title">Minimum required movement</string>
     <string name="settings_minimum_movement_description">The minimum distance that has to be travelled before a new point is recorded.</string>
 
+    <string name="settings_show_homeserver_in_notification_title">Show home server in notification</string>
+    <string name="settings_show_homeserver_in_notification_description">Shows your home server (%1$s) in the tracking notification.</string>
+
     <string name="settings_request_location_permissions">Request location permissions</string>
     <string name="settings_request_notification_permissions">Allow notifications</string>
     <string name="settings_request_fullscreen_permissions">Allow full-screen activities</string>
