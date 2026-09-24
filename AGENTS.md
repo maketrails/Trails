@@ -332,4 +332,8 @@ area: `devices_rename_title`, `devices_rename_description`.
 
 # App
 ## Design
-We use Lucide icons for the app. They need to be converted to android vector drawables and placed in the composeResources folder.
+We use [Phosphor icons](https://phosphoricons.com) for the app, via
+[PhosphorIcon-compose](https://github.com/dev778g-me/PhosphorIcon-compose)
+(`io.github.dev778g-me:phosphoricons-regular`). Use the *Regular* weight as
+`ImageVector`s — `Icon(imageVector = PhIcons.Regular.ArrowLeft, …)` — and don't
+add icon drawables to the composeResources folder.

@@ -16,12 +16,14 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewWrapper
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.ArrowRight
+import com.phosphor.icons.regular.Trash
 import es.jvbabi.trails.ui.components.DeviceImage
 import es.jvbabi.trails.ThemeWrapper
 import es.jvbabi.trails.domain.model.Device
 import es.jvbabi.trails.domain.model.User
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import trails.app.shared.generated.resources.*
@@ -85,7 +87,7 @@ fun DeviceDeletedContent(
             )
 
             Icon(
-                painter = painterResource(Res.drawable.move_right),
+                imageVector = PhIcons.Regular.ArrowRight,
                 contentDescription = null,
                 modifier = Modifier.size(40.dp),
                 tint = MaterialTheme.colorScheme.outline,
@@ -99,7 +101,7 @@ fun DeviceDeletedContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.trash_2),
+                    imageVector = PhIcons.Regular.Trash,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,

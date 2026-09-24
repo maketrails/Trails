@@ -21,6 +21,12 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.ArrowLeft
+import com.phosphor.icons.regular.BellRinging
+import com.phosphor.icons.regular.PencilSimple
+import com.phosphor.icons.regular.Trash
+import com.phosphor.icons.regular.Vibrate
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
 import dev.chrisbanes.haze.hazeEffect
@@ -35,7 +41,6 @@ import es.jvbabi.trails.ui.components.LocalHazeState
 import es.jvbabi.trails.utils.PaddingValues
 import es.jvbabi.trails.utils.padding
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import trails.app.shared.generated.resources.*
@@ -112,7 +117,7 @@ fun DeviceContent(
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f))
             ) {
                 Icon(
-                    painter = painterResource(Res.drawable.arrow_left),
+                    imageVector = PhIcons.Regular.ArrowLeft,
                     contentDescription = stringResource(Res.string.common_back),
                     modifier = Modifier.size(24.dp),
                 )
@@ -122,13 +127,13 @@ fun DeviceContent(
             isOwner -> listOf(
                 TopBarAction(
                     title = stringResource(Res.string.device_rename),
-                    icon = Res.drawable.pencil,
+                    icon = PhIcons.Regular.PencilSimple,
                     display = TopBarActionDisplay.ALWAYS,
                     onClick = { showRenameDialog = true },
                 ),
                 TopBarAction(
                     title = stringResource(Res.string.common_delete),
-                    icon = Res.drawable.trash_2,
+                    icon = PhIcons.Regular.Trash,
                     destructive = true,
                     onClick = { showDeleteDialog = true },
                 ),
@@ -138,7 +143,7 @@ fun DeviceContent(
             state.shares.isNotEmpty() -> listOf(
                 TopBarAction(
                     title = stringResource(Res.string.device_return_share),
-                    icon = Res.drawable.trash_2,
+                    icon = PhIcons.Regular.Trash,
                     display = TopBarActionDisplay.ALWAYS,
                     destructive = true,
                     onClick = { showReturnDialog = true },
@@ -196,7 +201,7 @@ fun DeviceContent(
             ) { isLoading ->
                 if (isLoading) LoadingIndicator(Modifier.size(24.dp))
                 else Icon(
-                    painter = painterResource(Res.drawable.trash_2),
+                    imageVector = PhIcons.Regular.Trash,
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(24.dp),
                     contentDescription = null,
@@ -284,7 +289,7 @@ fun DeviceContent(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Icon(
-                                        painter = painterResource(Res.drawable.bell_ring),
+                                        imageVector = PhIcons.Regular.BellRinging,
                                         contentDescription = null,
                                         modifier = Modifier.size(16.dp),
                                     )
@@ -304,7 +309,7 @@ fun DeviceContent(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         Icon(
-                                            painter = painterResource(Res.drawable.smartphone_nfc),
+                                            imageVector = PhIcons.Regular.Vibrate,
                                             contentDescription = null,
                                             modifier = Modifier.size(16.dp),
                                         )
@@ -325,7 +330,7 @@ fun DeviceContent(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
                                             Icon(
-                                                painter = painterResource(Res.drawable.smartphone_nfc),
+                                                imageVector = PhIcons.Regular.Vibrate,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(16.dp),
                                             )
@@ -375,7 +380,7 @@ private fun ReturnShareDialog(
             AnimatedContent(targetState = isLoading) { loading ->
                 if (loading) LoadingIndicator(Modifier.size(24.dp))
                 else Icon(
-                    painter = painterResource(Res.drawable.trash_2),
+                    imageVector = PhIcons.Regular.Trash,
                     tint = MaterialTheme.colorScheme.error,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
@@ -451,7 +456,7 @@ private fun RenameDeviceDialog(
             AnimatedContent(targetState = isLoading) { loading ->
                 if (loading) LoadingIndicator(Modifier.size(24.dp))
                 else Icon(
-                    painter = painterResource(Res.drawable.pencil),
+                    imageVector = PhIcons.Regular.PencilSimple,
                     contentDescription = null,
                     modifier = Modifier.size(24.dp),
                 )

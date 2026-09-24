@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -29,13 +30,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.ArrowLeft
+import com.phosphor.icons.regular.DotsThreeVertical
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
 import dev.chrisbanes.haze.hazeEffect
 import es.jvbabi.trails.ThemeWrapper
-import org.jetbrains.compose.resources.DrawableResource
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 
@@ -167,7 +169,7 @@ enum class TopBarActionDisplay {
  */
 data class TopBarAction(
     val title: String,
-    val icon: DrawableResource,
+    val icon: ImageVector,
     val onClick: () -> Unit,
     val display: TopBarActionDisplay = TopBarActionDisplay.IF_ROOM,
     val destructive: Boolean = false,
@@ -253,7 +255,7 @@ fun TopBarActions(actions: List<TopBarAction>) {
                 modifier = topBarActionBackground().size(TopBarActionSize),
             ) {
                 Icon(
-                    painter = painterResource(action.icon),
+                    imageVector = action.icon,
                     contentDescription = action.title,
                     tint = if (action.destructive) MaterialTheme.colorScheme.error else LocalContentColor.current,
                     modifier = Modifier.size(24.dp),
@@ -269,7 +271,7 @@ fun TopBarActions(actions: List<TopBarAction>) {
                     modifier = topBarActionBackground().size(TopBarActionSize),
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.ellipsis_vertical),
+                        imageVector = PhIcons.Regular.DotsThreeVertical,
                         contentDescription = stringResource(Res.string.common_more_actions),
                         modifier = Modifier.size(24.dp),
                     )
@@ -287,7 +289,7 @@ fun TopBarActions(actions: List<TopBarAction>) {
                             },
                             leadingIcon = {
                                 Icon(
-                                    painter = painterResource(action.icon),
+                                    imageVector = action.icon,
                                     contentDescription = null,
                                     modifier = Modifier.size(20.dp),
                                 )
@@ -409,7 +411,7 @@ private fun TopBarWithBackButtonPreview() {
                         subtitle = "Online",
                         navigationIcon = {
                             IconButton(onClick = {}) {
-                                Icon(painter = painterResource(Res.drawable.arrow_left), contentDescription = stringResource(Res.string.common_back))
+                                Icon(imageVector = PhIcons.Regular.ArrowLeft, contentDescription = stringResource(Res.string.common_back))
                             }
                         },
                     )
@@ -432,7 +434,7 @@ private fun TopBarLongTextPreview() {
                         subtitle = "And this subtitle is also unreasonably long for any normal screen",
                         navigationIcon = {
                             IconButton(onClick = {}) {
-                                Icon(painter = painterResource(Res.drawable.arrow_left), contentDescription = stringResource(Res.string.common_back))
+                                Icon(imageVector = PhIcons.Regular.ArrowLeft, contentDescription = stringResource(Res.string.common_back))
                             }
                         },
                     )

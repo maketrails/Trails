@@ -57,6 +57,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.BatteryMedium
+import com.phosphor.icons.regular.Check
+import com.phosphor.icons.regular.ClockCounterClockwise
+import com.phosphor.icons.regular.Link
+import com.phosphor.icons.regular.Tag
+import com.phosphor.icons.regular.Users
+import com.phosphor.icons.regular.WarningCircle
+import com.phosphor.icons.regular.X
 import es.jvbabi.trails.domain.model.Device
 import es.jvbabi.trails.domain.model.User
 import es.jvbabi.trails.page.home.bottomFadeOut
@@ -67,7 +76,6 @@ import es.jvbabi.trails.utils.padding
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
 import es.jvbabi.trails.utils.toDp
 import nl.jacobras.humanreadable.HumanReadable
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import org.koin.compose.viewmodel.koinViewModel
 import trails.app.shared.generated.resources.*
@@ -149,7 +157,7 @@ fun NewShareContent(
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.x),
+                        imageVector = PhIcons.Regular.X,
                         contentDescription = stringResource(Res.string.common_close)
                     )
                 }
@@ -233,7 +241,7 @@ fun NewShareContent(
                     verticalAlignment = Alignment.Top,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.map_pin_time),
+                        imageVector = PhIcons.Regular.ClockCounterClockwise,
                         contentDescription = null,
                     )
                     Column {
@@ -285,7 +293,7 @@ fun NewShareContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.battery_medium),
+                        imageVector = PhIcons.Regular.BatteryMedium,
                         contentDescription = null,
                     )
                     Column(Modifier.weight(1f)) {
@@ -311,7 +319,7 @@ fun NewShareContent(
                     verticalAlignment = Alignment.Top,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.tag),
+                        imageVector = PhIcons.Regular.Tag,
                         contentDescription = null,
                     )
                     Column(Modifier.weight(1f)) {
@@ -371,7 +379,7 @@ fun NewShareContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        painter = painterResource(Res.drawable.users),
+                        imageVector = PhIcons.Regular.Users,
                         contentDescription = null,
                     )
                     Column(Modifier.weight(1f)) {
@@ -403,7 +411,7 @@ fun NewShareContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(
-                            painter = painterResource(Res.drawable.link),
+                            imageVector = PhIcons.Regular.Link,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
                         )
@@ -430,12 +438,12 @@ fun NewShareContent(
                         NewShareState.ShareCreationState.Idle -> {}
                         NewShareState.ShareCreationState.Loading -> LoadingIndicator()
                         is NewShareState.ShareCreationState.Success -> Icon(
-                            painter = painterResource(Res.drawable.check),
+                            imageVector = PhIcons.Regular.Check,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         is NewShareState.ShareCreationState.Error -> Icon(
-                            painter = painterResource(Res.drawable.circle_alert),
+                            imageVector = PhIcons.Regular.WarningCircle,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
                         )

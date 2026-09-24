@@ -7,11 +7,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewWrapper
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.WarningCircle
 import es.jvbabi.trails.ThemeWrapper
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.Res
-import trails.app.shared.generated.resources.circle_alert
 import trails.app.shared.generated.resources.common_ok
 import trails.app.shared.generated.resources.update_download_failed_message
 import trails.app.shared.generated.resources.update_download_failed_title
@@ -30,7 +30,7 @@ fun DownloadFailedDialog(
         onDismissRequest = { onEvent(UpdateAvailableEvent.DismissDownloadError) },
         icon = {
             Icon(
-                painter = painterResource(Res.drawable.circle_alert),
+                imageVector = PhIcons.Regular.WarningCircle,
                 contentDescription = null,
             )
         },

@@ -31,6 +31,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.max
 import androidx.compose.ui.unit.times
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.phosphor.icons.PhIcons
+import com.phosphor.icons.regular.CornersOut
+import com.phosphor.icons.regular.Gear
+import com.phosphor.icons.regular.GpsFix
 import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
 import dev.chrisbanes.haze.hazeEffect
@@ -51,7 +55,6 @@ import es.jvbabi.trails.utils.padding
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.Month
-import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
 import kotlin.uuid.Uuid
@@ -173,7 +176,7 @@ fun HomeContent(
                                     ),
                                 ) {
                                     Icon(
-                                        painter = painterResource(Res.drawable.settings),
+                                        imageVector = PhIcons.Regular.Gear,
                                         contentDescription = stringResource(Res.string.settings_title)
                                     )
                                 }
@@ -208,10 +211,10 @@ fun HomeContent(
                                             modifier = Modifier.size(24.dp),
                                         ) { currentTrackingMode ->
                                             Icon(
-                                                painter = painterResource(when (currentTrackingMode) {
-                                                    MapState.TrackingMode.None, MapState.TrackingMode.OwnLocation -> Res.drawable.maximize
-                                                    MapState.TrackingMode.Overview -> Res.drawable.locate_fixed
-                                                }),
+                                                imageVector = when (currentTrackingMode) {
+                                                    MapState.TrackingMode.None, MapState.TrackingMode.OwnLocation -> PhIcons.Regular.CornersOut
+                                                    MapState.TrackingMode.Overview -> PhIcons.Regular.GpsFix
+                                                },
                                                 contentDescription = null,
                                                 modifier = Modifier.size(24.dp)
                                             )

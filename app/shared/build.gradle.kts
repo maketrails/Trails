@@ -97,6 +97,7 @@ kotlin {
 
             implementation(libs.app.human.readable)
             implementation(libs.app.jetlime)
+            implementation(libs.app.phosphor.icons.regular)
 
             api(libs.app.ktor.client.core)
             implementation(libs.app.ktor.client.content.negotiation)
