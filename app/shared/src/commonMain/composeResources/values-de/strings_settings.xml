@@ -2,6 +2,7 @@
     <string name="settings_title">Einstellungen</string>
 
     <string name="settings_section_interface">Oberfläche</string>
+    <string name="settings_theme_title">Design</string>
     <string name="settings_theme_system">System</string>
     <string name="settings_theme_auto">Auto</string>
     <string name="settings_theme_light">Hell</string>
