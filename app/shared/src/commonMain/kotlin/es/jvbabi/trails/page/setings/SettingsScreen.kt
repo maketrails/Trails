@@ -7,22 +7,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phosphor.icons.PhIcons
-import com.phosphor.icons.regular.ArrowLeft
-import com.phosphor.icons.regular.BellRinging
-import com.phosphor.icons.regular.Check
-import com.phosphor.icons.regular.CircleHalf
-import com.phosphor.icons.regular.Moon
-import com.phosphor.icons.regular.Palette
-import com.phosphor.icons.regular.Path
-import com.phosphor.icons.regular.Sun
+import com.phosphor.icons.regular.*
 import es.jvbabi.trails.domain.repository.Theme
 import es.jvbabi.trails.ui.components.SteppedSlider
 import es.jvbabi.trails.ui.components.settings.SettingsCategory
@@ -60,15 +54,6 @@ fun SettingsContent(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
-        // The map is rendered below the navigation display and stays there while settings are
-        // open, so this surface has to swallow the gestures that its own content does not use.
-        modifier = Modifier.pointerInput(Unit) {
-            awaitPointerEventScope {
-                while (true) {
-                    awaitPointerEvent().changes.forEach { it.consume() }
-                }
-            }
-        },
         topBar = {
             LargeTopAppBar(
                 title = { Text(stringResource(Res.string.settings_title)) },
