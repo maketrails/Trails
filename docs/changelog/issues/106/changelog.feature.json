@@ -1,0 +1,10 @@
+{
+  "title": "Redesigned settings",
+  "description": "The settings screen now follows the familiar Android layout, with clearly grouped categories, icons and descriptions for every setting and a tappable row for each option.",
+  "localized": {
+    "de": {
+      "title": "Überarbeitete Einstellungen",
+      "description": "Die Einstellungen folgen jetzt dem gewohnten Android-Layout – mit klar gruppierten Kategorien, Icons und Beschreibungen für jede Einstellung und Zeilen, die sich komplett antippen lassen."
+    }
+  }
+}
