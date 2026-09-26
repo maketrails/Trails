@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.phosphor.icons.PhIcons
 import com.phosphor.icons.regular.*
 import es.jvbabi.trails.domain.repository.Theme
+import es.jvbabi.trails.page.setings.login.LoginDialog
 import es.jvbabi.trails.ui.components.SteppedSlider
 import es.jvbabi.trails.ui.components.settings.SettingsCategory
 import es.jvbabi.trails.ui.components.settings.SettingsCheckboxItem
@@ -193,25 +194,11 @@ fun SettingsContent(
     }
 
     if (state.showLoginDialog) {
-        AlertDialog(
-            onDismissRequest = { onEvent(SettingsEvent.CloseLoginDialog) },
-            title = { Text(stringResource(Res.string.settings_login)) },
-            text = {
-                Column {
-                    TextField(
-                        value = state.loginDialogHomeServerUrl,
-                        onValueChange = { onEvent(SettingsEvent.UpdateHomeServerUrl(it)) },
-                        label = { Text(stringResource(Res.string.settings_login_homeserver_label)) }
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    onEvent(SettingsEvent.Login)
-                }) {
-                    Text(stringResource(Res.string.common_ok))
-                }
-            }
+        LoginDialog(
+            url = state.loginDialogHomeServerUrl,
+            onDismiss = { onEvent(SettingsEvent.CloseLoginDialog) },
+            onValueChange = { onEvent(SettingsEvent.UpdateHomeServerUrl(it)) },
+            onSubmit = { onEvent(SettingsEvent.Login) },
         )
     }
 }
@@ -256,7 +243,7 @@ private fun SettingsPreview() {
         onBack = {},
         state = SettingsState(
             showLoginDialog = false,
-            loginDialogHomeServerUrl = "https://trails.werkbank.space",
+            loginDialogHomeServerUrl = "trails.werkbank.space",
             hasLocationPermissions = true,
             currentHomeserverUrl = "trails.example.com",
             appTheme = Theme.Light,

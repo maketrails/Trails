@@ -136,12 +136,7 @@ class SettingsViewModel(
             is SettingsEvent.UpdateHomeServerUrl -> state.update { it.copy(loginDialogHomeServerUrl = event.url) }
             is SettingsEvent.Login -> {
                 state.update { it.copy(showLoginDialog = false) }
-                val url = URLBuilder(state.value.loginDialogHomeServerUrl).apply {
-                    if (!state.value.loginDialogHomeServerUrl.startsWith("http://") && !state.value.loginDialogHomeServerUrl.startsWith(
-                            "https://"
-                        )
-                    ) protocol =
-                        URLProtocol.HTTPS
+                val url = URLBuilder("https://${state.value.loginDialogHomeServerUrl.removePrefix("https://")}").apply {
                     appendPathSegments("api", "v1", "auth", "app-authorization")
                     parameters.append("device_manufacturer", deviceRepository.getManufacturer())
                     parameters.append("device_model", deviceRepository.getDeviceModel())
