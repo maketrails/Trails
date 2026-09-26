@@ -3,6 +3,11 @@ package es.jvbabi.trails.page.setings.login
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.tooling.preview.Preview
 import es.jvbabi.trails.utils.HttpsVisualTransformation
 import org.jetbrains.compose.resources.stringResource
@@ -18,6 +23,7 @@ fun LoginDialog(
     onSubmit: () -> Unit,
     onValueChange: (to: String) -> Unit,
 ) {
+    val focusRequester = remember { FocusRequester() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(Res.string.settings_login)) },
@@ -27,7 +33,8 @@ fun LoginDialog(
                     visualTransformation = HttpsVisualTransformation(MaterialTheme.colorScheme.outline),
                     value = url,
                     onValueChange = { onValueChange(it) },
-                    label = { Text(stringResource(Res.string.settings_login_homeserver_label)) }
+                    label = { Text(stringResource(Res.string.settings_login_homeserver_label)) },
+                    modifier = Modifier.focusRequester(focusRequester),
                 )
             }
         },
@@ -37,6 +44,10 @@ fun LoginDialog(
             }
         }
     )
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
 }
 
 @Preview
