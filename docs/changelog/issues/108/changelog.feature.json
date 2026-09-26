@@ -1,0 +1,10 @@
+{
+  "title": "Force HTTPS for login",
+  "description": "Logging in now always uses HTTPS.",
+  "localized": {
+    "de": {
+      "title": "Anmeldung nur über HTTPS",
+      "description": "Beim Anmelden wird nun automatisch HTTPS verwendet."
+    }
+  }
+}
