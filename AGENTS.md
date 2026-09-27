@@ -119,17 +119,23 @@ files over inventing new ones.
 
 ### Labels
 
-Three labels say which part of the system a change belongs to:
-`project:app`, `project:server` and `project:webapp`. Several may apply at once.
+Four labels say which part of the system a change belongs to:
+`project:app`, `project:server`, `project:webapp` and `project:other`
+(documentation, CI, tooling). Several may apply at once.
 
 They are not documentation, they steer the release
-([deploy.yaml](.github/workflows/deploy.yaml)):
+([deploy.yaml](.github/workflows/deploy.yaml)). A push to `main` builds what the
+labels of every pull request merged since the last successful deploy need
+together — a merged stack counts with all of its layers:
 
-| Label on the pull request        | Effect on a merge to `main`                          |
-|----------------------------------|------------------------------------------------------|
-| `project:app`                    | builds the APKs and publishes a GitHub release       |
-| `project:server` / `project:webapp` | builds and pushes the Docker image                |
-| none                             | builds nothing                                       |
+| Label on the pull request           | Effect on a merge to `main`                    |
+|-------------------------------------|------------------------------------------------|
+| `project:app`                       | builds the APKs and publishes a GitHub release |
+| `project:server` / `project:webapp` | builds and pushes the Docker image             |
+| `project:other` only                | builds nothing, deliberately                   |
+| none                                | builds nothing, with a warning                 |
+
+A direct push or a manual run without any pull request labels builds everything.
 
 The pull request label decides what gets built, the issue label decides what the
 changelog shows (see below) — but **labelling one of the two is enough**:
@@ -219,7 +225,9 @@ change would tell users about something they cannot see. An issue labelled
 `project:app` *and* `project:webapp` still counts as an app change. An issue with
 no label at all counts as none and is left out with a warning — so label the
 issue, not just the pull request. Write the entry anyway: nothing is lost, it is
-simply not published to app users.
+simply not published to app users. Accordingly, the pull request check only
+requires an entry for issues labelled `project:app` (or with no `project:*` label
+at all, with a warning); an entry that exists anyway is still validated.
 
 ### Internationalization (i18n)
 
@@ -337,3 +345,21 @@ We use [Phosphor icons](https://phosphoricons.com) for the app, via
 (`io.github.dev778g-me:phosphoricons-regular`). Use the *Regular* weight as
 `ImageVector`s — `Icon(imageVector = PhIcons.Regular.ArrowLeft, …)` — and don't
 add icon drawables to the composeResources folder.
+
+## Scaffold
+
+This project is based on [Scaffold](https://github.com/Julius-Babies/Scaffold);
+[.scaffold/README.md](.scaffold/README.md) names the version and lists every
+deviation from it. Files derived from Scaffold: `.github/`.
+
+When changing one of these files:
+
+1. **Check whether the change belongs in Scaffold.** If it would help every
+   project based on Scaffold (a fix, a better check, a new convention), tell the
+   user and propose making it in Scaffold instead. Only make it here if the user
+   agrees or it is genuinely specific to this project.
+2. **Document it.** Every difference from the Scaffold version goes into the
+   deviations table of `.scaffold/README.md`, with its reason, in the same change.
+   Mark it as an upstream candidate if it should move to Scaffold later.
+3. **Never change the Scaffold version by hand.** Upgrading follows the procedure
+   in Scaffold's AGENTS.md.
