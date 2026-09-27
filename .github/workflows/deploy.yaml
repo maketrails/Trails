@@ -22,12 +22,29 @@ on:
         description: Create the release as a draft
         type: boolean
         default: true
+
+# The only project specific values in this workflow. APP_NAME names the release
+# and its APKs, DOCKER_IMAGE is where the server image is pushed to (lowercase).
+env:
+  APP_NAME: Trails
+  DOCKER_IMAGE: ghcr.io/maketrails/trails
+
+# One deploy at a time. Two runs side by side could get the same build tag and
+# would both list the same changelog entries. A run waiting here may be replaced
+# by a newer one; nothing is lost, the newer run's scope reaches back to the
+# last successful deploy, see "Determine affected projects".
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   setup:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
+      # To find the last successful deploy.
+      actions: read
     outputs:
       build_tag: ${{ steps.vars.outputs.build_tag }}
       build_timestamp: ${{ steps.vars.outputs.build_timestamp }}
@@ -45,26 +62,60 @@ jobs:
           echo "build_tag=$TAG" >> $GITHUB_OUTPUT
           echo "date_formatted=$DATE_FORMATTED" >> $GITHUB_OUTPUT
 
-      # A push to main is a merged pull request, and that pull request declares
-      # which parts of the system it touches through its project:* labels. The
-      # release only builds what the change actually needs.
+      # A push to main is one or more merged pull requests -- a stack of them
+      # lands in a single push -- and each declares which parts of the system it
+      # touches through its project:* labels. The release builds what their
+      # labels together need, and nothing more.
+      # The pull requests are all those merged since the last successful deploy,
+      # not just those of this push: a stack merged through a merge queue may
+      # arrive in several pushes, and a run that failed or was replaced while
+      # waiting would otherwise leave its changes unbuilt. They are found through
+      # their merge commit, which every layer of a merged stack shares -- the
+      # commit's own associated pull requests name only one of them.
       # Manual runs and pushes without a pull request carry no labels, so they
       # fall back to building everything rather than silently shipping nothing.
+      # project:other is the deliberate empty scope -- documentation, CI, tooling:
+      # it is a label, so it never reaches that fallback, and it matches nothing
+      # below, so neither job runs.
       - name: Determine affected projects
         id: scope
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
         run: |
           ALL=$'project:app\nproject:server\nproject:webapp'
           if [ "${{ github.event_name }}" = 'workflow_dispatch' ]; then
             echo "Manual run: building every project."
             LABELS="$ALL"
           else
-            LABELS=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
-              --jq '[.[].labels[].name] | unique | .[]')
-            if [ -z "$LABELS" ]; then
-              echo "::notice::No pull request labels found for ${{ github.sha }}, building every project."
+            BASE=$(gh run list --workflow deploy.yaml --branch main --event push --status success \
+              --limit 1 --json headSha --jq '.[0].headSha // ""')
+            # The very first deploy has no predecessor, so it covers this push.
+            [ -n "$BASE" ] || BASE=$BEFORE
+            echo "Covering the pull requests merged since $BASE."
+
+            # Empty when the range cannot be listed completely (the compare API
+            # stops at 250 commits), which builds everything below.
+            SHAS=""
+            if [ -n "$BASE" ] && [ "$BASE" != 0000000000000000000000000000000000000000 ]; then
+              SHAS=$(gh api "repos/$GH_REPO/compare/$BASE...$GITHUB_SHA" \
+                --jq 'if .total_commits > (.commits | length) then empty else .commits[].sha end' || true)
+            fi
+
+            if [ -z "$SHAS" ]; then
+              echo "::notice::Could not list the commits since $BASE, building every project."
               LABELS="$ALL"
+            else
+              export SHAS
+              MERGED=$(gh pr list --state merged --limit 100 --json number,labels,mergeCommit \
+                --jq '[.[] | select(.mergeCommit.oid as $oid | env.SHAS | split("\n") | any(. == $oid))]')
+              printf 'Pull requests: %s\n' "$(printf '%s' "$MERGED" | jq -r 'map("#\(.number)") | join(" ")')"
+              LABELS=$(printf '%s' "$MERGED" | jq -r '[.[].labels[].name] | unique | .[]')
+              if [ -z "$LABELS" ]; then
+                echo "::notice::No pull request labels found since $BASE, building every project."
+                LABELS="$ALL"
+              fi
             fi
           fi
           printf 'Labels:\n%s\n' "$LABELS"
@@ -74,7 +125,19 @@ jobs:
           APP=false
           SERVER=false
           has 'project:app' && APP=true
+          # The image carries the Ktor server and the SvelteKit app, so either one rebuilds it.
           { has 'project:server' || has 'project:webapp'; } && SERVER=true
+
+          # A merge that builds nothing is the expected outcome for documentation, CI and
+          # tooling -- but it is also what a mislabelled release looks like, so the two are
+          # told apart here rather than left to whoever reads the empty run afterwards.
+          if [ "$APP" = false ] && [ "$SERVER" = false ]; then
+            if has 'project:other'; then
+              echo "::notice::Labelled project:other, so there is nothing to build or publish."
+            else
+              echo "::warning::No project:* label decides anything here, so nothing is built. Add project:other if that is intended."
+            fi
+          fi
 
           echo "app=$APP" >> "$GITHUB_OUTPUT"
           echo "server=$SERVER" >> "$GITHUB_OUTPUT"
@@ -96,6 +159,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
+          # Has to match the JDK toolchain of :server, see server/build.gradle.kts.
           java-version: '25'
 
       - name: Setup Gradle
@@ -107,7 +171,8 @@ jobs:
           -Pmaven.pkg.github.com.user=${{ secrets.GH_USERNAME }}
           -Pmaven.pkg.github.com.token=${{ secrets.GH_REGISTRY_TOKEN }}
 
-      - name: Rename artifact
+      # The jar the Dockerfile expects at the context root; the name comes from buildServerJar.
+      - name: Move artifact
         run: mv server/build/libs/server*.jar server-all.jar
 
       - name: Upload artifact
@@ -190,7 +255,7 @@ jobs:
           # A draft run still builds the image to prove it builds, but does not
           # overwrite :latest. On a push to main there is no input, so this is true.
           push: ${{ !inputs.draft }}
-          tags: ghcr.io/maketrails/trails:latest
+          tags: ${{ env.DOCKER_IMAGE }}:latest
 
   build-android:
     runs-on: ubuntu-latest
@@ -222,7 +287,6 @@ jobs:
           path: app/android/build/outputs/apk/release/
           compression-level: 0
           if-no-files-found: error
-
 
   create_release:
     runs-on: ubuntu-latest
@@ -297,7 +361,7 @@ jobs:
         run: |
           for apk in apks/*.apk; do
             base=$(basename "$apk")
-            mv "$apk" "apks/Trails ${{ needs.setup.outputs.build_tag }} ${base}"
+            mv "$apk" "apks/$APP_NAME ${{ needs.setup.outputs.build_tag }} ${base}"
           done
 
       - name: Create GitHub Release
@@ -305,12 +369,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            apks/Trails*
+            apks/${{ env.APP_NAME }}*
             build/changelog/changelog*.json
           body_path: build/changelog/CHANGELOG.md
           draft: ${{ inputs.draft || false }}
           prerelease: false
           make_latest: ${{ !inputs.draft }}
-          name: Trails (${{ needs.setup.outputs.date_formatted }})
+          name: ${{ env.APP_NAME }} (${{ needs.setup.outputs.date_formatted }})
           fail_on_unmatched_files: true
           tag_name: v${{ needs.setup.outputs.build_tag }}
