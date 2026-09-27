@@ -9,7 +9,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import kotlin.system.exitProcess
 
@@ -20,6 +23,10 @@ import kotlin.system.exitProcess
  *  - Feature: title and description, and the entry itself is required
  *  - Bug:     description only, entry optional
  *  - Task:    description optional, entry optional
+ *
+ * In a stack of pull requests, several layers may close the same issue. A
+ * Feature's entry then only has to exist in the topmost of them: layers further
+ * down are told it is expected higher up instead of failing.
  *
  * The pull request number comes from the environment so the workflow never
  * interpolates pull request data into the script itself. Falls back to the
@@ -132,20 +139,42 @@ fun finish(headline: String): Nothing {
 }
 
 // --- which issues does this pull request close? ---------------------------
-// The link is authoritative; the branch name is only a fallback for local runs
-// and for pull requests that never got linked.
-val linkedIssues = pullRequest
-    ?.let { capture("gh", "pr", "view", it, "--json", "closingIssuesReferences", "--jq", ".closingIssuesReferences[].number") }
-    ?.lines()
-    ?.mapNotNull { it.trim().toIntOrNull() }
-    .orEmpty()
+// Resolved the same way in generate_changelog.main.kts and sync-labels.yaml, the three have to agree.
+//
+// GitHub only links closing keywords of pull requests that target the default branch, so every
+// layer of a stack above the bottom one has no closing references. The keywords are therefore also
+// read from the description directly. The branch name is only a fallback for local runs and for
+// pull requests that reference no issue at all.
 
-// e.g. feat/15-add-minimal-movement -> 15, 5-editremove-shares -> 5
-val issues = linkedIssues.ifEmpty {
-    listOfNotNull(
-        branch?.let { Regex("^([a-zA-Z]+/)?(\\d+)-").find(it)?.groupValues?.get(2)?.toIntOrNull() }
+/** "Closes #12", "fixes: #12", "Resolved #12", … */
+val closingKeyword = Regex("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+#(\\d+)\\b")
+
+/** e.g. feat/15-add-minimal-movement -> 15, 5-editremove-shares -> 5 */
+fun issueOfBranch(branch: String?): Int? =
+    branch?.let { Regex("^([a-zA-Z]+/)?(\\d+)-").find(it)?.groupValues?.get(2)?.toIntOrNull() }
+
+val pullRequestFields = "number,headRefName,body,closingIssuesReferences"
+
+data class PullRequest(val number: Int, val branch: String, val issues: List<Int>)
+
+/** Reads a pull request as returned by `gh pr view/list --json [pullRequestFields]`. */
+fun JsonObject.toPullRequest(): PullRequest {
+    val branch = this["headRefName"]?.jsonPrimitive?.content.orEmpty()
+    val linked = this["closingIssuesReferences"]?.jsonArray.orEmpty()
+        .mapNotNull { it.jsonObject["number"]?.jsonPrimitive?.intOrNull }
+    val body = (this["body"] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+    val mentioned = closingKeyword.findAll(body).map { it.groupValues[1].toInt() }.toList()
+    return PullRequest(
+        number = this["number"]!!.jsonPrimitive.intOrNull!!,
+        branch = branch,
+        issues = (linked + mentioned).ifEmpty { listOfNotNull(issueOfBranch(branch)) }.distinct().sorted(),
     )
-}.distinct().sorted()
+}
+
+val issues = pullRequest
+    ?.let { capture("gh", "pr", "view", it, "--json", pullRequestFields) }
+    ?.let { Json.parseToJsonElement(it).jsonObject.toPullRequest().issues }
+    ?: listOfNotNull(issueOfBranch(branch))
 
 if (issues.isEmpty()) {
     warn("No linked issue found for this pull request (branch '$branch'), skipping the changelog check.")
@@ -242,7 +271,68 @@ fun readChangelog(file: File, shape: Shape): Changelog {
     )
 }
 
+/**
+ * The label that decides whether an issue is rendered into the changelog at all.
+ *
+ * generate_changelog.main.kts leaves out every issue without it -- a release ships the app, and
+ * the app is what reads the changelog -- so requiring an entry here would require a file that no
+ * release ever reads. The two scripts have to agree on this, see APP_LABEL over there.
+ */
+val APP_LABEL = "project:app"
+val PROJECT_PREFIX = "project:"
+
+fun projectLabelsOf(kind: String, number: String): List<String> =
+    capture("gh", kind, "view", number, "--json", "labels", "--jq", "[.labels[].name] | join(\",\")")
+        .orEmpty()
+        .split(",")
+        .map { it.trim() }
+        .filter { it.startsWith(PROJECT_PREFIX) }
+
+// Read once and folded into every issue below. sync-labels.yaml copies the labels between the two
+// sides, but it runs on the same events this check does -- so a pull request labelled a moment ago
+// may still be looking at an issue the sync has not reached yet. Taking both is what the sync
+// itself would arrive at.
+val pullRequestLabels = pullRequest?.let { projectLabelsOf("pr", it) }.orEmpty()
+
+/**
+ * The open pull requests stacked on top of [branch], transitively: those based on it, those based
+ * on them, and so on. Found through the base branches alone, so this works for any stack, however
+ * it was built.
+ */
+fun pullRequestsAbove(branch: String, seen: MutableSet<String> = mutableSetOf()): List<PullRequest> {
+    if (!seen.add(branch)) return emptyList()
+    val above = capture("gh", "pr", "list", "--state", "open", "--base", branch, "--json", pullRequestFields)
+        ?.let { Json.parseToJsonElement(it).jsonArray.map { element -> element.jsonObject.toPullRequest() } }
+        .orEmpty()
+    return above + above.flatMap { pullRequestsAbove(it.branch, seen) }
+}
+
+// Only for an actual pull request: a local run on the default branch would take every open pull
+// request for one stacked on top of it.
+val stackedAbove = if (pullRequest != null && branch != null) pullRequestsAbove(branch) else emptyList()
+
+/** The pull request highest up the stack that closes [issue] as well, if any. */
+fun topmostAbove(issue: Int): PullRequest? = stackedAbove.lastOrNull { issue in it.issues }
+
 issues.forEach { issue ->
+    val labels = (projectLabelsOf("issue", "$issue") + pullRequestLabels).distinct().sorted()
+
+    // Asked before the issue type, so an issue that is not an app change costs one call and is
+    // never reported for a type or an entry it does not need. An entry that is there anyway is
+    // still validated below: somebody wrote it on purpose, and a broken file is worth saying.
+    if (APP_LABEL !in labels && File(repoRoot, "docs/changelog/issues/$issue").exists().not()) {
+        if (labels.isEmpty()) {
+            // Nothing says what this change touches. Warn rather than skip: if the label turns
+            // out to be $APP_LABEL after all, a Feature must not have lost its entry meanwhile.
+            warn("Issue #$issue carries no $PROJECT_PREFIX label, so it is checked as an app change. Please add one.")
+            findings.appendLine("- ⚠️ **#$issue** carries no `$PROJECT_PREFIX` label, so it is checked as an app change. Please add one.")
+        } else {
+            println("Issue #$issue is labelled ${labels.joinToString()}, not $APP_LABEL, so it needs no changelog.")
+            findings.appendLine("- ✅ **#$issue** is labelled `${labels.joinToString("`, `")}`, not `$APP_LABEL`, so it needs no changelog.")
+            return@forEach
+        }
+    }
+
     val type = capture("gh", "issue", "view", "$issue", "--json", "issueType", "--jq", ".issueType.name // \"\"")
     val required = type.equals("Feature", ignoreCase = true)
 
@@ -276,6 +366,12 @@ issues.forEach { issue ->
         legacy -> {
             fail("Issue #$issue still uses changelog.json. Please rename it to ${shape.fileName}.")
             findings.appendLine("- ❌ **#$issue** (${type ?: "no type"}): `changelog.json` is no longer read, rename it to `${shape.fileName}`.")
+        }
+
+        !file.exists() && required && topmostAbove(issue) != null -> {
+            val above = topmostAbove(issue)!!.number
+            warn("Issue #$issue is a Feature without a changelog here, it is expected further up the stack in #$above.")
+            findings.appendLine("- ⚠️ **#$issue** (Feature) has no changelog in this layer. It is expected further up the stack, in #$above.")
         }
 
         !file.exists() && required -> {
@@ -314,6 +410,7 @@ finish(
     when {
         failed -> "The changelog is not ready for $checked."
         warned -> "The changelog needs a look for $checked."
-        else -> "Every issue in this pull request has a changelog ($checked)."
+        // Not "every issue has one": an issue that is not an app change is in order without.
+        else -> "The changelog is in order for $checked."
     }
 )

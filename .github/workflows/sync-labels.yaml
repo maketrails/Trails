@@ -57,12 +57,21 @@ jobs:
           PREFIX='project:'
 
           # --- finding the other side ---------------------------------------
-          # The closing reference is authoritative and the branch name is the
-          # fallback, exactly how check_changelog.main.kts resolves it.
+          # The closing references and the closing keywords in the description
+          # decide, the branch name is the fallback -- exactly how
+          # check_changelog.main.kts resolves it. The keywords are read directly
+          # because GitHub does not always link them for a pull request stacked
+          # on another branch.
+
+          # The issue numbers a pull request closes, as a jq expression on its
+          # closingIssuesReferences and body: "Closes #12", "fixes: #12", …
+          CLOSES='[(.closingIssuesReferences[].number),
+                   (.body // "" | scan("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+#(\\d+)\\b") | .[0] | tonumber)]
+                  | unique'
 
           issues_of_pr() {
             local linked
-            linked=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[].number')
+            linked=$(gh pr view "$1" --json closingIssuesReferences,body --jq "$CLOSES | .[]")
             if [ -z "$linked" ]; then
               # e.g. feat/36-use-labels-to-determine-builds -> 36
               linked=$(printf '%s' "$PR_BRANCH" | sed -nE 's|^([a-zA-Z]+/)?([0-9]+)-.*|\2|p')
@@ -71,11 +80,13 @@ jobs:
           }
 
           # The same rule backwards. Every open pull request is read in one call
-          # and kept when it resolves to this issue.
+          # and kept when it resolves to this issue. The issues come last: read
+          # merges consecutive tabs, so an empty field anywhere else would shift
+          # the ones after it.
           prs_of_issue() {
             gh pr list --state open --limit 100 \
-              --json number,headRefName,closingIssuesReferences \
-              --jq '.[] | [(.number|tostring), .headRefName, ([.closingIssuesReferences[].number|tostring] | join(","))] | @tsv' |
+              --json number,headRefName,closingIssuesReferences,body \
+              --jq ".[] | [(.number|tostring), .headRefName, ($CLOSES | map(tostring) | join(\",\"))] | @tsv" |
             while IFS=$(printf '\t') read -r number branch closes; do
               if [ -n "$closes" ]; then
                 if printf '%s\n' "$closes" | tr ',' '\n' | grep -qxF "$1"; then

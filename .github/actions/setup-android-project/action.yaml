@@ -34,17 +34,18 @@ runs:
       uses: android-actions/setup-android@v4
       with:
         cmdline-tools-version: '15859902'
+        # The default also asks for `tools`, which the SDK repository no longer carries, and
+        # sdkmanager fails the step on it. AGP fetches the platforms it needs itself.
+        packages: 'platform-tools'
 
     - name: Restore Keystore and Configure Properties
       shell: bash
       run: |
-        # Restore Keystore
         echo "${{ inputs.keystore_file }}" | base64 -d > "${GITHUB_WORKSPACE}/keystore.jks"
-        
+
         # Make gradlew executable (if not already handled by git)
         chmod +x ./gradlew
-        
-        # Batch write to local.properties
+
         {
           echo "signing.default.file=${GITHUB_WORKSPACE}/keystore.jks"
           echo "signing.default.storepassword=${{ inputs.keystore_password }}"
@@ -52,6 +53,6 @@ runs:
           echo "signing.default.keypassword=${{ inputs.keystore_password }}"
           echo "mapbox.public-token=${{ inputs.mapbox_public_token }}"
         } >> local.properties
-        
+
         echo "mapbox.token=${{ inputs.mapbox_secret_token }}" >> ~/.gradle/gradle.properties
         echo "${{ inputs.play_developer_signing_id }}" >> ${GITHUB_WORKSPACE}/app/android/src/main/assets/adi-registration.properties

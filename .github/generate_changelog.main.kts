@@ -9,7 +9,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
 
@@ -105,10 +108,74 @@ data class Entry(
 val latestRelease = capture("gh", "release", "view", "--json", "tagName", "--jq", ".tagName")
 val range = latestRelease?.let { "$it..HEAD" } ?: "HEAD"
 
-val issues = capture("git", "log", range, "--pretty=format:%s")
+// --- which issues did the release range close? ----------------------------
+// Commit subjects alone are not enough: a merge commit or a squash merge is titled after its pull
+// request, and the layers of a stack are merged together under a single merge commit, so the
+// subjects on main name one pull request at best. Instead, every merged pull request whose merge
+// commit lies in the range counts -- for a stack, all of its layers share that commit -- and each
+// is resolved to its issues exactly like check_changelog.main.kts and sync-labels.yaml do. The
+// three have to agree.
+
+/** "Closes #12", "fixes: #12", "Resolved #12", … */
+val closingKeyword = Regex("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\\s+#(\\d+)\\b")
+
+/** e.g. feat/15-add-minimal-movement -> 15, 5-editremove-shares -> 5 */
+fun issueOfBranch(branch: String): Int? =
+    Regex("^([a-zA-Z]+/)?(\\d+)-").find(branch)?.groupValues?.get(2)?.toIntOrNull()
+
+data class PullRequest(val number: Int, val issues: List<Int>)
+
+fun JsonObject.toPullRequest(): PullRequest {
+    val branch = this["headRefName"]?.jsonPrimitive?.content.orEmpty()
+    val linked = this["closingIssuesReferences"]?.jsonArray.orEmpty()
+        .mapNotNull { it.jsonObject["number"]?.jsonPrimitive?.intOrNull }
+    // GitHub does not always link the keywords of a pull request that targets another branch.
+    val body = (this["body"] as? JsonPrimitive)?.takeIf { it.isString }?.content.orEmpty()
+    val mentioned = closingKeyword.findAll(body).map { it.groupValues[1].toInt() }.toList()
+    return PullRequest(
+        number = this["number"]!!.jsonPrimitive.intOrNull!!,
+        issues = (linked + mentioned).ifEmpty { listOfNotNull(issueOfBranch(branch)) },
+    )
+}
+
+// First parent only: these are the commits main actually moved through -- merge commits, squash
+// merges, rebased commits and direct pushes.
+val commits = capture("git", "log", "--first-parent", range, "--pretty=format:%H %s")
     .orEmpty()
     .lines()
-    .mapNotNull { subject -> Regex("#(\\d+)").find(subject)?.groupValues?.get(1)?.toIntOrNull() }
+    .filter { it.isNotBlank() }
+    .map { it.substringBefore(' ') to it.substringAfter(' ', "") }
+val shas = commits.map { it.first }.toSet()
+
+// The most recent merged pull requests are plenty for one release range. A rebase merge records
+// its last rebased commit as merge commit, which is on the first parent line as well.
+val pullRequests = capture(
+    "gh", "pr", "list", "--state", "merged", "--limit", "300",
+    "--json", "number,headRefName,body,closingIssuesReferences,mergeCommit",
+    "--jq", "[.[] | select(.mergeCommit.oid != null)]",
+)
+    ?.let { Json.parseToJsonElement(it).jsonArray }
+    .orEmpty()
+    .map { it.jsonObject }
+    .filter { it["mergeCommit"]?.jsonObject?.get("oid")?.jsonPrimitive?.content in shas }
+    .map { it.toPullRequest() }
+
+val pullRequestNumbers = pullRequests.map { it.number }.toSet()
+
+/** Issue and pull request numbers share one sequence, the issues endpoint answers for both. */
+fun isPullRequest(number: Int): Boolean =
+    number in pullRequestNumbers ||
+        capture("gh", "api", "repos/{owner}/{repo}/issues/$number", "--jq", "has(\"pull_request\")") == "true"
+
+// A direct push has no pull request, so the references in the subjects still count, e.g.
+// "feat(app #12): …". The "#94" of "Merge pull request #94" or the "(#94)" behind a squash merge
+// is a pull request, not an issue.
+val mentionedInSubjects = commits
+    .flatMap { (_, subject) -> Regex("#(\\d+)").findAll(subject).map { it.groupValues[1].toInt() }.toList() }
+    .distinct()
+    .filterNot(::isPullRequest)
+
+val issues = (pullRequests.flatMap { it.issues } + mentionedInSubjects)
     .distinct()
     .sorted()
 
