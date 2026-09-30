@@ -236,9 +236,7 @@
     },
     "legend": {
       "label": "What the colours on the line mean",
-      "on_show": "On show",
-      "before": "Earlier",
-      "after": "Later",
+      "track": "Track",
       "marked": "Marked"
     }
   }

@@ -25,11 +25,13 @@
     import {
         bandFlags,
         isHighlighted,
-        trailBandColors,
+        movementFlags,
         trailData,
+        trailLineColors,
         type TrailBand,
         type TrailFocus
     } from "./trail_features";
+    import {MOVEMENT_COLORS, type MovementType} from "$lib/app/movements";
     import type { HistoryPoint } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
@@ -97,31 +99,20 @@
     const TRAIL_POINT_LAYER = "location-history-points-hover";
     const TRAIL_PUCK_SOURCE = "location-history-puck";
     const TRAIL_PUCK_LAYER = "location-history-puck-dot";
-    const TRAIL_BAND_COLORS = $derived(trailBandColors(darkMode.current));
+    /**
+     * How the line answers the timeline: only what the window shows is drawn, in the
+     * track's colour or the colour of the movement it belongs to. A marked range is
+     * outlined in amber, and the rest of the window drawn thinner next to it — see
+     * {@link TrailBand}.
+     */
+    const TRAIL_LINE_COLORS = $derived(trailLineColors(darkMode.current));
 
     const trailColors = $derived(
         darkMode.current
-            ? { primary: "#e2e8f0", casing: "#020617", outline: "rgba(226,232,240,0.5)" }
-            : { primary: "#0f172a", casing: "#ffffff", outline: "rgba(15,23,42,0.5)" }
+            ? { primary: "#e2e8f0", casing: "#020617" }
+            : { primary: "#0f172a", casing: "#ffffff" }
     );
 
-    /**
-     * Stretches the optimizer has not reached yet are drawn violet: they are raw
-     * measurements, still carrying the jitter and the standstill clouds that the
-     * optimized part has had removed. Own hex values for the same reason as
-     * {@link trailColors} — mapbox-gl cannot read the theme's oklch() tokens.
-     */
-    const trailRawColor = $derived(darkMode.current ? "#a78bfa" : "#7c3aed");
-
-    /**
-     * How the line answers the timeline: what the window shows is white, what lies
-     * before it recedes into the map as dark grey, what lies after it stays light but
-     * quiet, and a marked range is the one stretch that carries colour.
-     *
-     * The highlight is a colour of its own rather than the theme's `--primary`: that
-     * token is near-black in light mode and near-white in dark, and neither would be
-     * seen on a map. It is the same amber the timeline marks a range in.
-     */
     // Counts style loads: the initial one and each dark-mode swap. A style change
     // drops custom sources and layers, so the trail effect depends on this to
     // know when to (re)add them. A counter rather than a boolean, so a *second*
@@ -153,40 +144,43 @@
         try {
             currentMap.addSource(TRAIL_SOURCE, { type: "geojson", data: trailData([], [], [], []) });
 
-            // The band decides the colour; only inside the window does the track's own
-            // state still show through, violet where it is raw. One expression, so a
-            // stretch cannot end up in two of them.
+            // Violet where the track is still raw, the movement's colour where it belongs
+            // to one, the track's own colour otherwise. One expression, so a stretch
+            // cannot end up in two of them. `movement` is null between movements, and
+            // `match` only takes strings, hence the coalesce.
             const lineColor: mapboxgl.ExpressionSpecification = [
-                "match",
-                ["get", "band"],
-                "before", TRAIL_BAND_COLORS.before,
-                "after", TRAIL_BAND_COLORS.after,
-                "selected", TRAIL_BAND_COLORS.selected,
-                ["case", ["get", "raw"], trailRawColor, TRAIL_BAND_COLORS.window]
+                "case",
+                ["get", "raw"], TRAIL_LINE_COLORS.raw,
+                [
+                    "match",
+                    ["coalesce", ["get", "movement"], ""],
+                    ...(Object.entries(MOVEMENT_COLORS) as [MovementType, string][]).flat(),
+                    TRAIL_LINE_COLORS.track
+                ]
             ];
 
+            // Next to a marked range the rest of the window steps back by getting thinner.
+            const lineWidth: mapboxgl.ExpressionSpecification = ["match", ["get", "band"], "unmarked", 2, 3.5];
+
             /*
-             * What is drawn under the line. White on a light basemap is barely there,
-             * so the outline is what gives it an edge to be read against — at full
-             * strength for the stretch on show, at half for the ones that have stepped
-             * back, which is what keeps them legible without pulling the eye. The
-             * marked range keeps the neutral casing: it carries its own colour and a
-             * second one around it would only compete with it.
+             * What is drawn under the line: an edge in the basemap's colour that holds
+             * the line off the map, and the amber outline of a marked range. Thinner
+             * under the rest of the window, like the line on it.
              */
             const casingColor: mapboxgl.ExpressionSpecification = [
                 "match",
                 ["get", "band"],
-                "window", trailColors.primary,
-                "selected", trailColors.casing,
-                trailColors.outline
+                "marked", TRAIL_LINE_COLORS.marked,
+                trailColors.casing
             ];
+            const casingWidth: mapboxgl.ExpressionSpecification = ["match", ["get", "band"], "unmarked", 4.5, "marked", 8, 7];
+            const casingOpacity: mapboxgl.ExpressionSpecification = ["match", ["get", "band"], "marked", 1, 0.7];
 
-            // Which stretches are on show, and which have stepped back. A trail crosses
-            // itself, so the two are drawn in two passes: the dimmed ones first, the
-            // highlighted ones last and therefore on top, where they cannot be painted
-            // over by a stretch that was meant to recede.
-            const FOCUS_BANDS = ["window", "selected"];
-            const DIMMED_BANDS = ["before", "after"];
+            // What lies outside the window is not drawn at all. A trail crosses itself,
+            // so the rest is drawn in two passes: the thinner stretches next to a marked
+            // range first, everything else last and therefore on top.
+            const FOCUS_BANDS = ["window", "marked"];
+            const DIMMED_BANDS = ["unmarked"];
             const inBands = (bands: string[]): mapboxgl.ExpressionSpecification =>
                 ["match", ["get", "band"], bands, true, false];
             const solid = (bands: string[]): mapboxgl.ExpressionSpecification =>
@@ -207,7 +201,7 @@
                 layout: { "line-cap": "round", "line-join": "round" },
                 paint: {
                     "line-color": lineColor,
-                    "line-width": 3.5,
+                    "line-width": lineWidth,
                     "line-opacity": gap ? 0.45 : 0.9,
                     ...(gap ? { "line-dasharray": [0, 2] as [number, number] } : {})
                 }
@@ -225,12 +219,9 @@
                 type: "line",
                 slot: "middle",
                 source: TRAIL_SOURCE,
-                // Only under what is on show: the casing is there to hold a bright line
-                // off the map, and drawing it under the dimmed stretches would give them
-                // back the weight they were just relieved of.
-                filter: ["!", ["get", "gap"]],
+                filter: ["all", ["!", ["get", "gap"]], inBands([...FOCUS_BANDS, ...DIMMED_BANDS])],
                 layout: { "line-cap": "round", "line-join": "round" },
-                paint: { "line-color": casingColor, "line-width": 7, "line-opacity": 0.7 }
+                paint: { "line-color": casingColor, "line-width": casingWidth, "line-opacity": casingOpacity }
             }, beforeId);
 
             currentMap.addLayer(line(TRAIL_LINE_LAYER, solid(DIMMED_BANDS), false), beforeId);
@@ -284,10 +275,11 @@
         gaps: ArrayLike<number | boolean> = [],
         raws: ArrayLike<number | boolean> = [],
         bands: TrailBand[] = [],
-        breaks: ArrayLike<number | boolean> = []
+        breaks: ArrayLike<number | boolean> = [],
+        movements: (MovementType | null)[] = []
     ) {
         const source = currentMap.getSource(TRAIL_SOURCE);
-        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands, breaks));
+        if (source?.type === "geojson") source.setData(trailData(coordinates, gaps, raws, bands, breaks, movements));
     }
 
     const TRAIL_ANIMATION_MS = 2000;
@@ -452,7 +444,7 @@
         const coordinates = drawn.coordinates;
         const times = drawn.times;
         const cursor = event.point;
-        const focus = {window: mapTrail.window, selection: mapTrail.selection};
+        const focus = {window: mapTrail.window, selection: mapTrail.selection, movements: mapTrail.movements};
 
         // A box is what the query takes. Asking mapbox rather than walking the track
         // also keeps positions on the far side of the globe out of it: they are not
@@ -670,9 +662,10 @@
 
         const {coordinates, times, gaps, raws, breaks} = trackOf(currentMap, points);
         const bands = bandFlags(times, focus);
+        const movements = movementFlags(times, focus.movements);
         if (animateFrom == null || coordinates.length < 2) {
             trailAnimationStart = null;
-            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands, breaks);
+            setTrailCoordinates(currentMap, coordinates, gaps, raws, bands, breaks, movements);
             return;
         }
 
@@ -682,7 +675,7 @@
         // in the segment it replaces), so `gaps` still lines up.
         const drawUpTo = (now: number) => {
             const t = Math.min(1, (now - animateFrom) / TRAIL_ANIMATION_MS);
-            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands, breaks);
+            setTrailCoordinates(currentMap, trailUpTo(coordinates, lengths, easeOutExpo(t)), gaps, raws, bands, breaks, movements);
             return t;
         };
         const step = (now: number) => {
@@ -796,7 +789,7 @@
         const currentMap = map;
         const at = mapTrail.hoveredAt;
         const pointer = pointerHover;
-        const focus = {window: mapTrail.window, selection: mapTrail.selection};
+        const focus = {window: mapTrail.window, selection: mapTrail.selection, movements: mapTrail.movements};
         if (currentMap == null || currentMap.getLayer(TRAIL_PUCK_LAYER) == null) return;
 
         const position = at != null ? positionAtTime(drawn, at) : pointer;
@@ -826,7 +819,7 @@
         // Read here so that moving the timeline re-runs this and recolours the line.
         // The key has not changed then, so it is redrawn where its animation left it
         // rather than growing in again.
-        const focus = { window: mapTrail.window, selection: mapTrail.selection };
+        const focus = { window: mapTrail.window, selection: mapTrail.selection, movements: mapTrail.movements };
 
         // `style.load` (epoch > 0) is the signal that a style is in place, and
         // deliberately not isStyleLoaded() — that one also waits for every tile to

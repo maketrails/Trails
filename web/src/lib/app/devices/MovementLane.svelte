@@ -2,6 +2,7 @@
     import {_, locale} from "svelte-i18n";
     import type {MovementItem} from "$lib/api/history/history_repository";
     import type {TimelineLaneScale} from "$lib/components/timeline";
+    import {MOVEMENT_COLORS, movementTypeOf} from "$lib/app/movements";
     import { CarIcon, PersonSimpleBikeIcon, PersonSimpleWalkIcon } from "phosphor-svelte";
 
     let {
@@ -24,18 +25,6 @@
     /** Below this a block has no room for its label and only shows its icon. */
     const LABEL_MIN_WIDTH = 72;
 
-    /** The types this view knows; anything else the server sends is shown as unknown. */
-    const KNOWN_TYPES = ["walking", "cycling", "travel"];
-
-    const COLORS: Record<string, string> = {
-        walking: "bg-sky-600",
-        cycling: "bg-orange-500",
-        travel: "bg-emerald-600",
-    };
-
-    function typeOf(movement: MovementItem): string {
-        return KNOWN_TYPES.includes(movement.type) ? movement.type : "unknown";
-    }
 
     /** Kilometres from one kilometre on, metres below — whatever reads at a glance. */
     let distanceFormat = $derived({
@@ -64,7 +53,7 @@
                 const left = Math.max(0, (movement.from - start) * perMs);
                 const right = Math.min(width, (movement.to - start) * perMs);
                 // A hairline at least, so a movement too short for its pixel still shows.
-                return {movement, type: typeOf(movement), left, width: Math.max(1, right - left)};
+                return {movement, type: movementTypeOf(movement), left, width: Math.max(1, right - left)};
             });
     });
 </script>
@@ -73,11 +62,12 @@
      label inside only fits where the block is wide enough. -->
 <ul aria-label={$_("history.movements.label")} class="relative h-full w-full">
     {#each blocks as block (block.movement.id)}
-        {@const label = $_(`history.movements.type.${block.type}`)}
+        {@const label = $_(`history.movements.type.${block.type ?? "unknown"}`)}
         <li
                 class="absolute inset-y-0 flex flex-row gap-1 items-center overflow-hidden rounded-lg text-[11px] font-medium text-white
                        {block.width >= ICON_MIN_WIDTH ? 'px-2' : ''}
-                       {COLORS[block.type] ?? 'bg-muted-foreground/60'}"
+                       {block.type == null ? 'bg-muted-foreground/60' : ''}"
+                style:background-color={block.type == null ? undefined : MOVEMENT_COLORS[block.type]}
                 style:left="{block.left}px"
                 style:width="{block.width}px"
                 title="{label} · {distance(block.movement.distance_meters)}

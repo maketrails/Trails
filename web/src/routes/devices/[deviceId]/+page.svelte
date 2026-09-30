@@ -58,7 +58,7 @@
     // track, so switching the source animates the new line in while the history
     // arriving in pieces does not.
     $effect(() => {
-        mapTrail.set(history.points, deviceId ? `device:${deviceId}:${historySource}` : null);
+        mapTrail.set(history.points, deviceId ? `device:${deviceId}:${historySource}` : null, history.movements);
         return () => mapTrail.release();
     });
 

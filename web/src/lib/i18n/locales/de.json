@@ -236,9 +236,7 @@
     },
     "legend": {
       "label": "Was die Farben der Linie bedeuten",
-      "on_show": "Angezeigt",
-      "before": "Davor",
-      "after": "Danach",
+      "track": "Strecke",
       "marked": "Markiert"
     }
   }
