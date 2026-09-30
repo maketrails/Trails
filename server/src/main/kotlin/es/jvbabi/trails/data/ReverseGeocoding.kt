@@ -5,9 +5,20 @@ import java.io.Closeable
 /**
  * Resolves coordinates into a human-readable address. Implementations may back
  * onto different providers (e.g. [NominatimService]).
+ *
+ * This is the raw provider and does no caching of its own — callers go through
+ * [ReverseGeocodingRepository], which persists the results.
  */
 interface ReverseGeocoding : Closeable {
-    suspend fun reverseGeocode(latitude: Double, longitude: Double): GeocodedAddress?
+    /**
+     * Resolves [latitude]/[longitude] into an address in [language] (a primary
+     * language subtag like `en`).
+     *
+     * @return the address, or `null` if the provider has none for this position.
+     * @throws Exception if the provider could not be asked (network error,
+     *   rate limit, …). Unlike `null`, this is not an answer and must not be cached.
+     */
+    suspend fun reverseGeocode(latitude: Double, longitude: Double, language: String): GeocodedAddress?
 
     override fun close() {}
 }

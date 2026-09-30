@@ -9,6 +9,7 @@ import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.NominatimService
 import es.jvbabi.trails.data.ReverseGeocoding
+import es.jvbabi.trails.data.ReverseGeocodingRepository
 import es.jvbabi.trails.data.TrailOptimizerScheduler
 import es.jvbabi.trails.data.UserRepository
 import es.jvbabi.trails.database.DatabaseManager
@@ -29,6 +30,7 @@ private val coreModule = module {
     single { TrackRepository() }
     single { ShareRepository() }
     single<ReverseGeocoding> { NominatimService() }
+    single { ReverseGeocodingRepository() }
     single { TrailOptimizerScheduler() }
 }
 

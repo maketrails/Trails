@@ -3,7 +3,7 @@ package es.jvbabi.trails.routes.webapp
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.TrailsWebappPrincipal
 import es.jvbabi.trails.data.DeviceRepository
-import es.jvbabi.trails.data.ReverseGeocoding
+import es.jvbabi.trails.data.ReverseGeocodingRepository
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.UserRepository
@@ -13,6 +13,7 @@ import es.jvbabi.trails.data.model.DeviceModel
 import es.jvbabi.trails.data.model.SnapshotModel
 import es.jvbabi.trails.data.model.forShare
 import io.ktor.server.auth.*
+import io.ktor.server.request.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
@@ -41,11 +42,14 @@ fun Route.webappSocket() {
     val deviceRepository by inject<DeviceRepository>()
     val trackRepository by inject<TrackRepository>()
     val shareRepository by inject<ShareRepository>()
-    val reverseGeocoding by inject<ReverseGeocoding>()
+    val reverseGeocodingRepository by inject<ReverseGeocodingRepository>()
 
     authenticate(TRAILS_WEBAPP_REALM) {
         webSocket {
             val user = call.principal<TrailsWebappPrincipal>()!!.user
+
+            // Addresses follow the language the browser asked for when opening the socket.
+            val language = ReverseGeocodingRepository.languageFor(call.request.acceptLanguageItems().map { it.value })
 
             // One collector job per subscribed device stream.
             val deviceSubscriptions = mutableMapOf<Uuid, Job>()
@@ -57,7 +61,7 @@ fun Route.webappSocket() {
                 location: WebAppSocketServerMessage.DevicesUpdate.Device.LastLocation?,
             ): WebAppSocketServerMessage.DevicesUpdate.Device.LastLocation? {
                 if (location == null) return null
-                val address = reverseGeocoding.reverseGeocode(location.latitude, location.longitude)
+                val address = reverseGeocodingRepository.addressFor(location.latitude, location.longitude, language)
                     ?: return location
                 return location.copy(
                     address = WebAppSocketServerMessage.DevicesUpdate.Device.LastLocation.Address(

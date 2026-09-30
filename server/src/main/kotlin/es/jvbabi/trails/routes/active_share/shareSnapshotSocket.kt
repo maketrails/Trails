@@ -1,11 +1,12 @@
 package es.jvbabi.trails.routes.active_share
 
 import es.jvbabi.trails.data.DeviceRepository
-import es.jvbabi.trails.data.ReverseGeocoding
+import es.jvbabi.trails.data.ReverseGeocodingRepository
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.event.ActiveShareEvent
 import io.ktor.serialization.*
+import io.ktor.server.request.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
@@ -33,12 +34,15 @@ import kotlin.uuid.Uuid
  * the share's settings.
  */
 fun Route.shareSnapshotSocket() {
-    val reverseGeocoding by inject<ReverseGeocoding>()
+    val reverseGeocodingRepository by inject<ReverseGeocodingRepository>()
     val shareRepository by inject<ShareRepository>()
     val trackRepository by inject<TrackRepository>()
     val deviceRepository by inject<DeviceRepository>()
 
     webSocket {
+        // Addresses follow the language the browser asked for when opening the socket.
+        val language = ReverseGeocodingRepository.languageFor(call.request.acceptLanguageItems().map { it.value })
+
         // One live-update collector job per subscribed active-share id.
         val subscriptions = mutableMapOf<Uuid, Job>()
 
@@ -47,8 +51,9 @@ fun Route.shareSnapshotSocket() {
                 shareRepository = shareRepository,
                 trackRepository = trackRepository,
                 deviceRepository = deviceRepository,
-                reverseGeocoding = reverseGeocoding,
+                reverseGeocodingRepository = reverseGeocodingRepository,
                 activeShareId = activeShareId,
+                language = language,
             )
             if (snapshot != null) {
                 sendSerialized<ShareSocketServerMessage>(

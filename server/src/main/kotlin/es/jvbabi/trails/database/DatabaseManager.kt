@@ -41,6 +41,7 @@ class DatabaseManager: KoinComponent {
             SchemaUtils.create(Devices, Sessions, DeviceDeletions)
             SchemaUtils.create(DataSnapshots, Shares, ActiveShares, TrackRebuilds)
             SchemaUtils.create(UserShares)
+            SchemaUtils.create(ReverseGeocodings)
         }
     }
 
