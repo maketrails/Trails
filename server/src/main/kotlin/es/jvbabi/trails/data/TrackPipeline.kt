@@ -110,6 +110,16 @@ internal object TrackPipeline {
      */
     const val PAUSE_MAX_KMH = 5.0
 
+    /**
+     * A long step slower than this share of the faster step next to it counts as a
+     * pause too. The first fix after a stop often comes when the device is already
+     * under way again: ninety seconds at a station and ten more at 60 km/h average
+     * out at 6 km/h — too fast for [PAUSE_MAX_KMH], but a tenth of the train around it.
+     * A walker whose phone reports seldom keeps the same pace across every step and
+     * is not cut up.
+     */
+    const val PAUSE_SPEED_RATIO = 0.25
+
     /** A leg covering less than this is jitter around a spot, not a way somewhere. */
     const val MOVEMENT_MIN_DISTANCE_METERS = 50.0
 
@@ -707,23 +717,16 @@ internal object TrackPipeline {
      * The stretches of [segment] between two pauses, each with at least two positions.
      *
      * A pause is either the arrival and departure pair [collapseStationary] leaves
-     * behind or a single step that is long and slow, see [PAUSE_MAX_KMH]: a phone
-     * that stands still often stops delivering fixes altogether, so a stop at a
-     * station or a traffic light never gathers the positions a collapse needs.
+     * behind or a single step that is long and slow, see [isPause]: a phone that
+     * stands still often stops delivering fixes altogether, so a stop at a station
+     * or a traffic light never gathers the positions a collapse needs.
      */
     private fun legs(segment: List<Position>): List<List<Position>> {
         val legs = mutableListOf<List<Position>>()
         var current = mutableListOf<Position>()
 
-        for (position in segment) {
-            val previous = current.lastOrNull()
-            val pause = previous != null && (
-                    (previous.latitude == position.latitude && previous.longitude == position.longitude) ||
-                            (seconds(previous, position) >= STATIONARY_MIN_SECONDS &&
-                                    distance(previous, position) / seconds(previous, position) * 3.6 <= PAUSE_MAX_KMH)
-                    )
-
-            if (pause) {
+        for ((index, position) in segment.withIndex()) {
+            if (index > 0 && isPause(segment, index)) {
                 if (current.size >= 2) legs += current
                 current = mutableListOf()
             }
@@ -733,6 +736,30 @@ internal object TrackPipeline {
 
         if (current.size >= 2) legs += current
         return legs
+    }
+
+    /**
+     * Whether the step into `segment[index]` is a pause between two legs: the arrival and
+     * departure pair [collapseStationary] leaves behind, or a long step that is slow —
+     * slow outright, see [PAUSE_MAX_KMH], or slow against the steps around it, see
+     * [PAUSE_SPEED_RATIO].
+     */
+    private fun isPause(segment: List<Position>, index: Int): Boolean {
+        val previous = segment[index - 1]
+        val position = segment[index]
+
+        if (previous.latitude == position.latitude && previous.longitude == position.longitude) return true
+        if (seconds(previous, position) < STATIONARY_MIN_SECONDS) return false
+
+        val speed = speedKmh(previous, position) ?: return false
+        if (speed <= PAUSE_MAX_KMH) return true
+
+        val around = listOfNotNull(
+            segment.getOrNull(index - 2)?.let { speedKmh(it, previous) },
+            segment.getOrNull(index + 1)?.let { speedKmh(position, it) },
+        ).maxOrNull() ?: return false
+
+        return speed <= PAUSE_SPEED_RATIO * around
     }
 
     /**
