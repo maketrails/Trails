@@ -189,6 +189,15 @@
     "point": {
       "location_accuracy": "±{meters} m",
       "bearing": "{degrees}° ±{accuracy}°"
+    },
+    "movements": {
+      "label": "How the device moved",
+      "type": {
+        "walking": "Walking",
+        "cycling": "Cycling",
+        "travel": "Travel",
+        "unknown": "Unknown"
+      }
     }
   },
   "map": {
@@ -227,9 +236,7 @@
     },
     "legend": {
       "label": "What the colours on the line mean",
-      "on_show": "On show",
-      "before": "Earlier",
-      "after": "Later",
+      "track": "Track",
       "marked": "Marked"
     }
   }

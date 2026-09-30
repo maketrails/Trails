@@ -6,6 +6,7 @@ import es.jvbabi.trails.data.DeviceInformationRepository
 import es.jvbabi.trails.data.DeviceRepository
 import es.jvbabi.trails.data.SessionRepository
 import es.jvbabi.trails.data.ShareRepository
+import es.jvbabi.trails.data.MovementRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.NominatimService
 import es.jvbabi.trails.data.ReverseGeocoding
@@ -28,6 +29,7 @@ private val coreModule = module {
     single { SessionRepository() }
     single { DeviceRepository() }
     single { TrackRepository() }
+    single { MovementRepository() }
     single { ShareRepository() }
     single<ReverseGeocoding> { NominatimService() }
     single { ReverseGeocodingRepository() }

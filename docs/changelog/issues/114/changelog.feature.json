@@ -1,0 +1,10 @@
+{
+  "title": "See how a device moved",
+  "description": "The optimized track now filters out jumps, is smoothed, and tells walking, cycling and travelling apart. The timeline shows each movement as a coloured block you can click to mark it, the trail on the map takes the same colours, and the map point shows the trip it belongs to.",
+  "localized": {
+    "de": {
+      "title": "Sehen, wie sich ein Gerät bewegt hat",
+      "description": "Die optimierte Spur filtert jetzt Sprünge heraus, wird geglättet und unterscheidet zwischen Gehen, Radfahren und Unterwegssein. Die Timeline zeigt jede Bewegung als farbigen Block, den du per Klick markieren kannst, die Spur auf der Karte übernimmt dieselben Farben, und der Kartenpunkt zeigt den zugehörigen Trip."
+    }
+  }
+}

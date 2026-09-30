@@ -3,6 +3,7 @@ package es.jvbabi.trails.database
 import database.DataSnapshots
 import es.jvbabi.trails.config.ApplicationConfig
 import es.jvbabi.trails.config.ApplicationConfigFile
+import es.jvbabi.trails.data.model.Movements
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.v1.jdbc.Database
@@ -41,6 +42,7 @@ class DatabaseManager: KoinComponent {
             SchemaUtils.create(Devices, Sessions, DeviceDeletions)
             SchemaUtils.create(DataSnapshots, Shares, ActiveShares, TrackRebuilds)
             SchemaUtils.create(UserShares)
+            SchemaUtils.create(Movements)
             SchemaUtils.create(ReverseGeocodings)
         }
     }

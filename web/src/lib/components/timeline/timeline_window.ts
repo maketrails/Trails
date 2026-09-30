@@ -17,6 +17,16 @@ export interface TimelineRange {
 /** The stretch of time a timeline shows. */
 export type TimelineView = TimelineRange;
 
+/**
+ * What a lane needs to draw along the track: the window in epoch milliseconds and the
+ * track width in pixels. A moment `t` sits at `(t - start) / (end - start) * width`.
+ */
+export interface TimelineLaneScale {
+    start: number;
+    end: number;
+    width: number;
+}
+
 export interface TimelineWindowOptions {
     /** Everything there is data for. The window can neither leave it nor exceed it. */
     bounds: () => {oldest: Date; newest: Date};

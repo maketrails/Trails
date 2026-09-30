@@ -9,7 +9,8 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
-    import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
+    import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
+    import MovementLane from "$lib/app/devices/MovementLane.svelte";
     import {_} from "svelte-i18n";
 
     let shareId = $derived(page.params.shareId);
@@ -88,7 +89,7 @@
 
     // Draw the history as a line on the map while the page is open.
     $effect(() => {
-        mapTrail.set(history.points, shareId ? `share:${shareId}` : null);
+        mapTrail.set(history.points, shareId ? `share:${shareId}` : null, history.movements);
         return () => mapTrail.release();
     });
 
@@ -144,9 +145,14 @@
                     bind:selection={timelineSelection}
                     onhover={(at) => mapTrail.hover(at)}
                     actions={legend}
+                    lanes={history.movements.length > 0 ? movementLane : undefined}
             />
         </div>
     {/if}
+{/snippet}
+
+{#snippet movementLane(scale: TimelineLaneScale)}
+    <MovementLane movements={history.movements} {scale} />
 {/snippet}
 
 {#snippet legend()}

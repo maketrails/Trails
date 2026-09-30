@@ -26,6 +26,21 @@ export interface HistoryPoint {
 }
 
 /**
+ * One stretch of the same way of moving, as the optimizer classified it. `from` and
+ * `to` are epoch **milliseconds**, like `HistoryPoint.timestamp`.
+ *
+ * `type` is `walking`, `cycling` or `travel` today, but deliberately a plain string:
+ * a type added on the server later is shown as unknown instead of breaking the read.
+ */
+export interface MovementItem {
+    id: string;
+    from: number;
+    to: number;
+    type: string;
+    distance_meters: number;
+}
+
+/**
  * Which of a device's two series to read: the optimized track (optimized
  * positions as far as they reach, then the raw tail behind them), or only the
  * measurements as the device reported them.
@@ -46,6 +61,12 @@ export interface LocationHistory {
      */
     cursor: number | null;
     points: HistoryPoint[];
+    /**
+     * How the device moved, only in the last chunk of a read — for a share within its
+     * retention window, a movement reaching into it cut at the window's start.
+     * Missing from a (foreign) server that does not classify movements.
+     */
+    movements?: MovementItem[];
     /**
      * How many points of the same read come after this chunk; `0` once it is complete.
      * Continue with `after` set to the timestamp of the last point. Missing from a

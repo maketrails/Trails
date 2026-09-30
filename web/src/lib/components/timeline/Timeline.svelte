@@ -8,8 +8,8 @@
     import TimelineSelection from "./TimelineSelection.svelte";
     import {type DragModifiers, timelineGestures} from "./timeline_gestures";
     import {axisFor} from "./timeline_scale";
-    import {isMeaningful, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
-    import {createTimelineWindow, type TimelineRange, type TimelineView} from "./timeline_window";
+    import {isMeaningful, pickedRange, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
+    import {createTimelineWindow, type TimelineLaneScale, type TimelineRange, type TimelineView} from "./timeline_window";
 
     let {
         oldestPoint,
@@ -17,6 +17,7 @@
         view = $bindable(null),
         selection = $bindable(null),
         actions,
+        lanes,
         onhover,
     }: {
         /** First moment there is data for. */
@@ -42,6 +43,12 @@
          * marked, say.
          */
         actions?: Snippet<[]>;
+        /**
+         * Drawn across the track, below the calendar labels: bars of whatever happened
+         * over time. Handed the window and the track width, so [TimelineLaneScale]
+         * places things exactly where the axis puts their moments. 32 px high.
+         */
+        lanes?: Snippet<[TimelineLaneScale]>;
         /**
          * The moment the pointer is over, or `null` once it leaves. Not part of the
          * window or the range: it is nothing anyone acts on, only something they look
@@ -89,6 +96,9 @@
     /** Where the running sweep began, or null while none is running. */
     let sweepFrom: number | null = null;
 
+    /** What the running sweep was started on, see TIMELINE_PICK. */
+    let sweepTarget: EventTarget | null = null;
+
     // Gestures speak pixels; turning those into time is this component's job. The
     // handlers are stable and read the scale as they run, so the action never has to
     // be torn down and set up again.
@@ -98,8 +108,9 @@
         // Dragging the track marks a range rather than moving the window; the window
         // is moved with the wheel, a pinch or the scrollbar below.
         drag: {
-            start(anchor: number, modifiers: DragModifiers) {
+            start(anchor: number, modifiers: DragModifiers, target: EventTarget | null) {
                 sweepFrom = edgeAt(anchor, modifiers);
+                sweepTarget = target;
                 selection = rangeOf(sweepFrom, sweepFrom);
             },
             move(anchor: number, modifiers: DragModifiers) {
@@ -108,9 +119,11 @@
             },
             end() {
                 sweepFrom = null;
-                // A press that went nowhere is a click, and a click on the track is how
-                // a marked range is dropped again.
-                if (selection != null && !isMeaningful(selection, msPerPixel)) selection = null;
+                // A press that went nowhere is a click. On something that stands for a
+                // stretch of time it marks that stretch; anywhere else on the track it is
+                // how a marked range is dropped again.
+                if (selection != null && !isMeaningful(selection, msPerPixel)) selection = pickedRange(sweepTarget);
+                sweepTarget = null;
             },
         },
     };
@@ -262,6 +275,12 @@
             class="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden rounded-2xl bg-card/40 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:cursor-grabbing"
     >
         <TimelineAxis {axis} start={timeline.start} end={timeline.end} {width} />
+
+        {#if lanes != null}
+            <div class="absolute inset-x-0 top-5 h-8">
+                {@render lanes({start: timeline.start, end: timeline.end, width})}
+            </div>
+        {/if}
 
         <!-- Where the pointer is. The same moment the map puts its puck at, so the two
              read as one gesture rather than two things happening at once. -->

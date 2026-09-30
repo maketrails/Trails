@@ -1,4 +1,4 @@
-import type {HistoryPoint} from "$lib/api/history/history_repository";
+import type {HistoryPoint, MovementItem} from "$lib/api/history/history_repository";
 
 /** A stretch of time, as the two moments that bound it. */
 export interface TrailRange {
@@ -12,6 +12,10 @@ export interface TrailRange {
 // ever replaced, never edited in place, so nothing here needs the proxy.
 let points = $state.raw<HistoryPoint[]>([]);
 let key = $state<string | null>(null);
+
+// How the device moved along the trail, oldest first. Like the window it only changes
+// how the line is coloured, never what it contains.
+let movements = $state.raw<MovementItem[]>([]);
 
 // What the trail is being read through: the stretch a timeline shows, and the range
 // marked inside it. Neither changes what the line contains, only how it is coloured.
@@ -48,8 +52,11 @@ export interface MapTrailClaim {
      * added), and the map uses the key to tell "a different track" from "more of the
      * same one" — so the grow-in animation plays once per track instead of restarting
      * on every update.
+     *
+     * [nextMovements] colours the stretches the device walked, cycled or travelled —
+     * left out by a view that has none to show, a share for one.
      */
-    set(next: HistoryPoint[] | null, trailKey: string | null): void;
+    set(next: HistoryPoint[] | null, trailKey: string | null, nextMovements?: MovementItem[]): void;
     /**
      * Publishes what the trail is being read through: [window] is the stretch on
      * show, [selection] the range marked inside it. Pass `null` for either to say
@@ -77,10 +84,11 @@ export function claimMapTrail(): MapTrailClaim {
     owner = claim;
 
     return {
-        set(next: HistoryPoint[] | null, trailKey: string | null) {
+        set(next: HistoryPoint[] | null, trailKey: string | null, nextMovements: MovementItem[] = []) {
             if (owner !== claim) return;
             points = next ?? [];
             key = trailKey;
+            movements = nextMovements;
         },
         focus(nextWindow, nextSelection) {
             if (owner !== claim) return;
@@ -96,6 +104,7 @@ export function claimMapTrail(): MapTrailClaim {
             hoveredAt = null;
             points = [];
             key = null;
+            movements = [];
             window = null;
             selection = null;
         },
@@ -110,6 +119,10 @@ export const mapTrail = {
     /** The moment being pointed at on the timeline, or null. */
     get hoveredAt() {
         return hoveredAt;
+    },
+    /** How the device moved along [points], oldest first. */
+    get movements() {
+        return movements;
     },
     /** Which track [points] belong to; `null` when there is no trail. */
     get key() {

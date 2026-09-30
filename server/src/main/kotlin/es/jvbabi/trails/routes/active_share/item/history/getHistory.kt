@@ -1,8 +1,10 @@
 package es.jvbabi.trails.routes.active_share.item.history
 
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
+import es.jvbabi.trails.data.MovementRepository
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
+import es.jvbabi.trails.data.model.toApi
 import es.jvbabi.trails.data.model.toHistoryPoint
 import es.jvbabi.trails.routes.EntityNotFoundException
 import io.ktor.server.application.*
@@ -43,10 +45,15 @@ import kotlin.uuid.Uuid
  *
  * The battery state is withheld unless the share opted in, mirroring the snapshot
  * endpoints.
+ *
+ * The movements come with the last chunk, like on the device history endpoint, and are
+ * held to the same window: a movement that reaches into it from before starts at the
+ * window's start, and its distance only counts what lies inside.
  */
 fun Route.getActiveShareHistory() {
     val shareRepository by inject<ShareRepository>()
     val trackRepository by inject<TrackRepository>()
+    val movementRepository by inject<MovementRepository>()
 
     get {
         val activeShareId = call.parameters["activeShareId"]?.let(Uuid::parseOrNull)
@@ -90,6 +97,13 @@ fun Route.getActiveShareHistory() {
                 ) to null
             }
 
+            // Only with the last chunk of a read, see the device history endpoint.
+            val movements = if (remaining == null || remaining == 0L) {
+                movementRepository
+                    .storedSince(shared.device.id, storedSince = requestedSince, notOlderThan = window)
+                    .map { it.toApi() }
+            } else emptyList()
+
             LocationHistoryResponse(
                 historySeconds = share.historySeconds,
                 // Null when nothing came back: there is no new cursor to report, and the
@@ -97,6 +111,7 @@ fun Route.getActiveShareHistory() {
                 cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
                 points = track.map { it.toHistoryPoint(includeBattery = share.shareBatteryState) },
                 remaining = remaining,
+                movements = movements,
             )
         }
 

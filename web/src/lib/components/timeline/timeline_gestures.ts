@@ -21,7 +21,8 @@ export interface DragModifiers {
  * speaks in.
  */
 export interface TimelineDrag {
-    start(anchor: number, modifiers: DragModifiers): void;
+    /** [target] is what the press landed on, for a drag that starts on something. */
+    start(anchor: number, modifiers: DragModifiers, target: EventTarget | null): void;
     move(anchor: number, modifiers: DragModifiers): void;
     end(): void;
 }
@@ -129,7 +130,7 @@ export function timelineGestures(node: HTMLElement, gestures: TimelineGestures) 
 
         if (handlers.drag == null) return;
         dragging = true;
-        handlers.drag.start(anchorOf(event.clientX), modifiersOf(event));
+        handlers.drag.start(anchorOf(event.clientX), modifiersOf(event), event.target);
     }
 
     function onPointerMove(event: PointerEvent) {

@@ -3,8 +3,13 @@ package es.jvbabi.trails.data
 import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
+import es.jvbabi.trails.data.model.Movement
+import es.jvbabi.trails.data.model.Movements
 import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.database.Device
 import es.jvbabi.trails.database.TrackRebuild
+import es.jvbabi.trails.data.TrackPipeline.Position
+import io.ktor.util.logging.KtorSimpleLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -16,11 +21,11 @@ import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
-import kotlin.math.*
 import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
@@ -39,24 +44,8 @@ import kotlin.uuid.Uuid
  * being offline — reaches further back: the run then starts [REBUILD_OVERLAP]
  * before the oldest position stored since the previous run.
  *
- * Four stages, in this order:
- * 1. **Trust filter** — only positions below [MAX_ACCURACY_METERS] are used.
- *    Anything worse cannot be told apart from noise — unless the device moves
- *    fast enough that the error is small against the distance covered, see
- *    [MOVING_ACCURACY_RATIO].
- * 2. **Segmenting** — a recording pause longer than [SEGMENT_GAP_SECONDS]
- *    separates two independent stretches of movement.
- * 3. **Spike removal** — a position whose two neighbours are much closer to
- *    each other than to it is GPS noise: real movement continues in some
- *    direction, noise leaves and comes back.
- * 4. **Stationary collapse** — a cloud of positions that stays inside
- *    [STATIONARY_RADIUS_METERS] for at least [STATIONARY_MIN_SECONDS] becomes
- *    one accuracy weighted center, written twice so the pause keeps its
- *    duration instead of the device wandering around while it sits still.
- *
- * The thresholds were tuned against a 79 day, 156k position export in the
- * `optimizer/` Python playground, where 40 % of the positions failed the trust
- * filter, 0.8 % were spikes and 29 % belonged to a pause.
+ * The algorithm itself lives in [TrackPipeline]; this class feeds it batch by
+ * batch and writes the result back.
  */
 class TrailOptimizer(
     private val deviceId: Uuid,
@@ -106,36 +95,8 @@ class TrailOptimizer(
          */
         val BATCH_PAUSE: Duration = 50.milliseconds
 
-        const val MAX_ACCURACY_METERS = 20.0
-
-        /**
-         * A worse fix is still trusted while its accuracy stays below this share
-         * of the distance between its two neighbours. On a highway those are a few
-         * hundred metres apart, so ±45 m is plain to see; standing still, they are
-         * not, and the fix stays out.
-         */
-        const val MOVING_ACCURACY_RATIO = 0.25
-
-        /** Upper bound for [MOVING_ACCURACY_RATIO], however fast the device moves. */
-        const val MAX_MOVING_ACCURACY_METERS = 75.0
-        const val SEGMENT_GAP_SECONDS = 300.0
-
-        /** Generous on purpose: the same pipeline has to survive planes. */
-        const val MAX_SPEED_METERS_PER_SECOND = 100.0
-
-        const val SPIKE_RETURN_RATIO = 0.35
-        const val SPIKE_MIN_EXCURSION_METERS = 25.0
-        const val SPIKE_PASSES = 4
-
-        /**
-         * Same order of magnitude as the accuracy we trust: inside it, noise
-         * and movement cannot be told apart.
-         */
-        const val STATIONARY_RADIUS_METERS = 20.0
-        const val STATIONARY_MIN_SECONDS = 60.0
-        const val STATIONARY_MIN_POINTS = 3
-
-        private const val EARTH_RADIUS_METERS = 6_371_000.0
+        /** [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] as a duration, for reaching back in time. */
+        private val TRIP_MAX_PAUSE: Duration = TrackPipeline.TRIP_MAX_PAUSE_SECONDS.seconds
 
         private val MAX_CREATED_AT = Max(
             DataSnapshots.createdAt,
@@ -146,6 +107,11 @@ class TrailOptimizer(
             DataSnapshots.createdAt,
             columnType = KotlinInstantColumnType()
         ).alias("min_created_at")
+
+        private val MIN_STARTS_AT = Min(
+            Movements.startsAt,
+            columnType = KotlinInstantColumnType()
+        ).alias("min_starts_at")
 
         private val MAX_INSERTED_AT = Max(
             DataSnapshots.insertedAt,
@@ -169,7 +135,7 @@ class TrailOptimizer(
      * drops roughly two thirds of what it reads.
      *
      * Both distances skip steps across a recording pause longer than
-     * [SEGMENT_GAP_SECONDS]; without that, a gap of days between two positions
+     * [TrackPipeline.SEGMENT_GAP_SECONDS]; without that, a gap of days between two positions
      * would count as a straight line of hundreds of kilometres.
      */
     data class OptimizationState(
@@ -203,21 +169,9 @@ class TrailOptimizer(
         else ((previouslyProcessed + processed).toDouble() / settledPoints).coerceIn(0.0, 1.0)
     }
 
-    /**
-     * One position on its way through the pipeline. Carries the columns that
-     * are not part of the optimization so a derived position can keep the
-     * bearing and battery state of the measurement it came from.
-     */
-    private data class Position(
-        val timestamp: Instant,
-        val latitude: Double,
-        val longitude: Double,
-        val accuracy: Double,
-        val bearing: Double,
-        val bearingAccuracy: Double?,
-        val batteryLevel: Float?,
-        val batteryCharging: Boolean?
-    )
+
+    private val logger = KtorSimpleLogger("TrailOptimizer")
+
 
     /**
      * Rebuilds the derived series for everything that has settled.
@@ -245,6 +199,7 @@ class TrailOptimizer(
     suspend fun reoptimize() = runLock.withLock {
         db.transaction {
             DataSnapshots.deleteWhere { derived }
+            Movements.deleteWhere { Movements.device eq deviceId }
 
             // Recorded with the delete, so no client can read the emptied track
             // without also being able to see that it was reset.
@@ -300,6 +255,7 @@ class TrailOptimizer(
                     val oldestLate = oldestStoredSince(storedSinceLastRun(), recordedBefore = overlap)
                     oldestLate?.minus(REBUILD_OVERLAP)?.coerceAtMost(overlap) ?: overlap
                 }
+                ?.let(::tripStart)
 
             Window(
                 lowerBound = lowerBound,
@@ -331,6 +287,13 @@ class TrailOptimizer(
                 if (lowerBound == null) derived
                 else derived and (DataSnapshots.createdAt greaterEq lowerBound)
             }
+
+            Movements.deleteWhere {
+                val lowerBound = window.lowerBound
+
+                if (lowerBound == null) Movements.device eq deviceId
+                else (Movements.device eq deviceId) and (Movements.startsAt greaterEq lowerBound)
+            }
         }
 
         publishProgress(OptimizationProgress.Running(window.progressAt(0)))
@@ -344,6 +307,10 @@ class TrailOptimizer(
         var cursor: Instant? = null
         var processed = 0L
 
+        // The trip a batch ends in may go on in the next one, see MovementStream.
+        val movements = TrackPipeline.MovementStream()
+        var lastUpdate: TrackPipeline.MovementUpdate? = null
+
         while (true) {
             val batch = db.transaction {
                 readRawBatch(window.lowerBound, upperOptimizationBound, cursor)
@@ -351,10 +318,23 @@ class TrailOptimizer(
 
             if (batch.isEmpty()) break
 
-            val optimized = optimize(batch)
+            val segments = TrackPipeline.process(batch)
+            val update = movements.add(segments.flatMap { it.legs })
+
+            // A trip that may still go on is logged once it is complete.
+            logMovements(update.runs.filter { run -> update.openFrom == null || run.first().start < update.openFrom })
+            lastUpdate = update
+
+            val optimized = segments.flatMap { it.positions }
 
             if (optimized.isNotEmpty()) {
-                db.transaction { write(optimized) }
+                db.transaction {
+                    // One instant for both, so the cursor that covers the positions
+                    // covers the movements written with them.
+                    val insertedAt = Clock.System.now()
+                    write(optimized, insertedAt)
+                    writeMovements(update, insertedAt)
+                }
             }
 
             cursor = batch.last().timestamp
@@ -372,6 +352,11 @@ class TrailOptimizer(
              * SQLITE_BUSY.
              */
             delay(BATCH_PAUSE)
+        }
+
+        // The trip the last batch ended in has nothing left to wait for.
+        lastUpdate?.let { update ->
+            logMovements(update.runs.filter { run -> update.openFrom != null && run.first().start >= update.openFrom })
         }
 
         // Only a run that got through moves the mark: a failed one leaves the late
@@ -457,7 +442,7 @@ class TrailOptimizer(
      * Counts the selected positions and adds up the distance along them in one
      * pass, oldest first.
      *
-     * Steps across a recording pause longer than [SEGMENT_GAP_SECONDS] are
+     * Steps across a recording pause longer than [TrackPipeline.SEGMENT_GAP_SECONDS] are
      * skipped: the device did travel in between, but not in a straight line we
      * know anything about.
      */
@@ -482,8 +467,8 @@ class TrailOptimizer(
 
                 val gap = previousTimestamp?.let { (timestamp - it).inWholeMilliseconds / 1000.0 }
 
-                if (gap != null && gap <= SEGMENT_GAP_SECONDS) {
-                    total += distance(previousLatitude, previousLongitude, latitude, longitude)
+                if (gap != null && gap <= TrackPipeline.SEGMENT_GAP_SECONDS) {
+                    total += TrackPipeline.distance(previousLatitude, previousLongitude, latitude, longitude)
                 }
 
                 previousTimestamp = timestamp
@@ -526,15 +511,13 @@ class TrailOptimizer(
             )
         }
 
-    private fun write(positions: List<Position>) {
+    private fun write(positions: List<Position>, insertedAt: Instant) {
         /*
          * One instant for the whole batch: a derived position carries the timestamp of
          * the measurement it came from, so `inserted_at` is the only thing that tells a
          * client this generation of the track is new. Sharing it across the batch keeps
          * a batch indivisible for a cursor — nobody can read half of one.
          */
-        val insertedAt = Clock.System.now()
-
         DataSnapshots.batchInsert(positions) { position ->
             this[DataSnapshots.device] = deviceId
             this[DataSnapshots.createdAt] = position.timestamp
@@ -550,214 +533,71 @@ class TrailOptimizer(
         }
     }
 
-    private fun optimize(positions: List<Position>): List<Position> = positions
-        .let(::dropUntrusted)
-        .let(::splitSegments)
-        .flatMap { segment -> collapseStationary(dropSpikes(segment)) }
-
     /**
-     * Keeps the positions whose accuracy is good enough — absolutely, or relative
-     * to how far the device moved around them.
+     * Where the trip that is still going on at [bound] started — [bound] itself if none
+     * is. A trip is judged as a whole: whether a stretch of it stands or takes the mode
+     * of its neighbours depends on what comes before and after it (see
+     * [TrackPipeline.MovementStream]). A run starting in the middle of one would only
+     * see its second half, so it reaches back to its start instead, and the trip is
+     * derived again as a whole.
      *
-     * The movement is measured between the two raw neighbours, not from the
-     * position itself, so its own error cannot make it look like movement. A
-     * position at a batch edge or next to a recording pause has no such pair and
-     * only passes the absolute limit.
+     * Walks back from movement to movement for as long as they are not more than
+     * [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] apart, the same rule that makes them one
+     * trip.
      */
-    private fun dropUntrusted(positions: List<Position>): List<Position> =
-        positions.filterIndexed { index, position ->
-            if (position.accuracy < MAX_ACCURACY_METERS) return@filterIndexed true
+    private fun tripStart(bound: Instant): Instant {
+        var start = bound
 
-            val previous = positions.getOrNull(index - 1) ?: return@filterIndexed false
-            val following = positions.getOrNull(index + 1) ?: return@filterIndexed false
-
-            if (seconds(previous, following) > SEGMENT_GAP_SECONDS) return@filterIndexed false
-
-            val limit = min(MAX_MOVING_ACCURACY_METERS, MOVING_ACCURACY_RATIO * distance(previous, following))
-            position.accuracy < limit
-        }
-
-    /** Cuts the stream wherever the device stopped reporting for a while. */
-    private fun splitSegments(positions: List<Position>): List<List<Position>> {
-        if (positions.isEmpty()) return emptyList()
-
-        val segments = mutableListOf(mutableListOf(positions.first()))
-
-        for ((previous, current) in positions.zipWithNext()) {
-            if (seconds(previous, current) > SEGMENT_GAP_SECONDS) {
-                segments += mutableListOf(current)
-            } else {
-                segments.last() += current
-            }
-        }
-
-        return segments
-    }
-
-    /**
-     * Removes positions that jump away and immediately come back.
-     *
-     * Real movement continues in some direction. GPS noise around a spot
-     * leaves the track and returns to where it came from, so the two
-     * neighbours of a spike are close to each other while both are far away
-     * from the position in between.
-     */
-    private fun dropSpikes(segment: List<Position>): List<Position> {
-        var kept = segment
-
-        repeat(SPIKE_PASSES) {
-            if (kept.size < 3) return kept
-
-            val survivors = mutableListOf(kept.first())
-            var removed = 0
-
-            for (index in 1 until kept.lastIndex) {
-                val previous = survivors.last()
-                val current = kept[index]
-                val following = kept[index + 1]
-
-                val toCurrent = distance(previous, current)
-                val fromCurrent = distance(current, following)
-                val skipping = distance(previous, following)
-
-                val excursion = min(toCurrent, fromCurrent)
-                val noise = previous.accuracy + current.accuracy
-
-                val returns = skipping <= SPIKE_RETURN_RATIO * (toCurrent + fromCurrent)
-                val farEnough = excursion >= max(SPIKE_MIN_EXCURSION_METERS, noise)
-
-                if (farEnough && returns) {
-                    removed++
-                    continue
-                }
-
-                // Only credible as a jump if the successor stays reachable —
-                // otherwise the whole stretch moved, and this position is fine.
-                if (unreachable(previous, current) && !unreachable(previous, following)) {
-                    removed++
-                    continue
-                }
-
-                survivors += current
-            }
-
-            survivors += kept.last()
-            kept = survivors
-
-            if (removed == 0) return kept
-        }
-
-        return kept
-    }
-
-    /**
-     * Replaces a jitter cloud around one spot with a single position.
-     *
-     * The cloud is kept as two identical positions, one at the arrival and one
-     * at the departure timestamp, so the pause stays visible in the track.
-     */
-    private fun collapseStationary(segment: List<Position>): List<Position> {
-        val output = mutableListOf<Position>()
-        var index = 0
-
-        while (index < segment.size) {
-            val anchor = segment[index]
-
-            val cluster = mutableListOf(anchor)
-            var center = anchor.latitude to anchor.longitude
-
-            var follower = index + 1
-
-            while (follower < segment.size) {
-                val candidate = segment[follower]
-
-                /*
-                 * Bound the cloud against its anchor as well: without that a
-                 * slow walk drags the center along and the cluster never ends.
-                 */
-                val toAnchor = distance(anchor, candidate)
-                val toCenter = distance(center.first, center.second, candidate.latitude, candidate.longitude)
-
-                if (max(toAnchor, toCenter) > STATIONARY_RADIUS_METERS) break
-
-                cluster += candidate
-                center = weightedCenter(cluster)
-                follower++
-            }
-
-            val duration = seconds(cluster.first(), cluster.last())
-            val isPause = cluster.size >= STATIONARY_MIN_POINTS && duration >= STATIONARY_MIN_SECONDS
-
-            if (isPause) {
-                val accuracy = cluster.minOf { it.accuracy }
-
-                // Arrival and departure keep their own battery state; only the
-                // position becomes the shared center.
-                output += cluster.first().copy(
-                    latitude = center.first,
-                    longitude = center.second,
-                    accuracy = accuracy
+        while (true) {
+            val earlier = Movements
+                .select(MIN_STARTS_AT)
+                .where(
+                    (Movements.device eq deviceId) and
+                            (Movements.startsAt less start) and
+                            (Movements.endsAt greaterEq start - TRIP_MAX_PAUSE)
                 )
-                output += cluster.last().copy(
-                    latitude = center.first,
-                    longitude = center.second,
-                    accuracy = accuracy
-                )
-            } else {
-                output += cluster
+                .singleOrNull()
+                ?.get(MIN_STARTS_AT)
+                ?: return start
+
+            start = earlier
+        }
+    }
+
+    /**
+     * Stores the movements of one batch, see [TrackPipeline.MovementUpdate]: what was
+     * stored provisionally for a trip the batch continues gives way to the trip as it
+     * turned out.
+     */
+    private fun writeMovements(update: TrackPipeline.MovementUpdate, insertedAt: Instant) {
+        update.replaceFrom?.let { from ->
+            Movements.deleteWhere { (Movements.device eq deviceId) and (Movements.startsAt greaterEq from) }
+        }
+
+        val device = Device[deviceId]
+
+        for (run in update.runs) {
+            Movement.new {
+                this.device = device
+                startsAt = run.first().start
+                endsAt = run.last().end
+                distanceMeters = run.sumOf { it.distanceMeters }
+                type = run.first().mode
+                this.insertedAt = insertedAt
             }
-
-            index = follower
         }
-
-        return output
     }
 
-    /** Accuracy weighted mean position — a better fix counts more. */
-    private fun weightedCenter(positions: List<Position>): Pair<Double, Double> {
-        var latitude = 0.0
-        var longitude = 0.0
-        var weightSum = 0.0
+    /** Logs how the device moved, one line per stretch of the same mode. */
+    private fun logMovements(runs: List<List<TrackPipeline.Leg>>) {
+        for (run in runs) {
+            val reassigned = run.count { it.mode != it.measuredMode }
 
-        for (position in positions) {
-            val weight = 1.0 / max(position.accuracy, 1.0).pow(2)
-
-            latitude += position.latitude * weight
-            longitude += position.longitude * weight
-            weightSum += weight
+            logger.info(
+                "Device $deviceId: ${run.first().mode} from ${run.first().start} to ${run.last().end}, " +
+                        "${"%.2f".format(run.sumOf { it.distanceMeters } / 1000)} km in ${run.size} legs" +
+                        if (reassigned > 0) ", $reassigned reassigned" else ""
+            )
         }
-
-        return latitude / weightSum to longitude / weightSum
-    }
-
-    private fun unreachable(first: Position, second: Position): Boolean {
-        val seconds = seconds(first, second)
-
-        if (seconds <= 0) return true
-
-        return distance(first, second) / seconds > MAX_SPEED_METERS_PER_SECOND
-    }
-
-    private fun seconds(first: Position, second: Position): Double =
-        (second.timestamp - first.timestamp).inWholeMilliseconds / 1000.0
-
-    private fun distance(first: Position, second: Position): Double =
-        distance(first.latitude, first.longitude, second.latitude, second.longitude)
-
-    private fun distance(
-        latitude1: Double,
-        longitude1: Double,
-        latitude2: Double,
-        longitude2: Double
-    ): Double {
-        val deltaLatitude = Math.toRadians(latitude2 - latitude1)
-        val deltaLongitude = Math.toRadians(longitude2 - longitude1)
-
-        val a = sin(deltaLatitude / 2).pow(2) +
-                cos(Math.toRadians(latitude1)) *
-                cos(Math.toRadians(latitude2)) *
-                sin(deltaLongitude / 2).pow(2)
-
-        return EARTH_RADIUS_METERS * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 }
