@@ -69,6 +69,27 @@ application {
     mainClass.set("es.jvbabi.trails.MainKt")
 }
 
+/*
+ * Developer tools that run the server's own code against its data, kept out of the
+ * server JAR. Associated with main, so they see its internal declarations.
+ */
+val tools: SourceSet by sourceSets.creating
+
+configurations[tools.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[tools.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
+
+kotlin.target.compilations.named("tools") {
+    associateWith(kotlin.target.compilations.getByName("main"))
+}
+
+tasks.register<JavaExec>("speedChart") {
+    group = "tools"
+    description = "Charts speed and movement mode of a device as HTML, see SpeedChart.kt. Pass options with --args."
+    classpath = tools.runtimeClasspath
+    mainClass.set("es.jvbabi.trails.tools.SpeedChartKt")
+    workingDir = rootDir
+}
+
 tasks.register<Jar>("buildServerJar") {
     group = "build"
     description = "Assembles a fat JAR with all dependencies bundled."
