@@ -9,7 +9,7 @@
     import {type DragModifiers, timelineGestures} from "./timeline_gestures";
     import {axisFor} from "./timeline_scale";
     import {isMeaningful, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
-    import {createTimelineWindow, type TimelineRange, type TimelineView} from "./timeline_window";
+    import {createTimelineWindow, type TimelineLaneScale, type TimelineRange, type TimelineView} from "./timeline_window";
 
     let {
         oldestPoint,
@@ -17,6 +17,7 @@
         view = $bindable(null),
         selection = $bindable(null),
         actions,
+        lanes,
         onhover,
     }: {
         /** First moment there is data for. */
@@ -42,6 +43,12 @@
          * marked, say.
          */
         actions?: Snippet<[]>;
+        /**
+         * Drawn across the track, below the calendar labels: bars of whatever happened
+         * over time. Handed the window and the track width, so [TimelineLaneScale]
+         * places things exactly where the axis puts their moments. 32 px high.
+         */
+        lanes?: Snippet<[TimelineLaneScale]>;
         /**
          * The moment the pointer is over, or `null` once it leaves. Not part of the
          * window or the range: it is nothing anyone acts on, only something they look
@@ -262,6 +269,12 @@
             class="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden rounded-2xl bg-card/40 outline-none focus-visible:ring-2 focus-visible:ring-primary/50 active:cursor-grabbing"
     >
         <TimelineAxis {axis} start={timeline.start} end={timeline.end} {width} />
+
+        {#if lanes != null}
+            <div class="absolute inset-x-0 top-5 h-8">
+                {@render lanes({start: timeline.start, end: timeline.end, width})}
+            </div>
+        {/if}
 
         <!-- Where the pointer is. The same moment the map puts its puck at, so the two
              read as one gesture rather than two things happening at once. -->

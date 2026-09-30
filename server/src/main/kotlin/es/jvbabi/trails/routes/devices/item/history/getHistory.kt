@@ -4,12 +4,13 @@ import es.jvbabi.trails.api.TRAILS_USER_REALM
 import es.jvbabi.trails.api.TRAILS_WEBAPP_REALM
 import es.jvbabi.trails.api.v1.history.LocationHistoryResponse
 import es.jvbabi.trails.data.DeviceRepository
+import es.jvbabi.trails.data.MovementRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.TrackSource
+import es.jvbabi.trails.data.model.toApi
 import es.jvbabi.trails.data.model.toHistoryPoint
 import es.jvbabi.trails.routes.devices.item.deviceActor
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -51,8 +52,12 @@ import kotlin.uuid.Uuid
  * next chunk is asked for with `?after=<epoch millis>`, the timestamp of the last point
  * received, alongside the unchanged `since` and `source`. A lost connection then only
  * costs the chunk in flight. `after` is ignored without `chunked`.
+ *
+ * The movements come with the last chunk, stored since the same `since` — see
+ * [LocationHistoryResponse.movements].
  */
 fun Route.getDeviceHistory() {
+    val movementRepository by inject<MovementRepository>()
     val deviceRepository by inject<DeviceRepository>()
     val trackRepository by inject<TrackRepository>()
 
@@ -91,6 +96,12 @@ fun Route.getDeviceHistory() {
                 trackRepository.track(deviceId, storedSince = since, source = source) to null
             }
 
+            // Only with the last chunk of a read: its `since` is the one the read
+            // started with, so it also covers what was written while it went on.
+            val movements = if (remaining == null || remaining == 0L) {
+                movementRepository.storedSince(deviceId, since).map { it.toApi() }
+            } else emptyList()
+
             call.respond(
                 LocationHistoryResponse(
                     historySeconds = null,
@@ -99,6 +110,7 @@ fun Route.getDeviceHistory() {
                     cursor = track.maxOfOrNull { it.insertedAt.toEpochMilliseconds() },
                     points = track.map { it.toHistoryPoint(includeBattery = true) },
                     remaining = remaining,
+                    movements = movements,
                 )
             )
         }

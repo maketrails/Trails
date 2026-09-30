@@ -189,6 +189,15 @@
     "point": {
       "location_accuracy": "±{meters} m",
       "bearing": "{degrees}° ±{accuracy}°"
+    },
+    "movements": {
+      "label": "How the device moved",
+      "type": {
+        "walking": "Walking",
+        "cycling": "Cycling",
+        "travel": "Travel",
+        "unknown": "Unknown"
+      }
     }
   },
   "map": {

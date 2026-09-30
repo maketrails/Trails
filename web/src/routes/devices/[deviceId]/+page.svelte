@@ -14,7 +14,8 @@
     import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
     import {DownloadSimpleIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
-    import {Timeline, type TimelineRange, type TimelineView} from "$lib/components/timeline";
+    import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
+    import MovementLane from "$lib/app/devices/MovementLane.svelte";
 
     let deviceId = $derived(page.params.deviceId);
     let device = $derived(webappSocket.devices.find((d) => d.id === deviceId) ?? null);
@@ -121,8 +122,13 @@
             {#if isOwnDevice}
                 <HistorySourceTabs bind:source={historySource}/>
                 <!-- A rebuilt track invalidates the cached history, and reloading
-                     is what notices that. -->
-                <DeviceOptimization deviceId={device.id} onRebuilt={() => history.reload()}/>
+                     is what notices that. A finished run only extended it, and
+                     reloading reads just what it stored — the movements included. -->
+                <DeviceOptimization
+                        deviceId={device.id}
+                        onRebuilt={() => history.reload()}
+                        onRunFinished={() => history.reload()}
+                />
             {/if}
         </div>
     {:else}
@@ -148,6 +154,10 @@
     {/if}
 {/snippet}
 
+{#snippet movementLane(scale: TimelineLaneScale)}
+    <MovementLane movements={history.movements} {scale} />
+{/snippet}
+
 <!-- Nothing to lay a timeline over until the history has arrived, and the two
      ends below would read past the end of an empty list. -->
 {#snippet timeline()}
@@ -160,6 +170,7 @@
                     bind:selection={timelineSelection}
                     onhover={(at) => mapTrail.hover(at)}
                     actions={exportAction}
+                    lanes={history.movements.length > 0 ? movementLane : undefined}
             />
         </div>
     {/if}

@@ -34,10 +34,16 @@
     let {
         deviceId,
         onRebuilt,
+        onRunFinished,
     }: {
         deviceId: string;
         /** Called when the track turns out to have been rebuilt since the last read. */
         onRebuilt?: () => void;
+        /**
+         * Called whenever a run of the optimizer on this device finished — the track
+         * and the movements may have grown or changed.
+         */
+        onRunFinished?: () => void;
     } = $props();
 
     let loaded = $state<DeviceOptimization | null>(null);
@@ -126,7 +132,10 @@
     $effect(() => {
         const running = socket?.progress[deviceId]?.type === "running";
 
-        if (wasRunning && !running) load(deviceId);
+        if (wasRunning && !running) {
+            load(deviceId);
+            onRunFinished?.();
+        }
         wasRunning = running;
     });
 

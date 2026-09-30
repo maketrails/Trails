@@ -11,6 +11,7 @@ import org.jetbrains.exposed.v1.core.dao.id.UuidTable
 import org.jetbrains.exposed.v1.dao.UuidEntity
 import org.jetbrains.exposed.v1.dao.UuidEntityClass
 import org.jetbrains.exposed.v1.datetime.timestamp
+import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
 /**
@@ -25,6 +26,7 @@ class Movement(id: EntityID<Uuid>) : UuidEntity(id) {
     var startsAt by Movements.startsAt
     var endsAt by Movements.endsAt
     var distanceMeters by Movements.distanceMeters
+    var insertedAt by Movements.insertedAt
     var type by Movements.type
 
     /** The way of moving. A sealed class rather than an enum, so a type can carry details. */
@@ -93,8 +95,18 @@ object Movements : UuidTable("movements") {
         unwrap = { json.encodeToString<Movement.Type>(it) }
     )
 
+    /**
+     * When this row was last written — inserted, or extended by a later batch. Shares
+     * the instant of the optimized positions written with it, so the history cursor
+     * that covers those covers the movement as well, see `DataSnapshots.insertedAt`.
+     */
+    val insertedAt = timestamp("inserted_at").clientDefault { Clock.System.now() }
+
     init {
-        // Serves "the movements of this device from X on", the only way they are read.
+        // "The movements of this device from X on" — what the optimizer clears.
         index(false, device, startsAt)
+
+        // "Everything this device stored since X" — what an incremental history read asks.
+        index(false, device, insertedAt)
     }
 }

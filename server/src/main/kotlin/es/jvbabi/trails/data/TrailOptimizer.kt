@@ -317,8 +317,11 @@ class TrailOptimizer(
 
             if (optimized.isNotEmpty()) {
                 db.transaction {
-                    write(optimized)
-                    writeMovements(segments)
+                    // One instant for both, so the cursor that covers the positions
+                    // covers the movements written with them.
+                    val insertedAt = Clock.System.now()
+                    write(optimized, insertedAt)
+                    writeMovements(segments, insertedAt)
                 }
             }
 
@@ -491,15 +494,13 @@ class TrailOptimizer(
             )
         }
 
-    private fun write(positions: List<Position>) {
+    private fun write(positions: List<Position>, insertedAt: Instant) {
         /*
          * One instant for the whole batch: a derived position carries the timestamp of
          * the measurement it came from, so `inserted_at` is the only thing that tells a
          * client this generation of the track is new. Sharing it across the batch keeps
          * a batch indivisible for a cursor — nobody can read half of one.
          */
-        val insertedAt = Clock.System.now()
-
         DataSnapshots.batchInsert(positions) { position ->
             this[DataSnapshots.device] = deviceId
             this[DataSnapshots.createdAt] = position.timestamp
@@ -540,7 +541,7 @@ class TrailOptimizer(
      * [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] later — therefore extends it instead of
      * starting a new one.
      */
-    private fun writeMovements(segments: List<TrackPipeline.Segment>) {
+    private fun writeMovements(segments: List<TrackPipeline.Segment>, insertedAt: Instant) {
         val device = Device[deviceId]
 
         var latest = Movement
@@ -564,6 +565,7 @@ class TrailOptimizer(
                 latest.apply {
                     endsAt = end
                     distanceMeters += distance
+                    this.insertedAt = insertedAt
                 }
             } else {
                 Movement.new {
@@ -572,6 +574,7 @@ class TrailOptimizer(
                     endsAt = end
                     distanceMeters = distance
                     this.type = type
+                    this.insertedAt = insertedAt
                 }
             }
         }

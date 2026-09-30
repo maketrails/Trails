@@ -2,6 +2,7 @@ package es.jvbabi.trails.api.v1.history
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlin.uuid.Uuid
 
 /**
  * A device's recorded location history, oldest point first.
@@ -28,13 +29,41 @@ import kotlinx.serialization.Serializable
  * timestamp of the last point; `0` means the read is complete. All chunks of one read
  * together form the answer described above, and each reports the cursor of its own
  * rows — the read continues from the largest of them.
+ *
+ * [movements] holds how the device moved, as far as it was classified, for the
+ * caller's own devices only. They follow the same cursor: a movement is part of an
+ * answer when it was stored at or after `since`. A chunked read carries them in its
+ * last chunk only, whose `since` covers everything written while the read went on.
+ * Like the optimized positions they replace: the optimizer rewrites movements from
+ * the same bound it rewrites the track from, so every held movement that reaches the
+ * first returned optimized position — or the first returned movement — is superseded,
+ * and so is a held movement whose [MovementItem.id] comes back: a movement grows while
+ * the device keeps moving.
  */
 @Serializable
 data class LocationHistoryResponse(
     @SerialName("history_seconds") val historySeconds: Int? = null,
     @SerialName("cursor") val cursor: Long? = null,
     @SerialName("points") val points: List<LocationHistoryPoint> = emptyList(),
+    @SerialName("movements") val movements: List<MovementItem> = emptyList(),
     @SerialName("remaining") val remaining: Long? = null,
+)
+
+/**
+ * One stretch of the same way of moving, [from] and [to] in epoch **milliseconds**
+ * like the positions around it.
+ *
+ * [type] is `walking`, `cycling` or `travel` for now — a plain string, so a type the
+ * caller does not know yet is something it can show as unknown rather than a reason
+ * to fail the whole answer.
+ */
+@Serializable
+data class MovementItem(
+    @SerialName("id") val id: Uuid,
+    @SerialName("from") val from: Long,
+    @SerialName("to") val to: Long,
+    @SerialName("distance_meters") val distanceMeters: Int,
+    @SerialName("type") val type: String,
 )
 
 /**

@@ -1,6 +1,6 @@
 import {browser} from "$app/environment";
 import Dexie, {type IndexableType, type Table} from "dexie";
-import type {HistoryPoint, HistorySource} from "$lib/api/history/history_repository";
+import type {HistoryPoint, HistorySource, MovementItem} from "$lib/api/history/history_repository";
 
 /**
  * IndexedDB cache for a device's location history, via Dexie.
@@ -25,10 +25,20 @@ import type {HistoryPoint, HistorySource} from "$lib/api/history/history_reposit
  * - and because a write is one transaction, a cached series is never half-updated —
  *   the invariant `history.svelte.ts` relies on, since it presents what it holds as the
  *   complete track.
+ *
+ * The movements of a series are cached next to its points, one record per movement keyed
+ * `[device+source+id]`. They arrive with the same cursor and are replaced the same way —
+ * see [applyFreshMovements].
  */
 
 /** A cached position, plus the series it belongs to. */
 interface StoredPoint extends HistoryPoint {
+    device: string;
+    source: HistorySource;
+}
+
+/** A cached movement, plus the series it was read with. */
+interface StoredMovement extends MovementItem {
     device: string;
     source: HistorySource;
 }
@@ -43,6 +53,14 @@ export interface ResumePoint {
     since: number | null;
     after: number;
     cursor: number | null;
+    /** The earliest optimized position received so far, see [applyFreshMovements]. */
+    rewrittenFrom?: number | null;
+}
+
+/** What a completed read brings for the movements, see [applyFreshMovements]. */
+export interface FreshMovements {
+    fresh: MovementItem[];
+    rewrittenFrom: number | null;
 }
 
 /** How far one cached series has been read, and which generation of it. */
@@ -62,6 +80,7 @@ interface StoredCursor {
 class HistoryDatabase extends Dexie {
     points!: Table<StoredPoint, [string, HistorySource, number]>;
     cursors!: Table<StoredCursor, [string, HistorySource]>;
+    movements!: Table<StoredMovement, [string, HistorySource, string]>;
 
     constructor() {
         super("trails");
@@ -72,6 +91,11 @@ class HistoryDatabase extends Dexie {
             rawPoints: null,
             points: "[device+source+timestamp], device",
             cursors: "[device+source], device",
+        });
+        // Movements came later; a cache from before simply holds none yet, and the next
+        // full read — a rebuild, or a cache that has to be dropped — brings them.
+        this.version(3).stores({
+            movements: "[device+source+id], [device+source+from], device",
         });
     }
 }
@@ -105,10 +129,19 @@ function seriesRange(
         .between([deviceId, source, from], [deviceId, source, to], true, true);
 }
 
+/** The cached movements of one series from [from] on, oldest first. */
+function movementRange(opened: HistoryDatabase, deviceId: string, source: HistorySource, from: IndexableType = Dexie.minKey) {
+    return opened.movements
+        .where("[device+source+from]")
+        .between([deviceId, source, from], [deviceId, source, Dexie.maxKey], true, true);
+}
+
 /** A cached series and the cursor to continue it from. */
 export interface CachedHistory {
     /** Oldest point first. Never empty — nothing cached is reported as `null` instead. */
     points: HistoryPoint[];
+    /** Oldest first. Empty when none were cached with the points. */
+    movements: MovementItem[];
     /** `null` when points are cached but no cursor is, which forces a full read. */
     cursor: number | null;
     /** The generation the series was read under; `undefined` when it is not known. */
@@ -129,15 +162,17 @@ export async function readCachedHistory(
     if (opened == null) return null;
 
     try {
-        const [stored, storedCursor] = await Promise.all([
+        const [stored, storedCursor, storedMovements] = await Promise.all([
             seriesRange(opened, deviceId, source).toArray(),
             opened.cursors.get([deviceId, source]),
+            movementRange(opened, deviceId, source).toArray(),
         ]);
         if (stored.length === 0) return null;
 
         return {
             // Device and series are part of the key, not of what a caller asked for.
             points: stored.map(({device: _device, source: _source, ...point}) => point),
+            movements: storedMovements.map(({device: _device, source: _source, ...movement}) => movement),
             cursor: storedCursor?.cursor ?? null,
             rebuiltAt: storedCursor?.rebuiltAt,
             resume: storedCursor?.resume ?? null,
@@ -159,26 +194,33 @@ export interface CacheProgress {
 
 /**
  * Applies an answer (or one chunk of it) to the cached [source] series of [deviceId]:
- * everything [fresh] supersedes is dropped, the fresh positions take its place, and
- * [progress] records where to continue. One transaction, so the series never ends up
- * in a state between the two.
+ * everything [fresh] and [movements] supersede is dropped, the fresh ones take its
+ * place, and [progress] records where to continue. One transaction, so the series never
+ * ends up in a state between the two. [movements] only comes with the last chunk of a
+ * read, `null` otherwise.
  */
 export async function storeCachedHistory(
     deviceId: string,
     source: HistorySource,
     fresh: HistoryPoint[],
     progress: CacheProgress,
+    movements: FreshMovements | null = null,
 ): Promise<void> {
     const {cursor, rebuiltAt, resume} = progress;
+    const supersededMovements = movements == null ? null : movementsSupersededBy(movements);
     // Nothing to apply and nothing to continue from: the cache already says it all.
-    if (fresh.length === 0 && cursor == null && resume == null) return;
+    if (fresh.length === 0 && supersededMovements == null && cursor == null && resume == null) return;
     const superseded = supersededBy(fresh);
 
     const opened = open();
     if (opened == null) return;
 
     try {
-        await opened.transaction("rw", opened.points, opened.cursors, async () => {
+        await opened.transaction("rw", opened.points, opened.cursors, opened.movements, async () => {
+            if (movements != null && supersededMovements != null) {
+                await movementRange(opened, deviceId, source).filter(supersededMovements).delete();
+                await opened.movements.bulkPut(movements.fresh.map((movement) => ({...movement, device: deviceId, source})));
+            }
             if (superseded != null) {
                 const {derivedFrom, derivedUntil} = superseded;
                 await seriesRange(opened, deviceId, source, derivedFrom).filter((point) => !point.is_raw).delete();
@@ -207,8 +249,9 @@ export async function clearCachedSeries(deviceId: string, source: HistorySource)
     if (opened == null) return;
 
     try {
-        await opened.transaction("rw", opened.points, opened.cursors, async () => {
+        await opened.transaction("rw", opened.points, opened.cursors, opened.movements, async () => {
             await seriesRange(opened, deviceId, source).delete();
+            await movementRange(opened, deviceId, source).delete();
             await opened.cursors.delete([deviceId, source]);
         });
     } catch (e) {
@@ -222,8 +265,9 @@ export async function clearCachedHistory(deviceId: string): Promise<void> {
     if (opened == null) return;
 
     try {
-        await opened.transaction("rw", opened.points, opened.cursors, async () => {
+        await opened.transaction("rw", opened.points, opened.cursors, opened.movements, async () => {
             await opened.points.where("device").equals(deviceId).delete();
+            await opened.movements.where("device").equals(deviceId).delete();
             await opened.cursors.where("device").equals(deviceId).delete();
         });
     } catch (e) {
@@ -243,8 +287,9 @@ export async function clearAllCachedHistories(): Promise<void> {
     if (opened == null) return;
 
     try {
-        await opened.transaction("rw", opened.points, opened.cursors, async () => {
+        await opened.transaction("rw", opened.points, opened.cursors, opened.movements, async () => {
             await opened.points.clear();
+            await opened.movements.clear();
             await opened.cursors.clear();
         });
     } catch (e) {
@@ -278,6 +323,7 @@ export async function pruneCachedHistories(knownDeviceIds: Iterable<string>): Pr
         const cached = await Promise.all([
             opened.points.orderBy("device").uniqueKeys(),
             opened.cursors.orderBy("device").uniqueKeys(),
+            opened.movements.orderBy("device").uniqueKeys(),
         ]);
         const known = new Set(knownDeviceIds);
 
@@ -334,6 +380,40 @@ export function applyFreshPoints(cached: HistoryPoint[], fresh: HistoryPoint[]):
     }
     while (index < kept.length) merged.push(kept[index++]);
     return merged;
+}
+
+/**
+ * Which cached movements a completed read replaces, or `null` when it replaces none.
+ *
+ * The optimizer rewrites movements from the lower bound of a run on — deleting them and
+ * writing them anew, possibly fewer, possibly cut differently — and only the new ones come
+ * back. That bound is where the same read's optimized positions start
+ * ([FreshMovements.rewrittenFrom]): the run rewrote those from the same bound, and a
+ * movement the server kept ends before it. Every cached movement reaching into the
+ * rewritten stretch therefore gives way, and so does any older copy of a fresh one — a
+ * movement grows while the device keeps moving, and comes back under its old id.
+ */
+function movementsSupersededBy({fresh, rewrittenFrom}: FreshMovements): ((movement: MovementItem) => boolean) | null {
+    const from = Math.min(rewrittenFrom ?? Infinity, fresh[0]?.from ?? Infinity);
+    if (from === Infinity && fresh.length === 0) return null;
+
+    const freshIds = new Set(fresh.map((movement) => movement.id));
+    return (movement) => movement.to >= from || freshIds.has(movement.id);
+}
+
+/**
+ * The cached movements with a completed read applied on top, oldest first — the
+ * in-memory twin of what [storeCachedHistory] does to the cached movements.
+ */
+export function applyFreshMovements(
+    cached: MovementItem[],
+    fresh: MovementItem[],
+    rewrittenFrom: number | null,
+): MovementItem[] {
+    const superseded = movementsSupersededBy({fresh, rewrittenFrom});
+    if (superseded == null) return cached;
+
+    return [...cached.filter((movement) => !superseded(movement)), ...fresh].sort((a, b) => a.from - b.from);
 }
 
 /**

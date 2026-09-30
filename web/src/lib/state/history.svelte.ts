@@ -3,8 +3,10 @@ import {
     type HistoryPoint,
     type HistorySource,
     type LocationHistory,
+    type MovementItem,
 } from "$lib/api/history/history_repository";
 import {
+    applyFreshMovements,
     applyFreshPoints,
     clearCachedHistory,
     clearCachedSeries,
@@ -25,6 +27,8 @@ export type HistoryTarget =
 export interface HistoryLoad {
     /** Oldest point first. Empty while loading, or when the target has no history. */
     readonly points: HistoryPoint[];
+    /** How the device moved, oldest first. Empty for a share and while loading. */
+    readonly movements: MovementItem[];
     /** The retention window the server applied, in seconds; null = nothing cut off. */
     readonly historySeconds: number | null;
     readonly loading: boolean;
@@ -104,8 +108,10 @@ function cacheTargetFor(target: HistoryTarget): CacheTarget | null {
  * keeps it for as long as the calling component lives. Returning `null` from
  * [target] clears the result without fetching.
  *
- * Deliberately one-shot: unlike the snapshot sockets there is no live update, so
- * opening a detail view reads the history exactly once. Changing the target
+ * No live update of its own: opening a detail view reads the history once, and the
+ * view calls [HistoryLoad.reload] when there is reason to — the optimizer finishing a
+ * run, above all. Thanks to the cursor that only reads what was stored since, the
+ * movements included. Changing the target
  * (navigating between two devices) discards the in-flight response and reloads.
  *
  * A cacheable target (see [cacheTargetFor]) is served from the cache first, so the
@@ -120,6 +126,7 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
     // proxying a history of hundreds of thousands of points would make every later
     // read of it (drawing the trail, above all) an order of magnitude slower.
     let points = $state.raw<HistoryPoint[]>([]);
+    let movements = $state.raw<MovementItem[]>([]);
     let historySeconds = $state<number | null>(null);
     let loading = $state(false);
     let failed = $state(false);
@@ -138,6 +145,7 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
         const key = current == null ? null : JSON.stringify(current);
         if (key !== shownKey) {
             points = [];
+            movements = [];
             historySeconds = null;
         }
         shownKey = key;
@@ -178,14 +186,21 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
 
             // What the cache holds goes on the map before the request even goes out;
             // the response only has to bring what has been stored since.
-            if (base != null) points = base.points;
+            if (base != null) {
+                points = base.points;
+                movements = base.movements;
+            }
 
             // An interrupted read picks up where it stopped instead of starting over.
             const resume = base?.resume ?? null;
             let since = resume != null ? resume.since : base?.cursor ?? null;
             let after = resume?.after ?? null;
             let cursor = resume?.cursor ?? null;
+            // Where the optimizer rewrote the track, as far as this read has seen — see
+            // [applyFreshMovements]. Carried over an interruption like the cursor.
+            let rewrittenFrom = resume?.rewrittenFrom ?? null;
             let accumulated = base?.points ?? [];
+            let accumulatedMovements = base?.movements ?? [];
 
             while (true) {
                 let chunk = await fetchChunk(current, since, after, () => cancelled);
@@ -201,8 +216,11 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                 if (since != null && after == null && chunk?.points.length === 0) {
                     since = null;
                     cursor = null;
+                    rewrittenFrom = null;
                     accumulated = [];
+                    accumulatedMovements = [];
                     points = [];
+                    movements = [];
                     if (cacheTarget != null) await clearCachedHistory(cacheTarget.deviceId);
                     chunk = await fetchChunk(current, null, null, () => cancelled);
                     if (cancelled) return;
@@ -227,6 +245,18 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                     accumulated = applyFreshPoints(accumulated, chunk.points);
                     points = accumulated;
                 }
+                // Chunks are in timestamp order, so a chunk's first optimized position is
+                // its earliest.
+                const firstDerived = chunk.points.find((point) => !point.is_raw);
+                if (firstDerived != null) rewrittenFrom = Math.min(rewrittenFrom ?? Infinity, firstDerived.timestamp);
+
+                // Only the last chunk of a read carries movements, and only once the read
+                // is complete is it known how far back the track was rewritten.
+                const freshMovements = chunk.movements ?? [];
+                if (done) {
+                    accumulatedMovements = applyFreshMovements(accumulatedMovements, freshMovements, rewrittenFrom);
+                    movements = accumulatedMovements;
+                }
                 historySeconds = chunk.history_seconds;
 
                 // Only what the chunk actually carried is written back: the cache already
@@ -235,7 +265,8 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
                 if (cacheTarget != null) {
                     void storeCachedHistory(cacheTarget.deviceId, cacheTarget.source, chunk.points, done
                         ? {cursor, rebuiltAt, resume: null}
-                        : {cursor: since, rebuiltAt, resume: {since, after: last.timestamp, cursor}});
+                        : {cursor: since, rebuiltAt, resume: {since, after: last.timestamp, cursor, rewrittenFrom}},
+                        done ? {fresh: freshMovements, rewrittenFrom} : null);
                 }
 
                 if (done) break;
@@ -253,6 +284,9 @@ export function loadHistory(target: () => HistoryTarget | null): HistoryLoad {
     return {
         get points() {
             return points;
+        },
+        get movements() {
+            return movements;
         },
         get historySeconds() {
             return historySeconds;
