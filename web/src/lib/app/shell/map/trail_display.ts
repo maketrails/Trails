@@ -506,6 +506,17 @@ export function coordinateAt(track: DisplayTrack, position: TrackPosition): [num
     ];
 }
 
+/** The moment [position] stands at, interpolated along its stretch like its coordinate. */
+export function timeAt(track: DisplayTrack, position: TrackPosition): number | null {
+    const from = track.times[position.index];
+    if (from == null) return null;
+
+    const to = track.times[position.index + 1];
+    if (to == null) return from;
+
+    return from + (to - from) * position.fraction;
+}
+
 /** The recorded point a drawn position stands closest to — the whole of it, not just where. */
 export function recordedAt(track: DisplayTrack, points: HistoryPoint[], position: TrackPosition): HistoryPoint | null {
     const index = position.fraction >= 0.5 ? position.index + 1 : position.index;
