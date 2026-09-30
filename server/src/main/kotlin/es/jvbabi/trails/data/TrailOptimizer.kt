@@ -25,6 +25,7 @@ import kotlin.time.Clock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
 
@@ -93,6 +94,9 @@ class TrailOptimizer(
          * a long rebuild.
          */
         val BATCH_PAUSE: Duration = 50.milliseconds
+
+        /** [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] as a duration, for reaching back in time. */
+        private val TRIP_MAX_PAUSE: Duration = TrackPipeline.TRIP_MAX_PAUSE_SECONDS.seconds
 
         private val MAX_CREATED_AT = Max(
             DataSnapshots.createdAt,
@@ -251,7 +255,7 @@ class TrailOptimizer(
                     val oldestLate = oldestStoredSince(storedSinceLastRun(), recordedBefore = overlap)
                     oldestLate?.minus(REBUILD_OVERLAP)?.coerceAtMost(overlap) ?: overlap
                 }
-                ?.let { bound -> movementAcross(bound)?.coerceAtMost(bound) ?: bound }
+                ?.let(::tripStart)
 
             Window(
                 lowerBound = lowerBound,
@@ -303,6 +307,10 @@ class TrailOptimizer(
         var cursor: Instant? = null
         var processed = 0L
 
+        // The trip a batch ends in may go on in the next one, see MovementStream.
+        val movements = TrackPipeline.MovementStream()
+        var lastUpdate: TrackPipeline.MovementUpdate? = null
+
         while (true) {
             val batch = db.transaction {
                 readRawBatch(window.lowerBound, upperOptimizationBound, cursor)
@@ -311,7 +319,11 @@ class TrailOptimizer(
             if (batch.isEmpty()) break
 
             val segments = TrackPipeline.process(batch)
-            segments.forEach(::logMovement)
+            val update = movements.add(segments.flatMap { it.legs })
+
+            // A trip that may still go on is logged once it is complete.
+            logMovements(update.runs.filter { run -> update.openFrom == null || run.first().start < update.openFrom })
+            lastUpdate = update
 
             val optimized = segments.flatMap { it.positions }
 
@@ -321,7 +333,7 @@ class TrailOptimizer(
                     // covers the movements written with them.
                     val insertedAt = Clock.System.now()
                     write(optimized, insertedAt)
-                    writeMovements(segments, insertedAt)
+                    writeMovements(update, insertedAt)
                 }
             }
 
@@ -340,6 +352,11 @@ class TrailOptimizer(
              * SQLITE_BUSY.
              */
             delay(BATCH_PAUSE)
+        }
+
+        // The trip the last batch ended in has nothing left to wait for.
+        lastUpdate?.let { update ->
+            logMovements(update.runs.filter { run -> update.openFrom != null && run.first().start >= update.openFrom })
         }
 
         // Only a run that got through moves the mark: a failed one leaves the late
@@ -517,76 +534,63 @@ class TrailOptimizer(
     }
 
     /**
-     * Where the movement that is still going on at [bound] started, or null if none
-     * is. A run starting at [bound] would otherwise cut it in two and classify only
-     * its second half — so the run reaches back to the start of it instead, and the
-     * movement is derived again as a whole.
-     */
-    private fun movementAcross(bound: Instant): Instant? = Movements
-        .select(MIN_STARTS_AT)
-        .where(
-            (Movements.device eq deviceId) and
-                    (Movements.startsAt less bound) and
-                    (Movements.endsAt greaterEq bound)
-        )
-        .singleOrNull()
-        ?.get(MIN_STARTS_AT)
-
-    /**
-     * Stores how the device moved on [segments], one row per stretch of the same
-     * type, see [TrackPipeline.runs].
+     * Where the trip that is still going on at [bound] started — [bound] itself if none
+     * is. A trip is judged as a whole: whether a stretch of it stands or takes the mode
+     * of its neighbours depends on what comes before and after it (see
+     * [TrackPipeline.MovementStream]). A run starting in the middle of one would only
+     * see its second half, so it reaches back to its start instead, and the trip is
+     * derived again as a whole.
      *
-     * A batch boundary cuts a trip in two, and so does the start of a run. A stretch
-     * that continues the latest stored movement — same type, not more than
-     * [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] later — therefore extends it instead of
-     * starting a new one.
+     * Walks back from movement to movement for as long as they are not more than
+     * [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] apart, the same rule that makes them one
+     * trip.
      */
-    private fun writeMovements(segments: List<TrackPipeline.Segment>, insertedAt: Instant) {
-        val device = Device[deviceId]
+    private fun tripStart(bound: Instant): Instant {
+        var start = bound
 
-        var latest = Movement
-            .find { Movements.device eq deviceId }
-            .orderBy(Movements.endsAt to SortOrder.DESC)
-            .limit(1)
-            .firstOrNull()
+        while (true) {
+            val earlier = Movements
+                .select(MIN_STARTS_AT)
+                .where(
+                    (Movements.device eq deviceId) and
+                            (Movements.startsAt less start) and
+                            (Movements.endsAt greaterEq start - TRIP_MAX_PAUSE)
+                )
+                .singleOrNull()
+                ?.get(MIN_STARTS_AT)
+                ?: return start
 
-        for (run in segments.flatMap { TrackPipeline.runs(it.legs) }) {
-            val type = run.first().mode
-            val start = run.first().start
-            val end = run.last().end
-            val distance = run.sumOf { it.distanceMeters }
-
-            val continues = latest != null &&
-                    latest.type == type &&
-                    start >= latest.endsAt &&
-                    (start - latest.endsAt).inWholeMilliseconds / 1000.0 <= TrackPipeline.TRIP_MAX_PAUSE_SECONDS
-
-            latest = if (continues) {
-                latest.apply {
-                    endsAt = end
-                    distanceMeters += distance
-                    this.insertedAt = insertedAt
-                }
-            } else {
-                Movement.new {
-                    this.device = device
-                    startsAt = start
-                    endsAt = end
-                    distanceMeters = distance
-                    this.type = type
-                    this.insertedAt = insertedAt
-                }
-            }
+            start = earlier
         }
     }
 
     /**
-     * Logs how the device moved on [segment], one line per stretch of the same mode,
-     * see [TrackPipeline.Segment.legs]. A batch boundary cuts a trip as well, so a
-     * long ride can be logged in parts.
+     * Stores the movements of one batch, see [TrackPipeline.MovementUpdate]: what was
+     * stored provisionally for a trip the batch continues gives way to the trip as it
+     * turned out.
      */
-    private fun logMovement(segment: TrackPipeline.Segment) {
-        for (run in TrackPipeline.runs(segment.legs)) {
+    private fun writeMovements(update: TrackPipeline.MovementUpdate, insertedAt: Instant) {
+        update.replaceFrom?.let { from ->
+            Movements.deleteWhere { (Movements.device eq deviceId) and (Movements.startsAt greaterEq from) }
+        }
+
+        val device = Device[deviceId]
+
+        for (run in update.runs) {
+            Movement.new {
+                this.device = device
+                startsAt = run.first().start
+                endsAt = run.last().end
+                distanceMeters = run.sumOf { it.distanceMeters }
+                type = run.first().mode
+                this.insertedAt = insertedAt
+            }
+        }
+    }
+
+    /** Logs how the device moved, one line per stretch of the same mode. */
+    private fun logMovements(runs: List<List<TrackPipeline.Leg>>) {
+        for (run in runs) {
             val reassigned = run.count { it.mode != it.measuredMode }
 
             logger.info(

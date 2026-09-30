@@ -80,8 +80,20 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
             name to raw
         }
 
-        val segments = raw.chunked(TrailOptimizer.BATCH_SIZE).flatMap(TrackPipeline::process)
-        val runs = segments.flatMap { TrackPipeline.runs(it.legs) }
+        // Batch by batch, and the movements stored the way the optimizer stores them:
+        // each update replaces what an earlier one left provisional.
+        val movements = TrackPipeline.MovementStream()
+        val segments = mutableListOf<TrackPipeline.Segment>()
+        val runs = mutableListOf<List<TrackPipeline.Leg>>()
+
+        for (batch in raw.chunked(TrailOptimizer.BATCH_SIZE)) {
+            val processed = TrackPipeline.process(batch)
+            segments += processed
+
+            val update = movements.add(processed.flatMap { it.legs })
+            update.replaceFrom?.let { from -> runs.removeAll { run -> run.first().start >= from } }
+            runs += update.runs
+        }
 
         for (run in runs) {
             val reassigned = run.count { it.mode != it.measuredMode }

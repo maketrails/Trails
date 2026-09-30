@@ -168,10 +168,53 @@ internal object TrackPipeline {
     }
 
     /**
-     * One stretch of the derived track between two recording gaps, together with how
-     * the device moved on it — the legs after [smoothMovement].
+     * One stretch of the derived track between two recording gaps, together with the
+     * legs it is cut into, classified by their own speed only. Whether that holds is
+     * decided in the context of the whole trip, see [MovementStream].
      */
     data class Segment(val positions: List<Position>, val legs: List<Leg>)
+
+    /**
+     * How [MovementStream.add] asks to store the movements: everything stored from
+     * [replaceFrom] on gives way to [runs], one movement per run. Runs starting at or
+     * after [openFrom] belong to a trip the next batch may still continue, so they are
+     * provisional — stored, but replaced by the next call.
+     */
+    data class MovementUpdate(
+        val replaceFrom: Instant?,
+        val runs: List<List<Leg>>,
+        val openFrom: Instant?,
+    )
+
+    /**
+     * Follows the movements of one run across its batches.
+     *
+     * A batch boundary falls anywhere, also into the middle of a trip, and the smoothing
+     * of a trip needs all of it: a short stretch between two stretches of the same mode
+     * is only recognisable as an interruption once the second one is there. So the last
+     * trip of every batch is kept back and smoothed again together with the next one,
+     * and what was stored for it is replaced.
+     *
+     * The first batch has to start where a trip starts — see where the optimizer places
+     * its lower bound.
+     */
+    class MovementStream {
+        /** The legs of the trip the previous batch ended in, as measured. */
+        private var open: List<Leg> = emptyList()
+
+        fun add(legs: List<Leg>): MovementUpdate {
+            val all = open + legs
+            val replaceFrom = open.firstOrNull()?.start
+
+            open = trips(all).lastOrNull().orEmpty()
+
+            return MovementUpdate(
+                replaceFrom = replaceFrom,
+                runs = runs(smoothMovement(all)),
+                openFrom = open.firstOrNull()?.start,
+            )
+        }
+    }
 
     /**
      * One position on its way through the pipeline. Carries the columns that
@@ -191,7 +234,8 @@ internal object TrackPipeline {
 
     /**
      * Runs [positions] — one batch of raw measurements, oldest first — through all
-     * stages and classifies the movement on every resulting segment.
+     * stages and cuts every resulting segment into classified legs. Feed those to a
+     * [MovementStream] to get the movements.
      */
     fun process(positions: List<Position>): List<Segment> = positions
         .let(::dropUntrusted)
@@ -199,7 +243,7 @@ internal object TrackPipeline {
         .let(::splitSegments)
         .map { segment ->
             val track = smooth(collapseStationary(dropSpikes(dropStaleRepeats(segment))))
-            Segment(track, smoothMovement(classifiedLegs(track)))
+            Segment(track, classifiedLegs(track))
         }
 
     /**
