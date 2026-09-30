@@ -9,7 +9,7 @@ export {default as TimelineScrollbar} from "./TimelineScrollbar.svelte";
 export {default as TimelineRangePicker} from "./TimelineRangePicker.svelte";
 export {default as TimelineSelection} from "./TimelineSelection.svelte";
 export {createTimelineWindow, type TimelineLaneScale, type TimelineRange, type TimelineView, type TimelineWindow, type TimelineWindowOptions} from "./timeline_window";
-export {isMeaningful, rangeOf, snapTargets, snapToTargets, SNAP_DISTANCE} from "./timeline_selection";
+export {isMeaningful, pickedRange, pickValue, rangeOf, snapTargets, snapToTargets, SNAP_DISTANCE, TIMELINE_PICK} from "./timeline_selection";
 export {timelineGestures, type DragModifiers, type TimelineDrag, type TimelineGestures} from "./timeline_gestures";
 export {
     axisFor,

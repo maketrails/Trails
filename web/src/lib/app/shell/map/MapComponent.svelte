@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { onMount, mount, unmount } from "svelte";
+    import { onMount, mount, unmount, untrack } from "svelte";
     import { MediaQuery } from "svelte/reactivity";
     import mapboxgl from "mapbox-gl";
     import "mapbox-gl/dist/mapbox-gl.css";
     import { getMapboxToken } from "$lib/api/mapbox/get_mapbox_token";
     import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
-    import { mapCamera, releaseCameraToUser, type TrackingSelection } from "$lib/state/map_camera.svelte";
+    import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import {
         coordinateAt,
@@ -31,8 +31,8 @@
         type TrailBand,
         type TrailFocus
     } from "./trail_features";
-    import {MOVEMENT_COLORS, type MovementType} from "$lib/app/movements";
-    import type { HistoryPoint } from "$lib/api/history/history_repository";
+    import {MOVEMENT_COLORS, movementAt, type MovementType} from "$lib/app/movements";
+    import type { HistoryPoint, MovementItem } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
     import MapBundle from "./MapBundle.svelte";
@@ -410,7 +410,7 @@
     let pointerHover: TrackPosition | null = $state(null);
 
     /** What the popover above the puck reads, mutated rather than replaced (see its props). */
-    const puckState = $state<{point: HistoryPoint | null}>({point: null});
+    const puckState = $state<{point: HistoryPoint | null; movement: MovementItem | null}>({point: null, movement: null});
 
     let puckMarker: mapboxgl.Marker | null = null;
     let puckPopover: Record<string, any> | null = null;
@@ -506,13 +506,18 @@
     }
 
     /** Puts the puck where the timeline points, or else where the cursor does. */
-    function showPuck(currentMap: mapboxgl.Map, position: TrackPosition | null) {
+    function showPuck(currentMap: mapboxgl.Map, position: TrackPosition | null, movements: MovementItem[] = []) {
         const coordinates = position == null ? null : coordinateAt(drawn, position);
 
         const source = currentMap.getSource(TRAIL_PUCK_SOURCE);
         if (source?.type === "geojson") source.setData(trailPuckData(coordinates));
 
         puckState.point = position == null ? null : recordedAt(drawn, sourceFrom ?? [], position);
+        // Measured by the time the puck stands at rather than by the recorded point: the
+        // puck slides along the line between two points, and the stretch it is on is what
+        // belongs to a movement.
+        const time = position == null ? null : timeAt(drawn, position);
+        puckState.movement = time == null ? null : movementAt(movements, time);
 
         if (coordinates == null) return;
 
@@ -794,7 +799,7 @@
 
         const position = at != null ? positionAtTime(drawn, at) : pointer;
         const time = at ?? (position == null ? null : timeAt(drawn, position));
-        showPuck(currentMap, time != null && isHighlighted(time, focus) ? position : null);
+        showPuck(currentMap, time != null && isHighlighted(time, focus) ? position : null, focus.movements);
     });
 
     // The track the grow-in animation last played for, so everything that re-runs the
@@ -1386,6 +1391,48 @@
             followZoom = selection.keepZoom ? currentMap.getZoom() : FOLLOW_ZOOM;
         }
         followTarget(currentMap);
+    });
+
+    /**
+     * How long a marked range has to stay as it is before the camera frames it. It
+     * changes with every move while it is being dragged out, and the camera must not
+     * chase it — only the range the reader settled on is worth flying to.
+     */
+    const SELECTION_SETTLE_MS = 500;
+
+    /** The marked range the camera last framed, so the same one is framed only once. */
+    let framedSelection: string | null = null;
+
+    // Frame a marked range once, however it was marked — dragged out, picked from a
+    // lane or typed into the picker. The camera goes manual for it: following the
+    // device would pull it away again on the next location update, and after that the
+    // map is the reader's to move.
+    $effect(() => {
+        const currentMap = map;
+        const selection = mapTrail.selection;
+        if (currentMap == null || selection == null) {
+            framedSelection = null;
+            return;
+        }
+
+        const start = selection.start.getTime();
+        const end = selection.end.getTime();
+        const key = `${start}-${end}`;
+        if (key === framedSelection) return;
+
+        const timer = setTimeout(() => {
+            framedSelection = key;
+            // Untracked: new positions arriving must not frame the range again.
+            const coordinates: [number, number][] = untrack(() => mapTrail.points)
+                .filter((point) => point.timestamp >= start && point.timestamp <= end)
+                .map((point) => [point.longitude, point.latitude]);
+            if (coordinates.length === 0) return;
+
+            if (mapCamera.scope === "detail") setDetailCameraMode("manual");
+            fitCoordinates(currentMap, coordinates);
+        }, SELECTION_SETTLE_MS);
+
+        return () => clearTimeout(timer);
     });
 
     // Anchor wheel and pinch zoom on the followed target (which sits at the

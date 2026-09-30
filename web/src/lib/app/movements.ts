@@ -24,3 +24,27 @@ export type MovementType = keyof typeof MOVEMENT_COLORS;
 export function movementTypeOf(movement: MovementItem): MovementType | null {
     return movement.type in MOVEMENT_COLORS ? (movement.type as MovementType) : null;
 }
+
+/**
+ * The movement [time] falls into, or `null` between movements. [movements] is oldest
+ * first and free of overlaps, so a binary search finds it.
+ */
+export function movementAt(movements: MovementItem[], time: number): MovementItem | null {
+    let low = 0;
+    let high = movements.length - 1;
+    while (low <= high) {
+        const middle = (low + high) >> 1;
+        const movement = movements[middle];
+        if (time < movement.from) high = middle - 1;
+        else if (time > movement.to) low = middle + 1;
+        else return movement;
+    }
+    return null;
+}
+
+/** [meters] the way it reads at a glance: kilometres from one kilometre on, metres below. */
+export function formatDistance(meters: number, locale: string | null | undefined): string {
+    return meters < 1_000
+        ? new Intl.NumberFormat(locale ?? undefined, {style: "unit", unit: "meter", maximumFractionDigits: 0}).format(meters)
+        : new Intl.NumberFormat(locale ?? undefined, {style: "unit", unit: "kilometer", maximumFractionDigits: 1}).format(meters / 1_000);
+}

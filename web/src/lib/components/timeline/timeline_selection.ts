@@ -58,3 +58,30 @@ export function rangeOf(from: number, to: number): TimelineRange {
 export function isMeaningful(range: TimelineRange, msPerPixel: number, pixels = 3): boolean {
     return range.end.getTime() - range.start.getTime() > pixels * msPerPixel;
 }
+
+/**
+ * Marks an element inside the track that stands for a stretch of time — a block in a
+ * lane, say — as `data-timeline-pick="<start>,<end>"` in epoch milliseconds. Clicking
+ * it marks exactly that stretch; a drag starting on it marks a range like anywhere
+ * else on the track.
+ *
+ * An attribute rather than a click handler on the element, for the same reason as
+ * `TIMELINE_GRIP`: the track captures the pointer, and the click it would get never
+ * reaches the element.
+ */
+export const TIMELINE_PICK = "data-timeline-pick";
+
+/** The attribute value that makes an element pick [start]…[end], see {@link TIMELINE_PICK}. */
+export function pickValue(start: number, end: number): string {
+    return `${start},${end}`;
+}
+
+/** The stretch the element [target] was pressed on stands for, or `null` if none. */
+export function pickedRange(target: EventTarget | null): TimelineRange | null {
+    if (!(target instanceof Element)) return null;
+
+    const [start, end] = (target.closest(`[${TIMELINE_PICK}]`)?.getAttribute(TIMELINE_PICK) ?? "")
+        .split(",")
+        .map(Number);
+    return Number.isFinite(start) && Number.isFinite(end) && start < end ? rangeOf(start, end) : null;
+}

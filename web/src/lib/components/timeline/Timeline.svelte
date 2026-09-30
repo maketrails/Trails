@@ -8,7 +8,7 @@
     import TimelineSelection from "./TimelineSelection.svelte";
     import {type DragModifiers, timelineGestures} from "./timeline_gestures";
     import {axisFor} from "./timeline_scale";
-    import {isMeaningful, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
+    import {isMeaningful, pickedRange, rangeOf, snapToTargets, snapTargets} from "./timeline_selection";
     import {createTimelineWindow, type TimelineLaneScale, type TimelineRange, type TimelineView} from "./timeline_window";
 
     let {
@@ -96,6 +96,9 @@
     /** Where the running sweep began, or null while none is running. */
     let sweepFrom: number | null = null;
 
+    /** What the running sweep was started on, see TIMELINE_PICK. */
+    let sweepTarget: EventTarget | null = null;
+
     // Gestures speak pixels; turning those into time is this component's job. The
     // handlers are stable and read the scale as they run, so the action never has to
     // be torn down and set up again.
@@ -105,8 +108,9 @@
         // Dragging the track marks a range rather than moving the window; the window
         // is moved with the wheel, a pinch or the scrollbar below.
         drag: {
-            start(anchor: number, modifiers: DragModifiers) {
+            start(anchor: number, modifiers: DragModifiers, target: EventTarget | null) {
                 sweepFrom = edgeAt(anchor, modifiers);
+                sweepTarget = target;
                 selection = rangeOf(sweepFrom, sweepFrom);
             },
             move(anchor: number, modifiers: DragModifiers) {
@@ -115,9 +119,11 @@
             },
             end() {
                 sweepFrom = null;
-                // A press that went nowhere is a click, and a click on the track is how
-                // a marked range is dropped again.
-                if (selection != null && !isMeaningful(selection, msPerPixel)) selection = null;
+                // A press that went nowhere is a click. On something that stands for a
+                // stretch of time it marks that stretch; anywhere else on the track it is
+                // how a marked range is dropped again.
+                if (selection != null && !isMeaningful(selection, msPerPixel)) selection = pickedRange(sweepTarget);
+                sweepTarget = null;
             },
         },
     };

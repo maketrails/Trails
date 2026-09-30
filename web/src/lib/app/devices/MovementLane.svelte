@@ -1,8 +1,8 @@
 <script lang="ts">
     import {_, locale} from "svelte-i18n";
     import type {MovementItem} from "$lib/api/history/history_repository";
-    import type {TimelineLaneScale} from "$lib/components/timeline";
-    import {MOVEMENT_COLORS, movementTypeOf} from "$lib/app/movements";
+    import {pickValue, TIMELINE_PICK, type TimelineLaneScale} from "$lib/components/timeline";
+    import {formatDistance, MOVEMENT_COLORS, movementTypeOf} from "$lib/app/movements";
     import { CarIcon, PersonSimpleBikeIcon, PersonSimpleWalkIcon } from "phosphor-svelte";
 
     let {
@@ -26,14 +26,8 @@
     const LABEL_MIN_WIDTH = 72;
 
 
-    /** Kilometres from one kilometre on, metres below — whatever reads at a glance. */
-    let distanceFormat = $derived({
-        meters: new Intl.NumberFormat($locale ?? undefined, {style: "unit", unit: "meter", maximumFractionDigits: 0}),
-        kilometers: new Intl.NumberFormat($locale ?? undefined, {style: "unit", unit: "kilometer", maximumFractionDigits: 1}),
-    });
-
     function distance(meters: number): string {
-        return meters < 1_000 ? distanceFormat.meters.format(meters) : distanceFormat.kilometers.format(meters / 1_000);
+        return formatDistance(meters, $locale);
     }
 
     let timeFormat = $derived(new Intl.DateTimeFormat($locale ?? undefined, {dateStyle: "medium", timeStyle: "short"}));
@@ -59,15 +53,17 @@
 </script>
 
 <!-- One block per movement, coloured by its type. Hovering a block names it in full, the
-     label inside only fits where the block is wide enough. -->
+     label inside only fits where the block is wide enough; clicking it marks the movement
+     on the timeline. -->
 <ul aria-label={$_("history.movements.label")} class="relative h-full w-full">
     {#each blocks as block (block.movement.id)}
         {@const label = $_(`history.movements.type.${block.type ?? "unknown"}`)}
         <li
-                class="absolute inset-y-0 flex flex-row gap-1 items-center overflow-hidden rounded-lg text-[11px] font-medium text-white
+                class="absolute inset-y-0 flex cursor-pointer flex-row gap-1 items-center overflow-hidden rounded-lg text-[11px] font-medium text-white
                        {block.width >= ICON_MIN_WIDTH ? 'px-2' : ''}
                        {block.type == null ? 'bg-muted-foreground/60' : ''}"
                 style:background-color={block.type == null ? undefined : MOVEMENT_COLORS[block.type]}
+                {...{[TIMELINE_PICK]: pickValue(block.movement.from, block.movement.to)}}
                 style:left="{block.left}px"
                 style:width="{block.width}px"
                 title="{label} · {distance(block.movement.distance_meters)}
