@@ -30,8 +30,9 @@ import kotlin.uuid.Uuid
  * together form the answer described above, and each reports the cursor of its own
  * rows — the read continues from the largest of them.
  *
- * [movements] holds how the device moved, as far as it was classified, for the
- * caller's own devices only. They follow the same cursor: a movement is part of an
+ * [movements] holds how the device moved, as far as it was classified — for a share
+ * only within its retention window, a movement reaching into it cut at the window's
+ * start. They follow the same cursor: a movement is part of an
  * answer when it was stored at or after `since`. A chunked read carries them in its
  * last chunk only, whose `since` covers everything written while the read went on.
  * Like the optimized positions they replace: the optimizer rewrites movements from

@@ -15,6 +15,24 @@ data class MovementModel(
     val insertedAt: Instant,
 )
 
+/**
+ * This movement as a reader who may only see what happened from [windowStart] on sees
+ * it — a share's retention window. Null if it ended before; unchanged if it started
+ * inside the window, or there is none.
+ *
+ * One that reaches into the window is cut at its start, and its distance is measured
+ * anew by [distanceBetween] over what lies inside: the stored distance covers the part
+ * before the window too, and would give away how far the device went there.
+ */
+fun MovementModel.visibleFrom(
+    windowStart: Instant?,
+    distanceBetween: (from: Instant, to: Instant) -> Double,
+): MovementModel? = when {
+    windowStart == null || startsAt >= windowStart -> this
+    endsAt < windowStart -> null
+    else -> copy(startsAt = windowStart, distanceMeters = distanceBetween(windowStart, endsAt))
+}
+
 fun Movement.toModel() = MovementModel(
     id = id.value,
     startsAt = startsAt,
