@@ -1,5 +1,6 @@
 package es.jvbabi.trails.data
 
+import es.jvbabi.trails.data.model.Movement
 import kotlin.math.*
 import kotlin.time.Instant
 
@@ -151,13 +152,6 @@ internal object TrackPipeline {
 
     private const val EARTH_RADIUS_METERS = 6_371_000.0
 
-    /** How the device got from one pause to the next, see [classifyMovement]. */
-    enum class MovementMode(val minSeconds: Double) {
-        Walking(WALKING_MIN_SECONDS),
-        Bike(BIKE_MIN_SECONDS),
-        Travel(TRAVEL_MIN_SECONDS)
-    }
-
     /**
      * A stretch between two pauses and how the device covered it. [measuredMode]
      * is what its own speed says, [mode] what is left after [smoothMovement].
@@ -166,8 +160,8 @@ internal object TrackPipeline {
         val positions: List<Position>,
         val distanceMeters: Double,
         val speedKmh: Double,
-        val measuredMode: MovementMode,
-        val mode: MovementMode = measuredMode
+        val measuredMode: Movement.Type,
+        val mode: Movement.Type = measuredMode
     ) {
         val start get() = positions.first().timestamp
         val end get() = positions.last().timestamp
@@ -535,7 +529,7 @@ internal object TrackPipeline {
 
     /**
      * Irons out modes that do not last: within a trip, a stretch of the same mode
-     * shorter than [MovementMode.minSeconds] takes the mode of its longer neighbour.
+     * shorter than [minSeconds] takes the mode of its longer neighbour.
      * Between two stretches of the same other mode it has to last at least
      * [INTERRUPTION_MIN_SECONDS] — see there. A bike stretch in stop-and-go
      * traffic becomes travel, see [BIKE_MAX_SLOWDOWNS_PER_KM].
@@ -557,19 +551,19 @@ internal object TrackPipeline {
             // A bike stretch in stop-and-go is a bus; once it is, its neighbours
             // may have to follow, so smoothing starts over.
             val stopAndGo = runRanges(modes).filter { run ->
-                modes[run.first] == MovementMode.Bike &&
+                modes[run.first] == Movement.Type.Bike &&
                         (slowdownsPerKm(trip.slice(run)) ?: 0.0) > BIKE_MAX_SLOWDOWNS_PER_KM
             }
             if (stopAndGo.isEmpty()) break
 
-            for (run in stopAndGo) for (index in run) modes[index] = MovementMode.Travel
+            for (run in stopAndGo) for (index in run) modes[index] = Movement.Type.Travel()
         }
 
         trip.mapIndexed { index, leg -> leg.copy(mode = modes[index]) }
     }
 
     /** Merges the stretches of [modes] that are too short, see [smoothMovement]. */
-    private fun smoothRuns(trip: List<Leg>, modes: MutableList<MovementMode>) {
+    private fun smoothRuns(trip: List<Leg>, modes: MutableList<Movement.Type>) {
         fun duration(run: IntRange) = seconds(trip[run.first].positions.first(), trip[run.last].positions.last())
 
         while (true) {
@@ -577,7 +571,7 @@ internal object TrackPipeline {
             if (runs.size < 2) break
 
             fun minSeconds(index: Int): Double {
-                val own = modes[runs[index].first].minSeconds
+                val own = minSeconds(modes[runs[index].first])
                 val before = runs.getOrNull(index - 1) ?: return own
                 val after = runs.getOrNull(index + 1) ?: return own
 
@@ -646,7 +640,7 @@ internal object TrackPipeline {
     }
 
     /** The index ranges of [modes] that hold the same mode. */
-    private fun runRanges(modes: List<MovementMode>): List<IntRange> {
+    private fun runRanges(modes: List<Movement.Type>): List<IntRange> {
         val runs = mutableListOf<IntRange>()
         var start = 0
 
@@ -722,10 +716,17 @@ internal object TrackPipeline {
         return steps.last().first
     }
 
-    private fun classifyMovement(speedKmh: Double): MovementMode = when {
-        speedKmh <= WALKING_MAX_KMH -> MovementMode.Walking
-        speedKmh <= BIKE_MAX_KMH -> MovementMode.Bike
-        else -> MovementMode.Travel
+    private fun classifyMovement(speedKmh: Double): Movement.Type = when {
+        speedKmh <= WALKING_MAX_KMH -> Movement.Type.Walking
+        speedKmh <= BIKE_MAX_KMH -> Movement.Type.Bike
+        else -> Movement.Type.Travel()
+    }
+
+    /** How long [type] has to last within a trip to be believed, see [WALKING_MIN_SECONDS]. */
+    private fun minSeconds(type: Movement.Type): Double = when (type) {
+        Movement.Type.Walking -> WALKING_MIN_SECONDS
+        Movement.Type.Bike -> BIKE_MIN_SECONDS
+        is Movement.Type.Travel -> TRAVEL_MIN_SECONDS
     }
 
     /** Accuracy weighted mean position — a better fix counts more. */

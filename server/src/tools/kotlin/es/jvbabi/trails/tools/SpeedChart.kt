@@ -11,6 +11,7 @@ import database.DataSnapshots
 import es.jvbabi.trails.data.TrackPipeline
 import es.jvbabi.trails.data.TrackPipeline.Position
 import es.jvbabi.trails.data.TrailOptimizer
+import es.jvbabi.trails.data.model.Movement
 import es.jvbabi.trails.database.Device
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
@@ -85,7 +86,7 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
         for (run in runs) {
             val reassigned = run.count { it.mode != it.measuredMode }
             echo(
-                "${run.first().mode.name.padEnd(8)} ${run.first().start} – ${run.last().end}  " +
+                "${run.first().mode.key.padEnd(8)} ${run.first().start} – ${run.last().end}  " +
                         "${"%6.2f".format(run.sumOf { it.distanceMeters } / 1000)} km in ${run.size} legs" +
                         if (reassigned > 0) ", $reassigned reassigned" else ""
             )
@@ -104,7 +105,7 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
         val title = "$name — speed, optimized track".escapeHtml()
         val data = points.joinToString(",", "[", "]") { point ->
             "[${point.time.toEpochMilliseconds()},${"%.2f".format(java.util.Locale.ROOT, point.speedKmh)}," +
-                    "${point.newSegment},${point.mode?.let { "\"${it.name.lowercase()}\"" } ?: "null"}]"
+                    "${point.newSegment},${point.mode?.let { "\"${it.key}\"" } ?: "null"}]"
         }
 
         val template = SpeedChartCommand::class.java.getResource("/speed-chart.html")!!.readText()
@@ -119,7 +120,7 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
         val time: Instant,
         val speedKmh: Double,
         val newSegment: Boolean,
-        val mode: TrackPipeline.MovementMode?
+        val mode: Movement.Type?
     )
 
     /**
@@ -149,6 +150,14 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
             ChartPoint(current.timestamp, speed, newSegment, mode).also { newSegment = false }
         }
     }
+
+    /** The CSS class and data value the chart template knows the type by. */
+    private val Movement.Type.key
+        get() = when (this) {
+            Movement.Type.Walking -> "walking"
+            Movement.Type.Bike -> "bike"
+            is Movement.Type.Travel -> "travel"
+        }
 
     private fun localInstant(value: String): Instant =
         LocalDateTime.parse(value).toInstant(TimeZone.currentSystemDefault())

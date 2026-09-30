@@ -3,7 +3,10 @@ package es.jvbabi.trails.data
 import database.DataSnapshot
 import database.DataSnapshots
 import es.jvbabi.trails.api.v1.optimization.DeviceOptimizationResponse.OptimizationProgress
+import es.jvbabi.trails.data.model.Movement
+import es.jvbabi.trails.data.model.Movements
 import es.jvbabi.trails.database.DatabaseManager
+import es.jvbabi.trails.database.Device
 import es.jvbabi.trails.database.TrackRebuild
 import es.jvbabi.trails.data.TrackPipeline.Position
 import io.ktor.util.logging.KtorSimpleLogger
@@ -101,6 +104,11 @@ class TrailOptimizer(
             columnType = KotlinInstantColumnType()
         ).alias("min_created_at")
 
+        private val MIN_STARTS_AT = Min(
+            Movements.startsAt,
+            columnType = KotlinInstantColumnType()
+        ).alias("min_starts_at")
+
         private val MAX_INSERTED_AT = Max(
             DataSnapshots.insertedAt,
             columnType = KotlinInstantColumnType()
@@ -187,6 +195,7 @@ class TrailOptimizer(
     suspend fun reoptimize() = runLock.withLock {
         db.transaction {
             DataSnapshots.deleteWhere { derived }
+            Movements.deleteWhere { Movements.device eq deviceId }
 
             // Recorded with the delete, so no client can read the emptied track
             // without also being able to see that it was reset.
@@ -242,6 +251,7 @@ class TrailOptimizer(
                     val oldestLate = oldestStoredSince(storedSinceLastRun(), recordedBefore = overlap)
                     oldestLate?.minus(REBUILD_OVERLAP)?.coerceAtMost(overlap) ?: overlap
                 }
+                ?.let { bound -> movementAcross(bound)?.coerceAtMost(bound) ?: bound }
 
             Window(
                 lowerBound = lowerBound,
@@ -273,6 +283,13 @@ class TrailOptimizer(
                 if (lowerBound == null) derived
                 else derived and (DataSnapshots.createdAt greaterEq lowerBound)
             }
+
+            Movements.deleteWhere {
+                val lowerBound = window.lowerBound
+
+                if (lowerBound == null) Movements.device eq deviceId
+                else (Movements.device eq deviceId) and (Movements.startsAt greaterEq lowerBound)
+            }
         }
 
         publishProgress(OptimizationProgress.Running(window.progressAt(0)))
@@ -299,7 +316,10 @@ class TrailOptimizer(
             val optimized = segments.flatMap { it.positions }
 
             if (optimized.isNotEmpty()) {
-                db.transaction { write(optimized) }
+                db.transaction {
+                    write(optimized)
+                    writeMovements(segments)
+                }
             }
 
             cursor = batch.last().timestamp
@@ -492,6 +512,68 @@ class TrailOptimizer(
             this[DataSnapshots.batteryLevel] = position.batteryLevel
             this[DataSnapshots.batteryCharging] = position.batteryCharging
             this[DataSnapshots.isRaw] = false
+        }
+    }
+
+    /**
+     * Where the movement that is still going on at [bound] started, or null if none
+     * is. A run starting at [bound] would otherwise cut it in two and classify only
+     * its second half — so the run reaches back to the start of it instead, and the
+     * movement is derived again as a whole.
+     */
+    private fun movementAcross(bound: Instant): Instant? = Movements
+        .select(MIN_STARTS_AT)
+        .where(
+            (Movements.device eq deviceId) and
+                    (Movements.startsAt less bound) and
+                    (Movements.endsAt greaterEq bound)
+        )
+        .singleOrNull()
+        ?.get(MIN_STARTS_AT)
+
+    /**
+     * Stores how the device moved on [segments], one row per stretch of the same
+     * type, see [TrackPipeline.runs].
+     *
+     * A batch boundary cuts a trip in two, and so does the start of a run. A stretch
+     * that continues the latest stored movement — same type, not more than
+     * [TrackPipeline.TRIP_MAX_PAUSE_SECONDS] later — therefore extends it instead of
+     * starting a new one.
+     */
+    private fun writeMovements(segments: List<TrackPipeline.Segment>) {
+        val device = Device[deviceId]
+
+        var latest = Movement
+            .find { Movements.device eq deviceId }
+            .orderBy(Movements.endsAt to SortOrder.DESC)
+            .limit(1)
+            .firstOrNull()
+
+        for (run in segments.flatMap { TrackPipeline.runs(it.legs) }) {
+            val type = run.first().mode
+            val start = run.first().start
+            val end = run.last().end
+            val distance = run.sumOf { it.distanceMeters }
+
+            val continues = latest != null &&
+                    latest.type == type &&
+                    start >= latest.endsAt &&
+                    (start - latest.endsAt).inWholeMilliseconds / 1000.0 <= TrackPipeline.TRIP_MAX_PAUSE_SECONDS
+
+            latest = if (continues) {
+                latest.apply {
+                    endsAt = end
+                    distanceMeters += distance
+                }
+            } else {
+                Movement.new {
+                    this.device = device
+                    startsAt = start
+                    endsAt = end
+                    distanceMeters = distance
+                    this.type = type
+                }
+            }
         }
     }
 
