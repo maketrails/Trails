@@ -27,7 +27,7 @@ export type HistoryTarget =
 export interface HistoryLoad {
     /** Oldest point first. Empty while loading, or when the target has no history. */
     readonly points: HistoryPoint[];
-    /** How the device moved, oldest first. Empty for a share and while loading. */
+    /** How the device moved, oldest first. Empty while loading. */
     readonly movements: MovementItem[];
     /** The retention window the server applied, in seconds; null = nothing cut off. */
     readonly historySeconds: number | null;

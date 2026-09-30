@@ -62,7 +62,8 @@ export interface LocationHistory {
     cursor: number | null;
     points: HistoryPoint[];
     /**
-     * How the device moved — own devices only, and only in the last chunk of a read.
+     * How the device moved, only in the last chunk of a read — for a share within its
+     * retention window, a movement reaching into it cut at the window's start.
      * Missing from a (foreign) server that does not classify movements.
      */
     movements?: MovementItem[];
