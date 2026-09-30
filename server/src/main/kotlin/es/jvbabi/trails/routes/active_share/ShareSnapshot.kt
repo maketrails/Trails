@@ -1,7 +1,7 @@
 package es.jvbabi.trails.routes.active_share
 
 import es.jvbabi.trails.data.DeviceRepository
-import es.jvbabi.trails.data.ReverseGeocoding
+import es.jvbabi.trails.data.ReverseGeocodingRepository
 import es.jvbabi.trails.data.ShareRepository
 import es.jvbabi.trails.data.TrackRepository
 import es.jvbabi.trails.data.model.forShare
@@ -60,15 +60,18 @@ data class ShareSnapshotResponse(
  * device) no longer exists.
  *
  * What the share may reveal is applied by [forShare], the one place that rule
- * lives. Reverse geocoding runs on what the repositories already returned, so no
- * network call happens while a database connection is held.
+ * lives. The address is resolved in [language] (see
+ * [ReverseGeocodingRepository.languageFor]). Reverse geocoding runs on what the
+ * repositories already returned, so no network call happens while a database
+ * connection is held.
  */
 suspend fun buildShareSnapshot(
     shareRepository: ShareRepository,
     trackRepository: TrackRepository,
     deviceRepository: DeviceRepository,
-    reverseGeocoding: ReverseGeocoding,
+    reverseGeocodingRepository: ReverseGeocodingRepository,
     activeShareId: Uuid,
+    language: String,
 ): ShareSnapshotResponse? {
     val shared = shareRepository.getSharedDevice(activeShareId) ?: return null
     val snapshot = trackRepository.latestSnapshot(shared.device.id)?.forShare(shared.share)
@@ -93,7 +96,7 @@ suspend fun buildShareSnapshot(
     )
 
     val enriched = base.lastLocation?.let { location ->
-        val address = reverseGeocoding.reverseGeocode(location.latitude, location.longitude)
+        val address = reverseGeocodingRepository.addressFor(location.latitude, location.longitude, language)
             ?: return@let location
         location.copy(
             address = ShareSnapshotResponse.LastLocation.Address(

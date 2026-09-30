@@ -1,0 +1,10 @@
+{
+  "title": "Addresses are remembered",
+  "description": "Addresses of locations are now stored on the server, so they appear faster and in the language of your browser.",
+  "localized": {
+    "de": {
+      "title": "Adressen werden gespeichert",
+      "description": "Adressen von Standorten werden jetzt auf dem Server gespeichert, erscheinen dadurch schneller und in der Sprache deines Browsers."
+    }
+  }
+}
