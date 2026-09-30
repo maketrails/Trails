@@ -14,6 +14,7 @@
         EMPTY_TRACK,
         positionAtTime,
         recordedAt,
+        timeAt,
         toleranceFor,
         type DisplayTrack,
         type TrackPosition,
@@ -23,6 +24,7 @@
     import TrailPointPopover from "./TrailPointPopover.svelte";
     import {
         bandFlags,
+        isHighlighted,
         trailBandColors,
         trailData,
         type TrailBand,
@@ -448,7 +450,9 @@
         if (currentMap == null || currentMap.getLayer(TRAIL_POINT_LAYER) == null) return;
 
         const coordinates = drawn.coordinates;
+        const times = drawn.times;
         const cursor = event.point;
+        const focus = {window: mapTrail.window, selection: mapTrail.selection};
 
         // A box is what the query takes. Asking mapbox rather than walking the track
         // also keeps positions on the far side of the globe out of it: they are not
@@ -479,6 +483,10 @@
         const nearest: {found: TrackPosition & {distance: number} | null} = {found: null};
         const consider = (index: number) => {
             if (coordinates[index] == null) return;
+            // Only the highlighted stretch answers the cursor, so a dimmed one lying
+            // closer cannot take the puck away from it. A stretch carries the band of
+            // the point it ends in (see bandFlags).
+            if (!isHighlighted(times[index + 1] ?? times[index], focus)) return;
 
             const from = project(index);
             const {fraction, distance} = coordinates[index + 1] == null
@@ -781,15 +789,19 @@
     /**
      * The puck stands wherever something is pointing: the timeline first — a reader
      * moving along it is asking about a moment, and the map answers with a place — and
-     * the cursor on the map otherwise.
+     * the cursor on the map otherwise. Either way only on the highlighted stretch: the
+     * ones that have stepped back are context, not something to be read point by point.
      */
     $effect(() => {
         const currentMap = map;
         const at = mapTrail.hoveredAt;
         const pointer = pointerHover;
+        const focus = {window: mapTrail.window, selection: mapTrail.selection};
         if (currentMap == null || currentMap.getLayer(TRAIL_PUCK_LAYER) == null) return;
 
-        showPuck(currentMap, at != null ? positionAtTime(drawn, at) : pointer);
+        const position = at != null ? positionAtTime(drawn, at) : pointer;
+        const time = at ?? (position == null ? null : timeAt(drawn, position));
+        showPuck(currentMap, time != null && isHighlighted(time, focus) ? position : null);
     });
 
     // The track the grow-in animation last played for, so everything that re-runs the

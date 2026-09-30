@@ -65,6 +65,15 @@ export function bandOf(time: number, focus: TrailFocus): TrailBand {
 }
 
 /**
+ * Whether [time] lies on the one highlighted stretch (see {@link bandOf}) rather than
+ * on one that has stepped back.
+ */
+export function isHighlighted(time: number, focus: TrailFocus): boolean {
+    const band = bandOf(time, focus);
+    return band === "window" || band === "selected";
+}
+
+/**
  * Per-point flag: the stretch ending in point `i` is coloured for the band that
  * point falls in. Index 0 has no incoming stretch, but carries a band anyway so the
  * array lines up with the coordinates.
