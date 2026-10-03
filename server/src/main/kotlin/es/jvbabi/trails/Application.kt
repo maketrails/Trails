@@ -2,11 +2,11 @@ package es.jvbabi.trails
 
 import es.jvbabi.trails.api.installAuthentication
 import es.jvbabi.trails.api.installCallLogging
+import es.jvbabi.trails.api.installCommonApi
 import es.jvbabi.trails.api.installContentNegotiation
 import es.jvbabi.trails.api.installCors
 import es.jvbabi.trails.api.installDefaultHeaders
 import es.jvbabi.trails.api.installSse
-import es.jvbabi.trails.api.installStatusPages
 import es.jvbabi.trails.api.installWebsocket
 import es.jvbabi.trails.auth.installAuthentikt
 import es.jvbabi.trails.data.TrailOptimizerScheduler
@@ -29,10 +29,10 @@ fun Application.rootModule(
     installWebsocket()
     installSse()
     installCallLogging()
+    installCommonApi()
     installContentNegotiation()
     installAuthentication()
     installAuthentikt()
-    installStatusPages()
     installRouting()
 
     val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()

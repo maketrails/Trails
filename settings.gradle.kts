@@ -44,6 +44,14 @@ dependencyResolutionManagement {
                 password = providers.gradleProperty("maven.pkg.github.com.token").orElse("").get()
             }
         }
+        maven {
+            // Public, no credentials needed: commonapi and its plus.vplan.lib dependencies
+            name = "GitLab VPlanPlus"
+            url = uri("https://gitlab.jvbabi.es/api/v4/groups/12/-/packages/maven")
+            mavenContent {
+                includeGroupAndSubgroups("plus.vplan")
+            }
+        }
     }
 }
 

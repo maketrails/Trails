@@ -35,6 +35,7 @@ server-logback = "1.6.0"
 server-sqlite = "3.53.2.1"
 server-postgres = "42.7.13"
 server-authentikt = "0.4.8"
+server-commonapi = "v2026.01.10"
 
 [libraries]
 # Kotlin
@@ -105,13 +106,13 @@ server-ktor-server-sse = { module = "io.ktor:ktor-server-sse", version.ref = "kt
 server-ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negotiation", version.ref = "ktor" }
 server-ktor-server-auth-jwt = { module = "io.ktor:ktor-server-auth-jwt", version.ref = "ktor" }
 server-ktor-server-call-logging = { module = "io.ktor:ktor-server-call-logging", version.ref = "ktor" }
-server-ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
 server-ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 server-ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 server-ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 server-ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
 server-ktor-server-default-headers = { module = "io.ktor:ktor-server-default-headers", version.ref = "ktor" }
 server-ktor-server-cors = { module = "io.ktor:ktor-server-cors", version.ref = "ktor" }
+server-ktor-server-html-builder = { module = "io.ktor:ktor-server-html-builder", version.ref = "ktor" }
 server-ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 
 # Server - Exposed
@@ -134,6 +135,7 @@ server-csv = { module = "com.jsoizo:kotlin-csv-jvm", version.ref = "server-csv" 
 server-gson = { module = "com.google.code.gson:gson", version.ref = "server-gson" }
 server-logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "server-logback" }
 server-authentikt = { module = "es.jvbabi.authentikt:core", version.ref = "server-authentikt" }
+server-commonapi = { module = "plus.vplan:commonapi", version.ref = "server-commonapi" }
 server-bcrypt = { module = "at.favre.lib:bcrypt", version.ref = "server-bcrypt" }
 server-kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 

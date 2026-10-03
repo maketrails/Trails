@@ -25,10 +25,10 @@ dependencies {
     implementation(libs.server.ktor.server.content.negotiation)
     implementation(libs.server.ktor.server.auth.jwt)
     implementation(libs.server.ktor.server.call.logging)
-    implementation(libs.server.ktor.server.status.pages)
     implementation(libs.server.ktor.server.sse)
     implementation(libs.server.ktor.server.default.headers)
     implementation(libs.server.ktor.server.cors)
+    implementation(libs.server.ktor.server.html.builder)
     implementation(libs.server.ktor.serialization.kotlinx.json)
 
     // Ktor Client
@@ -60,6 +60,9 @@ dependencies {
 
     // Auth - private GitHub package
     implementation(libs.server.authentikt)
+
+    // Common API (info page, health check, error pages, request logging)
+    implementation(libs.server.commonapi)
 
     testImplementation(libs.kotlin.test)
     testImplementation(libs.server.ktor.server.test.host)
