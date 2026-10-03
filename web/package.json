@@ -39,6 +39,7 @@
 	},
 	"dependencies": {
 		"@Julius-Babies/authentikt-svelte": "^0.3.1",
+		"@julius-babies/authentikt-svelte": "^0.4.8",
 		"@lucide/svelte": "^1.43.0",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"dayjs": "^1.11.21",

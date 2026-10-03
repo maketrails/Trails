@@ -34,7 +34,7 @@ server-gson = "2.14.0"
 server-logback = "1.6.0"
 server-sqlite = "3.53.2.1"
 server-postgres = "42.7.13"
-server-authentikt = "0.4.5"
+server-authentikt = "0.4.8"
 
 [libraries]
 # Kotlin
