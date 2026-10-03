@@ -1,5 +1,6 @@
 package es.jvbabi.trails.routes
 
+import es.jvbabi.trails.api.API_PREFIX
 import es.jvbabi.trails.data.model.toApi
 import es.jvbabi.trails.routes.active_share.item.getActiveShare
 import es.jvbabi.trails.routes.active_share.item.history.getActiveShareHistory
@@ -45,7 +46,7 @@ import io.ktor.server.routing.*
 
 fun Application.installRouting() {
     routing {
-        route("/api/v1") {
+        route(API_PREFIX) {
             route("/auth") {
                 route("/app-authorization") {
                     appAuthorization()
