@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {useAuthentiktContext} from "@Julius-Babies/authentikt-svelte";
+    import {useAuthentiktContext} from "@julius-babies/authentikt-svelte";
     import {onMount, tick} from "svelte";
     import {page} from "$app/state";
     import {Loader} from "@lucide/svelte";

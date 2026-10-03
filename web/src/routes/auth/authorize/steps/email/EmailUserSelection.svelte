@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {EmailUserSelectionRenderer} from "@Julius-Babies/authentikt-svelte";
+    import {EmailUserSelectionRenderer} from "@julius-babies/authentikt-svelte";
     import Content from "./Content.svelte";
 </script>
 

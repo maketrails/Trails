@@ -1,6 +1,6 @@
 <script lang="ts">
     import type {DeviceSelectPluginInstance, DeviceSelectSnippet} from "./types.ts";
-    import {type FlowUserState, useAuthentiktContext} from "@Julius-Babies/authentikt-svelte";
+    import {type FlowUserState, useAuthentiktContext} from "@julius-babies/authentikt-svelte";
     import {DeviceSelectionPlugin} from "./DeviceSelectionPlugin.svelte.ts";
     import {Button} from "$lib/components/ui/button";
     import NewDeviceInfoDialog from "./NewDeviceInfoDialog.svelte";

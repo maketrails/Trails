@@ -1,5 +1,5 @@
 import type {DeviceOption, DeviceSelectState} from "./types.ts";
-import type {FlowState} from "@Julius-Babies/authentikt-svelte";
+import type {FlowState} from "@julius-babies/authentikt-svelte";
 
 interface AuthentiktClient {
     readonly currentFlow: FlowState | null;

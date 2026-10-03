@@ -6,7 +6,7 @@
         DoneRenderer,
         OIDCRenderer,
         useAuthentiktContext
-    } from "@Julius-Babies/authentikt-svelte";
+    } from "@julius-babies/authentikt-svelte";
     import LinkFlow from "./steps/init/LinkFlow.svelte";
     import DeviceSelection from "./steps/device_selection/DeviceSelection.svelte";
     import EmailUserSelection from "./steps/email/EmailUserSelection.svelte";
