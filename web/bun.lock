@@ -5,7 +5,6 @@
     "": {
       "name": "web",
       "dependencies": {
-        "@Julius-Babies/authentikt-svelte": "^0.3.1",
         "@julius-babies/authentikt-svelte": "^0.4.8",
         "@lucide/svelte": "^1.43.0",
         "@sveltejs/adapter-node": "^5.5.7",
@@ -42,8 +41,6 @@
     },
   },
   "packages": {
-    "@Julius-Babies/authentikt-svelte": ["@Julius-Babies/authentikt-svelte@0.3.1", "https://npm.pkg.github.com/download/@Julius-Babies/authentikt-svelte/0.3.1/00cf7e8e69f3946e59ff06af9c4ba31b771fba87", { "dependencies": { "@lucide/svelte": "^1.8.0", "@zerodevx/svelte-json-view": "^1.0.11" }, "peerDependencies": { "svelte": "^5.0.0" } }, "sha512-msdQvRJPFsTwVBK7qIfLCCB1XFyQmw1zmjmnTgN0F9kv2w/WCXv4mJrFDG2aqCQ20xnIMJMuaf8h3rUhJwxSwg=="],
-
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
 
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@7.1.2", "", { "dependencies": { "@csstools/css-calc": "^3.4.1", "@csstools/css-color-parser": "^4.2.4", "@csstools/css-parser-algorithms": "^4.0.1", "@csstools/css-tokenizer": "^4.0.2", "lru-cache": "^11.5.3" } }, "sha512-99DHAnXDB5z6EEK+9GMpVI7Mw4oxj97dY5bpOzMnjADQWxI8rN6TvTduuFLUhUMlS7/CfVZ06tcZsus6cltnNw=="],
@@ -685,8 +682,6 @@
     "xmlchars": ["xmlchars@2.2.0", "", {}, "sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw=="],
 
     "zimmerframe": ["zimmerframe@1.1.4", "", {}, "sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ=="],
-
-    "@Julius-Babies/authentikt-svelte/@lucide/svelte": ["@lucide/svelte@1.16.0", "", { "peerDependencies": { "svelte": "^5" } }, "sha512-AvvPJnaWxeiNkAljI5MsSEc84yHPLMaWQIAJOcbX7k9au/f9ITS7cxTTQiautDiOFKVOXiYdZ+d6mtl88J+Kbg=="],
 
     "@rollup/plugin-commonjs/estree-walker": ["estree-walker@2.0.2", "", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 

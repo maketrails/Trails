@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {PasswordRenderer} from "@Julius-Babies/authentikt-svelte";
+    import {PasswordRenderer} from "@julius-babies/authentikt-svelte";
     import Content from "./Content.svelte";
 </script>
 

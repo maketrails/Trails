@@ -4,7 +4,7 @@
     import {slide} from "svelte/transition";
     import {Button} from "$lib/components/ui/button";
     import {ArrowRight, Loader} from "@lucide/svelte";
-    import {type EmailUserSelectionPluginInstance} from "@Julius-Babies/authentikt-svelte";
+    import {type EmailUserSelectionPluginInstance} from "@julius-babies/authentikt-svelte";
     import {_} from "svelte-i18n";
 
     const id = $props.id();
