@@ -26,6 +26,11 @@ export interface PinBundle<T> {
     items: T[];
     /** The average of the members' anchors — where the bundle is anchored. */
     position: PinPoint;
+    /**
+     * The largest screen distance between two members' anchors, in CSS pixels; 0 for
+     * a single pin. Says how far the bundle reaches at the camera it was worked out for.
+     */
+    span: number;
 }
 
 /**
@@ -109,54 +114,6 @@ function coversEnough(a: PinBox, b: PinBox): boolean {
     );
 }
 
-/**
- * One merging pass over [groups] (each a list of indices into [positions]), or
- * `null` when nothing overlapped any more.
- *
- * Overlap is treated as transitive: A over B and B over C makes one group of
- * three, even where A and C don't touch — otherwise a pin could belong to two
- * bundles at once and there would be no saying which one draws it.
- */
-function mergeOverlapping(groups: number[][], positions: PinPoint[]): number[][] | null {
-    const boxes = groups.map((group) => boxOf(centerOf(group, positions), bundleSize(group.length)));
-
-    // Union-find: `parent[i]` points at another group of the same bundle, the root
-    // standing for the bundle itself.
-    const parent = groups.map((_, index) => index);
-    const rootOf = (index: number): number => {
-        while (parent[index] !== index) {
-            parent[index] = parent[parent[index]];
-            index = parent[index];
-        }
-        return index;
-    };
-
-    let merged = false;
-    // O(n²) over the pins the map shows — a user's own devices plus the shares they
-    // were given, which is a handful, not a feed.
-    for (let a = 0; a < boxes.length; a++) {
-        for (let b = a + 1; b < boxes.length; b++) {
-            if (!coversEnough(boxes[a], boxes[b])) continue;
-            const rootA = rootOf(a);
-            const rootB = rootOf(b);
-            if (rootA === rootB) continue;
-            parent[rootB] = rootA;
-            merged = true;
-        }
-    }
-    if (!merged) return null;
-
-    // Rebuilt in input order, so the drawn order stays stable across passes.
-    const bundles = new Map<number, number[]>();
-    for (let index = 0; index < groups.length; index++) {
-        const root = rootOf(index);
-        const bundle = bundles.get(root);
-        if (bundle == null) bundles.set(root, [...groups[index]]);
-        else bundle.push(...groups[index]);
-    }
-    return [...bundles.values()];
-}
-
 function centerOf(group: number[], positions: PinPoint[]): PinPoint {
     let x = 0;
     let y = 0;
@@ -168,12 +125,52 @@ function centerOf(group: number[], positions: PinPoint[]): PinPoint {
 }
 
 /**
+ * Whether the anchors of [group] all fit into the box of a single pin.
+ *
+ * This caps how far a bundle may reach on screen. Without it a bundle feeds on
+ * itself: it is drawn wider than a pin, so it swallows a neighbour, which makes it
+ * wider still, until it stands for devices that sit clearly apart and would be
+ * perfectly visible on their own. Within the cap a bundle only ever holds pins that
+ * one pin would cover.
+ */
+function fitsIntoOnePin(group: number[], positions: PinPoint[]): boolean {
+    const xs = group.map((index) => positions[index].x);
+    const ys = group.map((index) => positions[index].y);
+    return (
+        Math.max(...xs) - Math.min(...xs) <= PIN_WIDTH &&
+        Math.max(...ys) - Math.min(...ys) <= PIN_HEIGHT
+    );
+}
+
+/** The largest screen distance between two anchors of [group], in CSS pixels. */
+function spanOf(group: number[], positions: PinPoint[]): number {
+    let widest = 0;
+    for (let a = 0; a < group.length; a++) {
+        for (let b = a + 1; b < group.length; b++) {
+            const dx = positions[group[a]].x - positions[group[b]].x;
+            const dy = positions[group[a]].y - positions[group[b]].y;
+            widest = Math.max(widest, Math.hypot(dx, dy));
+        }
+    }
+    return widest;
+}
+
+/**
  * Groups the pins that cover each other, in the order they came in; a pin that
  * covers none is a bundle of its own.
  *
- * Merging is repeated until nothing changes: a bundle is drawn wider than the
- * single pin it grew out of, so it can reach a neighbour that neither of its
- * members did on their own.
+ * Bundles are grown one merge at a time, closest pair first. A bundle is drawn
+ * wider than the pins it grew out of, so it may reach a neighbour that neither
+ * member did on its own — and that neighbour should join, it would be hidden
+ * behind the pill otherwise. Two rules keep this from running away:
+ * - A merge needs the two drawn boxes to cover each other in *both* dimensions
+ *   (see {@link coversEnough}).
+ * - A merge is refused when the members' anchors would no longer fit into a single
+ *   pin (see {@link fitsIntoOnePin}), so no chain of neighbours grows into one
+ *   bundle reaching across the map.
+ *
+ * Closest first, so which of two neighbours a pin joins doesn't depend on the order
+ * the devices happen to arrive in.
  */
 export function bundleOverlappingPins<T>(
     items: T[],
@@ -181,15 +178,36 @@ export function bundleOverlappingPins<T>(
 ): PinBundle<T>[] {
     const positions = items.map(positionOf);
 
-    let groups = items.map((_, index) => [index]);
+    const groups = items.map((_, index) => [index]);
     for (;;) {
-        const merged = mergeOverlapping(groups, positions);
-        if (merged == null) break;
-        groups = merged;
+        const centers = groups.map((group) => centerOf(group, positions));
+        const boxes = groups.map((group, index) => boxOf(centers[index], bundleSize(group.length)));
+
+        let closest: [number, number] | null = null;
+        let closestDistance = Infinity;
+        // O(n³) overall over the pins the map shows — a user's own devices plus the
+        // shares they were given, which is a handful, not a feed.
+        for (let a = 0; a < groups.length; a++) {
+            for (let b = a + 1; b < groups.length; b++) {
+                if (!coversEnough(boxes[a], boxes[b])) continue;
+                if (!fitsIntoOnePin([...groups[a], ...groups[b]], positions)) continue;
+                const distance = (centers[a].x - centers[b].x) ** 2 + (centers[a].y - centers[b].y) ** 2;
+                if (distance >= closestDistance) continue;
+                closestDistance = distance;
+                closest = [a, b];
+            }
+        }
+        if (closest == null) break;
+
+        // Members stay in input order, so the drawn order is stable across camera moves.
+        const [a, b] = closest;
+        groups[a] = [...groups[a], ...groups[b]].sort((left, right) => left - right);
+        groups.splice(b, 1);
     }
 
     return groups.map((group) => ({
         items: group.map((index) => items[index]),
         position: centerOf(group, positions),
+        span: spanOf(group, positions),
     }));
 }

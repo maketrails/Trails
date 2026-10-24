@@ -2,9 +2,17 @@
  * How much ground a bundle actually covers.
  *
  * Bundling is a screen-space question (see pin_bundling), so zoomed far enough out
- * a pill can stand for devices that are nowhere near each other. Past
- * {@link BUNDLE_SPREAD_MIN_DISTANCE} that is worth saying out loud: the map draws
- * the circle the members lie in, and the pill points at the top of it.
+ * a pill can stand for devices that are nowhere near each other. That is worth
+ * saying out loud: the map draws the circle the members lie in, and the pill points
+ * at the top of it.
+ *
+ * It takes two things for the circle to be drawn (see {@link shouldDrawSpread}):
+ * - The members lie more than {@link BUNDLE_SPREAD_MIN_DISTANCE} apart, so they are
+ *   genuinely in different places rather than in the same house or street.
+ * - They also lie apart *on screen*, by at least
+ *   {@link BUNDLE_SPREAD_MIN_SCREEN_SPAN}. Zoomed far out, devices in neighbouring
+ *   towns land on the same few pixels; a circle that small is a speck under the pill
+ *   that says nothing.
  */
 
 export interface LngLat {
@@ -23,6 +31,17 @@ export interface BundleSpread {
 
 /** Below this the members are close enough that a circle would say nothing. */
 export const BUNDLE_SPREAD_MIN_DISTANCE = 10_000;
+
+/**
+ * How far apart on screen, in CSS pixels, a bundle's members have to lie for its
+ * circle to be drawn. Below that the circle would hide under the pill's tail.
+ */
+export const BUNDLE_SPREAD_MIN_SCREEN_SPAN = 24;
+
+/** Whether a bundle reaching [span] CSS pixels on screen is spread out enough for a circle. */
+export function shouldDrawSpread(span: number): boolean {
+    return span >= BUNDLE_SPREAD_MIN_SCREEN_SPAN;
+}
 
 /** Mean earth radius, in metres (IUGG). */
 const EARTH_RADIUS = 6_371_008.8;

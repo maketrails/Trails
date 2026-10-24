@@ -2,6 +2,7 @@ package es.jvbabi.trails.utils
 
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * Which pins on the map lie so far on top of each other that they are drawn as one
@@ -34,6 +35,11 @@ data class PinBundle<T>(
     val items: List<T>,
     /** The average of the members' anchors — where the bundle is anchored. */
     val position: PinPoint,
+    /**
+     * The largest screen distance between two members' anchors, in pixels; 0 for a
+     * single pin. Says how far the bundle reaches at the camera it was worked out for.
+     */
+    val span: Double = 0.0,
 )
 
 /**
@@ -88,53 +94,30 @@ private fun centerOf(group: List<Int>, positions: List<PinPoint>) = PinPoint(
 )
 
 /**
- * One merging pass over [groups] (each a list of indices into [positions]), or `null`
- * when nothing overlapped any more.
+ * Whether the anchors of [group] all fit into the box of a single [pin].
  *
- * Overlap is treated as transitive: A over B and B over C makes one group of three,
- * even where A and C don't touch — otherwise a pin could belong to two bundles at
- * once and there would be no saying which one draws it.
+ * This caps how far a bundle may reach on screen. Without it a bundle feeds on itself:
+ * it is drawn wider than a pin, so it swallows a neighbour, which makes it wider still,
+ * until it stands for devices that sit clearly apart and would be perfectly visible on
+ * their own. Within the cap a bundle only ever holds pins that one pin would cover.
  */
-private fun mergeOverlapping(
-    groups: List<List<Int>>,
-    positions: List<PinPoint>,
-    coverage: Double,
-    sizeOf: (count: Int) -> PinSize,
-): List<List<Int>>? {
-    val boxes = groups.map { group -> boxOf(centerOf(group, positions), sizeOf(group.size)) }
+private fun fitsIntoOnePin(group: List<Int>, positions: List<PinPoint>, pin: PinSize): Boolean {
+    val xs = group.map { positions[it].x }
+    val ys = group.map { positions[it].y }
+    return xs.max() - xs.min() <= pin.width && ys.max() - ys.min() <= pin.height
+}
 
-    // Union-find: `parent[i]` points at another group of the same bundle, the root
-    // standing for the bundle itself.
-    val parent = IntArray(groups.size) { it }
-    fun rootOf(index: Int): Int {
-        var current = index
-        while (parent[current] != current) {
-            parent[current] = parent[parent[current]]
-            current = parent[current]
-        }
-        return current
-    }
-
-    var merged = false
-    // O(n²) over the pins the map shows — a user's own devices, which is a handful.
-    for (a in boxes.indices) {
-        for (b in a + 1..boxes.lastIndex) {
-            if (!coversEnough(boxes[a], boxes[b], coverage)) continue
-            val rootA = rootOf(a)
-            val rootB = rootOf(b)
-            if (rootA == rootB) continue
-            parent[rootB] = rootA
-            merged = true
+/** The largest screen distance between two anchors of [group], in pixels. */
+private fun spanOf(group: List<Int>, positions: List<PinPoint>): Double {
+    var widest = 0.0
+    for (a in group.indices) {
+        for (b in a + 1..group.lastIndex) {
+            val dx = positions[group[a]].x - positions[group[b]].x
+            val dy = positions[group[a]].y - positions[group[b]].y
+            widest = max(widest, sqrt(dx * dx + dy * dy))
         }
     }
-    if (!merged) return null
-
-    // Rebuilt in input order, so the drawn order stays stable across passes.
-    val bundles = LinkedHashMap<Int, MutableList<Int>>()
-    for (index in groups.indices) {
-        bundles.getOrPut(rootOf(index)) { mutableListOf() }.addAll(groups[index])
-    }
-    return bundles.values.toList()
+    return widest
 }
 
 /**
@@ -142,9 +125,20 @@ private fun mergeOverlapping(
  * none is a bundle of its own.
  *
  * [sizeOf] gives the size a bundle of that many pins is drawn at — one pin included.
- * Merging is repeated until nothing changes: a bundle is drawn wider than the single
- * pin it grew out of, so it can reach a neighbour that neither of its members did on
- * their own.
+ *
+ * Bundles are grown one merge at a time, closest pair first. A bundle is drawn wider
+ * than the pins it grew out of, so it may reach a neighbour that neither member did on
+ * its own — and that neighbour should join, it would be hidden behind the bundle
+ * otherwise. Two rules keep this from running away:
+ * - A merge needs the two drawn boxes to cover each other in *both* dimensions by more
+ *   than [coverage] of the smaller one. Pins at the same height that merely touch at
+ *   the edges hide nothing, so they are not bundled either.
+ * - A merge is refused when the members' anchors would no longer fit into a single pin
+ *   (see [fitsIntoOnePin]), so no chain of neighbours grows into one bundle reaching
+ *   across the map.
+ *
+ * Closest first, so which of two neighbours a pin joins doesn't depend on the order the
+ * devices happen to arrive in.
  */
 fun <T> bundleOverlappingPins(
     items: List<T>,
@@ -153,16 +147,41 @@ fun <T> bundleOverlappingPins(
     positionOf: (item: T) -> PinPoint,
 ): List<PinBundle<T>> {
     val positions = items.map(positionOf)
+    val pin = sizeOf(1)
 
-    var groups = items.indices.map { listOf(it) }
+    val groups = items.indices.map { listOf(it) }.toMutableList()
     while (true) {
-        groups = mergeOverlapping(groups, positions, coverage, sizeOf) ?: break
+        val centers = groups.map { group -> centerOf(group, positions) }
+        val boxes = groups.indices.map { index -> boxOf(centers[index], sizeOf(groups[index].size)) }
+
+        var closest: Pair<Int, Int>? = null
+        var closestDistance = Double.MAX_VALUE
+        // O(n³) overall over the pins the map shows — a user's own devices, which is a
+        // handful.
+        for (a in groups.indices) {
+            for (b in a + 1..groups.lastIndex) {
+                if (!coversEnough(boxes[a], boxes[b], coverage)) continue
+                if (!fitsIntoOnePin(groups[a] + groups[b], positions, pin)) continue
+                val dx = centers[a].x - centers[b].x
+                val dy = centers[a].y - centers[b].y
+                val distance = dx * dx + dy * dy
+                if (distance >= closestDistance) continue
+                closestDistance = distance
+                closest = a to b
+            }
+        }
+        val (a, b) = closest ?: break
+
+        // Members stay in input order, so the drawn order is stable across camera moves.
+        groups[a] = (groups[a] + groups[b]).sorted()
+        groups.removeAt(b)
     }
 
     return groups.map { group ->
         PinBundle(
             items = group.map { items[it] },
             position = centerOf(group, positions),
+            span = spanOf(group, positions),
         )
     }
 }
