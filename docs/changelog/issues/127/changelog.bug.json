@@ -1,0 +1,8 @@
+{
+  "description": "Downloading an app update from GitHub no longer fails with \"Line exceeds limit of 8192 characters\".",
+  "localized": {
+    "de": {
+      "description": "Das Herunterladen eines App-Updates von GitHub schlägt nicht mehr mit „Line exceeds limit of 8192 characters“ fehl."
+    }
+  }
+}
