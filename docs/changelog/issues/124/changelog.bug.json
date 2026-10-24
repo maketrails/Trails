@@ -1,0 +1,8 @@
+{
+  "description": "Ringing a device no longer crashes the app while Do Not Disturb is on, and the ring now sounds through Do Not Disturb.",
+  "localized": {
+    "de": {
+      "description": "Klingelt ein Gerät bei aktivem „Bitte nicht stören“, stürzt die App nicht mehr ab – der Klingelton ist jetzt trotzdem hörbar."
+    }
+  }
+}

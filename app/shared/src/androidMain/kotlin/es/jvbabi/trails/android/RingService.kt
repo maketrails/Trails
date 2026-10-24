@@ -9,6 +9,7 @@ import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import es.jvbabi.trails.data.repository.NotificationRepository
 import es.jvbabi.trails.domain.repository.DeviceRepository
@@ -51,21 +52,36 @@ class RingService: Service(), KoinComponent {
         stopSelf()
     }
 
+    /**
+     * Sets the alarm stream volume. The ring deliberately plays on the alarm
+     * stream rather than the ring stream: alarms are let through by Do Not
+     * Disturb, and changing their volume never touches the DND state. Changing
+     * the ring stream volume while DND is active may switch the ringer mode,
+     * which Android rejects with a SecurityException ("Not allowed to change
+     * Do Not Disturb state") unless the app holds notification policy access.
+     */
     private fun setVolume(percent: Int) {
         val am = getSystemService(AUDIO_SERVICE) as AudioManager
-        val max = am.getStreamMaxVolume(AudioManager.STREAM_RING)
-        am.setStreamVolume(
-            AudioManager.STREAM_RING,
-            (max * percent.coerceIn(0, 100)) / 100,
-            0
-        )
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        try {
+            am.setStreamVolume(
+                AudioManager.STREAM_ALARM,
+                (max * percent.coerceIn(0, 100)) / 100,
+                0
+            )
+        } catch (e: SecurityException) {
+            // Keep ringing at the current volume rather than crashing the service.
+            Log.w(TAG, "Could not set the alarm volume", e)
+        }
     }
 
     private fun playRingtone() {
         val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
         ringtone = RingtoneManager.getRingtone(applicationContext, uri).also {
             it.audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                // USAGE_ALARM routes the sound to the alarm stream, which
+                // Do Not Disturb lets through, see setVolume().
+                .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -124,8 +140,8 @@ class RingService: Service(), KoinComponent {
         const val ACTION_START = "ACTION_START_RING"
         const val ACTION_STOP  = "ACTION_STOP_RING"
         const val ACTION_USER_STOP = "ACTION_USER_STOP_RING"
-        const val ACTION_SHOW_RINGING = "es.jvbabi.trails.ACTION_SHOW_RINGING"
         const val EXTRA_DEVICE_NAME = "caused_by_device_name"
+        private const val TAG = "RingService"
         private const val RINGING_ACTIVITY_CLASS = "es.jvbabi.trails.RingingActivity"
     }
 }
