@@ -2,44 +2,16 @@
 
 package es.jvbabi.trails.page.home.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.indication
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ripple
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,16 +20,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
-import org.jetbrains.compose.resources.stringResource
-import trails.app.shared.generated.resources.Res
-import trails.app.shared.generated.resources.home_map_compass
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.geojson.Point
 import com.mapbox.maps.*
+import com.mapbox.maps.R
 import com.mapbox.maps.dsl.cameraOptions
 import com.mapbox.maps.extension.compose.ComposeMapInitOptions
 import com.mapbox.maps.extension.compose.DisposableMapEffect
@@ -68,9 +38,6 @@ import com.mapbox.maps.extension.compose.annotation.ViewAnnotation
 import com.mapbox.maps.extension.compose.annotation.generated.PolygonAnnotation
 import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.extension.compose.style.MapStyle
-import com.mapbox.maps.extension.compose.style.standard.LightPresetValue
-import com.mapbox.maps.extension.compose.style.standard.MapboxStandardStyle
-import com.mapbox.maps.extension.compose.style.standard.StandardStyleState
 import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.gestures.OnMoveListener
@@ -85,17 +52,11 @@ import es.jvbabi.trails.LocalAppTheme
 import es.jvbabi.trails.domain.repository.Theme
 import es.jvbabi.trails.page.home.HomeState
 import es.jvbabi.trails.page.home.MapState
-import es.jvbabi.trails.utils.BundleSpread
-import es.jvbabi.trails.utils.Location
-import es.jvbabi.trails.utils.PinBundle
-import es.jvbabi.trails.utils.PinPoint
-import es.jvbabi.trails.utils.PinSize
-import es.jvbabi.trails.utils.averageLocation
-import es.jvbabi.trails.utils.bundleOverlappingPins
-import es.jvbabi.trails.utils.bundleSpread
 import es.jvbabi.trails.ui.components.desaturated
-import es.jvbabi.trails.utils.rememberBitmapFromBytes
-import es.jvbabi.trails.utils.ring
+import es.jvbabi.trails.utils.*
+import org.jetbrains.compose.resources.stringResource
+import trails.app.shared.generated.resources.Res
+import trails.app.shared.generated.resources.home_map_compass
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.time.Duration.Companion.seconds
@@ -202,6 +163,15 @@ private val SPREAD_COLOR_LIGHT = Color(0xFF2563EB)
 private val SPREAD_COLOR_DARK = Color(0xFF60A5FA)
 private const val SPREAD_FILL_OPACITY = 0.18
 private const val SPREAD_LINE_WIDTH = 2.5
+
+/**
+ * How far apart on screen a bundle's members have to lie for its circle to be drawn, see
+ * bundleSpread. Below that the circle would hide under the bundle's tail.
+ */
+private val SPREAD_MIN_SCREEN_SPAN = 24.dp
+
+/** What `MapboxMap.pixelForCoordinate` answers for a coordinate outside the map view. */
+private val OFF_SCREEN = PinPoint(-1.0, -1.0)
 
 /** The size a bundle of [count] devices is drawn at, a single pin included. */
 private fun bundleSize(count: Int): DpSize {
@@ -402,7 +372,7 @@ actual fun Map(
                 mapView.viewAnnotationManager.setViewAnnotationUpdateMode(ViewAnnotationUpdateMode.MAP_SYNCHRONIZED)
             }
 
-            MapEffect(state.targetCameraState) { mapView ->
+            MapEffect(state.targetCameraState) {
                 val camera = state.targetCameraState ?: return@MapEffect
                 mapViewportState.flyTo(
                     cameraOptions = cameraOptions {
@@ -449,17 +419,27 @@ actual fun Map(
                 // Nothing to project against yet; every device stands on its own.
                 pinnedDevices.map { device -> PinBundle(listOf(device), PinPoint(0.0, 0.0)) }
             } else {
+                val positions = pinnedDevices.associate { device ->
+                    val location = device.snapshot!!.location
+                    val pixel = currentMap.pixelForCoordinate(
+                        Point.fromLngLat(location.longitude, location.latitude)
+                    )
+                    device.device.id to PinPoint(pixel.x, pixel.y)
+                }
+
+                // Mapbox answers (-1, -1) for every coordinate outside the map view, so
+                // all off-screen devices would land on the same pixel and be bundled —
+                // circle included — although none of them is even drawn. A pin that
+                // isn't on screen covers nothing, so it stays a bundle of its own.
+                val (onScreen, offScreen) = pinnedDevices.partition { device ->
+                    positions.getValue(device.device.id) != OFF_SCREEN
+                }
+
                 bundleOverlappingPins(
-                    items = pinnedDevices,
+                    items = onScreen,
                     sizeOf = { count -> bundleSizePx(count, density) },
-                    positionOf = { device ->
-                        val location = device.snapshot!!.location
-                        val pixel = currentMap.pixelForCoordinate(
-                            Point.fromLngLat(location.longitude, location.latitude)
-                        )
-                        PinPoint(pixel.x, pixel.y)
-                    },
-                )
+                    positionOf = { device -> positions.getValue(device.device.id) },
+                ) + offScreen.map { device -> PinBundle(listOf(device), OFF_SCREEN) }
             }
             val bundleOf = bundles
                 .flatMap { bundle -> bundle.items.map { member -> member.device.id to bundle } }
@@ -474,7 +454,8 @@ actual fun Map(
              */
             pinnedDevices.forEach { device ->
                 key(device.device.id) {
-                    val members = bundleOf[device.device.id]?.items ?: listOf(device)
+                    val bundle = bundleOf[device.device.id]
+                    val members = bundle?.items ?: listOf(device)
                     val locations = members.map { member ->
                         val location = member.snapshot!!.location
                         Location(latitude = location.latitude, longitude = location.longitude)
@@ -485,9 +466,12 @@ actual fun Map(
                     // stay where they are, hidden.
                     val drawsMarker = members.minOf { it.device.id.toString() } == device.device.id.toString()
 
-                    // Only bundles standing for far-apart devices get a circle; a ring
-                    // around pins that sit on the same spot says nothing.
-                    val spread = if (members.size > 1) bundleSpread(locations) else null
+                    // Only bundles standing for devices that are far apart, both on the
+                    // ground and on screen, get a circle; a ring around pins that sit on
+                    // the same spot says nothing.
+                    val spreadOnScreen = bundle != null &&
+                        bundle.span >= with(density) { SPREAD_MIN_SCREEN_SPAN.toPx() }
+                    val spread = if (members.size > 1 && spreadOnScreen) bundleSpread(locations) else null
 
                     // Anchored geographically, never at a projected pixel: a coordinate read
                     // off the screen is only true for the camera that was up when it was

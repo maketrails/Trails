@@ -12,9 +12,17 @@ import kotlin.math.sqrt
  * How much ground a bundle actually covers.
  *
  * Bundling is a screen-space question (see [bundleOverlappingPins]), so zoomed far
- * enough out a bundle can stand for devices that are nowhere near each other. Past
- * [BUNDLE_SPREAD_MIN_DISTANCE_METERS] that is worth saying out loud: the map draws
- * the circle the members lie in, and the bundle points at the top of it.
+ * enough out a bundle can stand for devices that are nowhere near each other. That is
+ * worth saying out loud: the map draws the circle the members lie in, and the bundle
+ * points at the top of it.
+ *
+ * It takes two things for the circle to be drawn, and the map has to check both:
+ * - The members lie more than [BUNDLE_SPREAD_MIN_DISTANCE_METERS] apart, so they are
+ *   genuinely in different places rather than in the same house or street.
+ * - They also lie apart *on screen* (see [PinBundle.span]). Zoomed far out, devices in
+ *   neighbouring towns land on the same few pixels; a circle that small is a speck
+ *   under the bundle that says nothing, and a bundle of devices that sit on one spot
+ *   on screen is exactly what a bundle without a circle already says.
  */
 
 /** The circle a bundle's members lie in. */

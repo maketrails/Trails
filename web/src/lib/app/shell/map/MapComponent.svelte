@@ -36,7 +36,7 @@
     import {cubicOut} from "svelte/easing";
     import MapPin from "./MapPin.svelte";
     import MapBundle from "./MapBundle.svelte";
-    import {bundleSpread, spreadRing, type BundleSpread} from "./bundle_spread";
+    import {bundleSpread, shouldDrawSpread, spreadRing, type BundleSpread} from "./bundle_spread";
     import {
         bundleOverlappingPins,
         PIN_HEIGHT,
@@ -1208,9 +1208,10 @@
                 continue;
             }
 
-            // Only bundles that stand for far-apart devices get a circle; the rest are
-            // pins on the same spot, and drawing a ring around those says nothing.
-            const spread = bundleSpread(
+            // Only bundles that stand for devices far apart, both on the ground and on
+            // screen, get a circle; the rest are pins on the same spot, and drawing a
+            // ring around those says nothing.
+            const spread = !shouldDrawSpread(bundle.span) ? null : bundleSpread(
                 bundle.items.map((target) => ({
                     lng: target.location.longitude,
                     lat: target.location.latitude

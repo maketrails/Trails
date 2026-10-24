@@ -1,0 +1,8 @@
+{
+  "description": "Devices on the map are only grouped once their pins actually cover each other, and the circle around a group no longer appears when the devices can be told apart or are not on screen at all.",
+  "localized": {
+    "de": {
+      "description": "Geräte auf der Karte werden nur noch gruppiert, wenn sich ihre Pins wirklich überdecken, und der Kreis um eine Gruppe erscheint nicht mehr, wenn die Geräte gut zu unterscheiden oder gar nicht im Bild sind."
+    }
+  }
+}
