@@ -170,6 +170,9 @@ private const val SPREAD_LINE_WIDTH = 2.5
  */
 private val SPREAD_MIN_SCREEN_SPAN = 24.dp
 
+/** What `MapboxMap.pixelForCoordinate` answers for a coordinate outside the map view. */
+private val OFF_SCREEN = PinPoint(-1.0, -1.0)
+
 /** The size a bundle of [count] devices is drawn at, a single pin included. */
 private fun bundleSize(count: Int): DpSize {
     if (count <= 1) return DpSize(PIN_SIZE, PIN_SIZE)
@@ -416,17 +419,27 @@ actual fun Map(
                 // Nothing to project against yet; every device stands on its own.
                 pinnedDevices.map { device -> PinBundle(listOf(device), PinPoint(0.0, 0.0)) }
             } else {
+                val positions = pinnedDevices.associate { device ->
+                    val location = device.snapshot!!.location
+                    val pixel = currentMap.pixelForCoordinate(
+                        Point.fromLngLat(location.longitude, location.latitude)
+                    )
+                    device.device.id to PinPoint(pixel.x, pixel.y)
+                }
+
+                // Mapbox answers (-1, -1) for every coordinate outside the map view, so
+                // all off-screen devices would land on the same pixel and be bundled —
+                // circle included — although none of them is even drawn. A pin that
+                // isn't on screen covers nothing, so it stays a bundle of its own.
+                val (onScreen, offScreen) = pinnedDevices.partition { device ->
+                    positions.getValue(device.device.id) != OFF_SCREEN
+                }
+
                 bundleOverlappingPins(
-                    items = pinnedDevices,
+                    items = onScreen,
                     sizeOf = { count -> bundleSizePx(count, density) },
-                    positionOf = { device ->
-                        val location = device.snapshot!!.location
-                        val pixel = currentMap.pixelForCoordinate(
-                            Point.fromLngLat(location.longitude, location.latitude)
-                        )
-                        PinPoint(pixel.x, pixel.y)
-                    },
-                )
+                    positionOf = { device -> positions.getValue(device.device.id) },
+                ) + offScreen.map { device -> PinBundle(listOf(device), OFF_SCREEN) }
             }
             val bundleOf = bundles
                 .flatMap { bundle -> bundle.items.map { member -> member.device.id to bundle } }
