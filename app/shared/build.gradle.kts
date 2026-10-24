@@ -59,6 +59,7 @@ kotlin {
             }
             implementation(libs.app.mapbox.compose)
             implementation(libs.app.ktor.client.cio)
+            implementation(libs.app.ktor.client.okhttp)
         }
 
         commonMain.dependencies {

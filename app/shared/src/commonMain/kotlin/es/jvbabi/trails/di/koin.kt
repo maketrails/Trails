@@ -37,6 +37,7 @@ import io.ktor.serialization.kotlinx.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import io.ktor.client.engine.HttpClientEngineFactory
 import kotlinx.serialization.json.Json
 import org.koin.core.context.startKoin
 import org.koin.core.module.Module
@@ -60,6 +61,16 @@ expect fun getDatabaseBuilder(): RoomDatabase.Builder<TrailsDatabase>
  * since only that knows the platform's context.
  */
 expect fun platformModule(): Module
+
+/**
+ * The engine of the [HttpClient] for hosts we don't control (see [KOIN_HTTP_CLIENT_THIRD_PARTY]).
+ *
+ * Chosen per platform rather than left to whichever engine is on the classpath, because those hosts
+ * don't play by our rules: GitHub answers a release download with a redirect whose
+ * `Content-Security-Policy` header is longer than the 8,192 characters a CIO header line may have,
+ * so the CIO engine fails before it ever reaches the file.
+ */
+expect fun thirdPartyHttpClientEngine(): HttpClientEngineFactory<*>
 
 /** Qualifier of the [HttpClient] used for requests to hosts we don't control. */
 const val KOIN_HTTP_CLIENT_THIRD_PARTY = "http_client_third_party"
@@ -116,7 +127,7 @@ fun initKoin(appDeclaration: KoinAppDeclaration = {}) = startKoin {
         // Client for third-party APIs (e.g. GitHub). Deliberately carries no Werkbank headers,
         // so the access token can never leak to a host outside our own infrastructure.
         single<HttpClient>(named(KOIN_HTTP_CLIENT_THIRD_PARTY)) {
-            HttpClient {
+            HttpClient(thirdPartyHttpClientEngine()) {
                 install(ContentNegotiation) {
                     json(jsonInstance)
                 }

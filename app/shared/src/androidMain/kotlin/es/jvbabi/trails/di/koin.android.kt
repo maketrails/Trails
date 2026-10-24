@@ -14,6 +14,8 @@ import es.jvbabi.trails.domain.repository.UpdateRepository
 import es.jvbabi.trails.domain.usecase.app.CheckAppIsLatestVersionUseCase
 import es.jvbabi.trails.domain.usecase.app.GetReleaseChangelogsUseCase
 import es.jvbabi.trails.ui.overlay.update_available.UpdateAvailableViewModel
+import io.ktor.client.engine.HttpClientEngineFactory
+import io.ktor.client.engine.okhttp.OkHttp
 import org.koin.core.module.Module
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.module.dsl.viewModelOf
@@ -29,6 +31,12 @@ actual fun getDatabaseBuilder(): RoomDatabase.Builder<TrailsDatabase> {
         name = context.getDatabasePath("trails.db").absolutePath
     )
 }
+
+/**
+ * OkHttp rather than the CIO engine the Trails server is talked to with: CIO rejects header lines
+ * longer than 8,192 characters, which GitHub's release download redirect exceeds.
+ */
+actual fun thirdPartyHttpClientEngine(): HttpClientEngineFactory<*> = OkHttp
 
 /**
  * Android is the only platform that updates itself, so the whole updater is declared here.
