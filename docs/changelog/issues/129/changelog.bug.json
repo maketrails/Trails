@@ -1,0 +1,8 @@
+{
+  "description": "The app reconnects to its server again after the device was offline, instead of only after tracking was restarted.",
+  "localized": {
+    "de": {
+      "description": "Die App verbindet sich wieder mit ihrem Server, nachdem das Gerät offline war, statt erst nach einem Neustart des Trackings."
+    }
+  }
+}
