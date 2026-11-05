@@ -48,10 +48,12 @@ import trails.app.shared.generated.resources.notification_ping_by_browser
 import trails.app.shared.generated.resources.notification_ping_by_device
 import trails.app.shared.generated.resources.notification_ping_title
 import kotlin.time.Clock
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.Instant
+import kotlin.time.TimeMark
+import kotlin.time.TimeSource
 import kotlin.uuid.Uuid
 
 class TrailsServerRepositoryImpl(
@@ -156,12 +158,12 @@ class TrailsServerRepositoryImpl(
     private var homeServerConnectJob: Job? = null
 
     /**
-     * Waits up to [delayMs] ms, but wakes up immediately once the app (re-)enters the
+     * Waits up to [delay], but wakes up immediately once the app (re-)enters the
      * foreground. Returns true when the foreground change was what woke it up — the caller
      * should then start a new connection attempt right away and reset the backoff.
      */
-    private suspend fun delayOrUntilForeground(delayMs: Long): Boolean {
-        return withTimeoutOrNull(delayMs.milliseconds) {
+    private suspend fun delayOrUntilForeground(delay: Duration): Boolean {
+        return withTimeoutOrNull(delay) {
             applicationRepository.getApplicationForegroundState()
                 .dropWhile { it }   // skip the current foreground state
                 .first { it }       // wait for the switch to foreground
@@ -177,9 +179,9 @@ class TrailsServerRepositoryImpl(
         }
 
         homeServerConnectJob = scope.launch {
-            var currentRetry = 0
+            val backoff = ReconnectBackoff()
             while (isActive) {
-                var wasConnected = false
+                var connectedAt: TimeMark? = null
                 var locationUpdater: Job? = null
                 var backlogUploader: Job? = null
                 var currentServerHost: String? = null
@@ -206,7 +208,7 @@ class TrailsServerRepositoryImpl(
                     }
 
                     isConnected.value = true
-                    wasConnected = true
+                    connectedAt = TimeSource.Monotonic.markNow()
                     if (!deferred.isCompleted) deferred.complete(true)
 
                     database.connectionEventDao.upsert(
@@ -291,24 +293,21 @@ class TrailsServerRepositoryImpl(
                         data = ConnectionEvent.Event.Disconnected
                     ).toEntity())
 
-                } catch (e: CancellationException) {
-                    // Cancelled from outside: tear the connection down, then let the
-                    // cancellation through so the loop ends instead of reconnecting.
-                    locationUpdater?.cancel()
-                    backlogUploader?.cancel()
-                    if (currentServerHost != null) stopCrashDetection(currentServerHost)
-                    isConnected.value = false
-                    ringStates.value = emptyMap()
-                    withContext(NonCancellable) { websocketSession?.close() }
-                    websocketSession = null
-                    throw e
                 } catch (e: Exception) {
-                    Logger.e(e) { "Error connecting to WS: ${e.message}" }
+                    // Ktor cancels the session's channels with a CancellationException when the
+                    // connection breaks, so only a cancelled loop counts as cancelled from outside.
+                    val cancelledFromOutside = e is CancellationException && !currentCoroutineContext().isActive
                     locationUpdater?.cancel()
                     backlogUploader?.cancel()
                     if (currentServerHost != null) stopCrashDetection(currentServerHost)
                     isConnected.value = false
                     ringStates.value = emptyMap()
+                    withContext(NonCancellable) { websocketSession?.closeQuietly() }
+                    websocketSession = null
+                    // Let the cancellation through so the loop ends instead of reconnecting.
+                    if (cancelledFromOutside) throw e
+
+                    Logger.e(e) { "Error connecting to WS: ${e.message}" }
                     database.connectionEventDao.upsert(ConnectionEvent(
                         id = Uuid.random(),
                         server = currentServerHost ?: "unknown",
@@ -317,32 +316,15 @@ class TrailsServerRepositoryImpl(
                     ).toEntity())
                 }
 
-                // Number of failed attempts after which the caller is no longer blocked. The loop
-                // does NOT give up, it keeps reconnecting in the background (a tracking app has to
-                // reconnect permanently).
-                val retriesBeforeUnblockingCaller = 30
-                if (!wasConnected) {
-                    if (currentRetry >= retriesBeforeUnblockingCaller && !deferred.isCompleted) {
-                        deferred.complete(false)
-                    }
-                    val delayMs = if (applicationRepository.getApplicationForegroundState().first()) {
-                        1_000L
-                    } else {
-                        // Avoid `1L shl` with an oversized exponent -> cap the exponent.
-                        minOf(30_000L, 5_000L * (1L shl minOf(currentRetry, 6)))
-                    }
-                    // When the app comes to the foreground, retry immediately and reset the backoff.
-                    if (delayOrUntilForeground(delayMs)) currentRetry = 0 else currentRetry++
-                } else {
+                if (connectedAt != null) {
                     if (!deferred.isCompleted) deferred.complete(true)
-                    val delayMs = if (applicationRepository.getApplicationForegroundState().first()) {
-                        1_000L
-                    } else {
-                        5_000L
-                    }
-                    delay(delayMs.milliseconds)
-                    currentRetry = 0
+                    backoff.onConnectionEnded(connectedAt.elapsedNow())
+                } else if (backoff.failures >= RETRIES_BEFORE_UNBLOCKING_CALLER && !deferred.isCompleted) {
+                    deferred.complete(false)
                 }
+                val inForeground = applicationRepository.getApplicationForegroundState().first()
+                // When the app comes to the foreground, retry immediately and reset the backoff.
+                if (delayOrUntilForeground(backoff.nextDelay(inForeground))) backoff.reset()
             }
         }
         return deferred
@@ -674,17 +656,15 @@ class TrailsServerRepositoryImpl(
     typealias ServerHost = String
     private val activeExternalSessions = mutableMapOf<ServerHost, DefaultClientWebSocketSession>()
 
-    override suspend fun connectWithOtherServer(server: String) = connectWithOtherServer(server, 0)
-
-    private suspend fun connectWithOtherServer(server: String, retryCount: Int) {
-        var currentRetry = retryCount
+    override suspend fun connectWithOtherServer(server: String) {
+        val backoff = ReconnectBackoff()
         while (currentCoroutineContext().isActive) {
             if (activeExternalSessions[server]?.isActive == true) return
             val url = URLBuilder("wss://$server").apply {
                 appendPathSegments("api", "v1", "app", "ws")
             }
 
-            var wasConnected = false
+            var connectedAt: TimeMark? = null
             try {
                 Logger.i { "Connecting with external server $server" }
                 activeExternalSessions[server] = httpClient.webSocketSession(urlString = url.buildString())
@@ -696,7 +676,7 @@ class TrailsServerRepositoryImpl(
                     data = ConnectionEvent.Event.Connected,
                 ).toEntity())
                 startCrashDetection(server)
-                wasConnected = true
+                connectedAt = TimeSource.Monotonic.markNow()
 
                 externalServerSocketClient.run(activeExternalSessions[server]!!, server)
                 stopCrashDetection(server)
@@ -711,16 +691,17 @@ class TrailsServerRepositoryImpl(
                 activeExternalSessions[server]?.close()
                 activeExternalSessions.remove(server)
 
-            } catch (e: CancellationException) {
-                // Cancelled from outside: tear the connection down, then let the
-                // cancellation through so the loop ends instead of reconnecting.
-                stopCrashDetection(server)
-                withContext(NonCancellable) { activeExternalSessions[server]?.close() }
-                activeExternalSessions.remove(server)
-                throw e
             } catch (e: Exception) {
-                Logger.e(e) { "Error connecting to WS: ${e.message}" }
+                // Ktor cancels the session's channels with a CancellationException when the
+                // connection breaks, so only a cancelled loop counts as cancelled from outside.
+                val cancelledFromOutside = e is CancellationException && !currentCoroutineContext().isActive
                 stopCrashDetection(server)
+                withContext(NonCancellable) { activeExternalSessions[server]?.closeQuietly() }
+                activeExternalSessions.remove(server)
+                // Let the cancellation through so the loop ends instead of reconnecting.
+                if (cancelledFromOutside) throw e
+
+                Logger.e(e) { "Error connecting to WS: ${e.message}" }
                 database.connectionEventDao.upsert(ConnectionEvent(
                     id = Uuid.random(),
                     server = url.host,
@@ -729,24 +710,11 @@ class TrailsServerRepositoryImpl(
                 ).toEntity())
             }
 
-            if (!wasConnected) {
-                // Never give up for good, keep retrying with a capped backoff.
-                val delayMs = if (applicationRepository.getApplicationForegroundState().first()) {
-                    1_000L
-                } else {
-                    minOf(30_000L, 5_000L * (1L shl minOf(currentRetry, 6)))
-                }
-                // When the app comes to the foreground, retry immediately and reset the backoff.
-                if (delayOrUntilForeground(delayMs)) currentRetry = 0 else currentRetry++
-            } else {
-                val delayMs = if (applicationRepository.getApplicationForegroundState().first()) {
-                    1_000L
-                } else {
-                    5_000L
-                }
-                delay(delayMs.milliseconds)
-                currentRetry = 0
-            }
+            // Never give up for good, keep retrying with a capped backoff.
+            connectedAt?.let { backoff.onConnectionEnded(it.elapsedNow()) }
+            val inForeground = applicationRepository.getApplicationForegroundState().first()
+            // When the app comes to the foreground, retry immediately and reset the backoff.
+            if (delayOrUntilForeground(backoff.nextDelay(inForeground))) backoff.reset()
         }
     }
 
@@ -889,9 +857,33 @@ private suspend fun DefaultClientWebSocketSession.sendOrLog(
     } catch (e: IOException) {
         // The connection broke; the outgoing channel is closed with that failure.
         logger.w(e) { "Dropping WS message $message: ${e.message}" }
+    } catch (e: CancellationException) {
+        // Ktor also cancels the outgoing channel when the connection breaks. Only a cancellation
+        // of the calling coroutine itself may escape.
+        currentCoroutineContext().ensureActive()
+        logger.w(e) { "Dropping WS message $message: ${e.message}" }
     }
     return false
 }
+
+/**
+ * Closes the session, ignoring failures: it is called while tearing down a connection that has
+ * usually already broken, and a failing close must not keep the reconnect loop from going on.
+ */
+private suspend fun DefaultClientWebSocketSession.closeQuietly() {
+    try {
+        close()
+    } catch (e: Exception) {
+        currentCoroutineContext().ensureActive()
+    }
+}
+
+/**
+ * Number of failed attempts after which [TrailsServerRepositoryImpl.connectWithHomeserver] no
+ * longer blocks its caller. The loop does NOT give up, it keeps reconnecting in the background
+ * (a tracking app has to reconnect permanently).
+ */
+private const val RETRIES_BEFORE_UNBLOCKING_CALLER = 30
 
 private abstract class WebSocketClientBase(
     protected val scope: CoroutineScope,
@@ -909,8 +901,12 @@ private abstract class WebSocketClientBase(
 ) {
     suspend fun run(session: DefaultClientWebSocketSession, serverHost: String) {
         val appForegroundSyncer = startShareSubscriptionSync(serverHost) { session }
-        handleIncomingMessages(session)
-        appForegroundSyncer.cancel()
+        try {
+            handleIncomingMessages(session)
+        } finally {
+            // Also when the message loop throws, otherwise the job keeps sending to a dead session.
+            appForegroundSyncer.cancel()
+        }
     }
 
     private fun startShareSubscriptionSync(
@@ -982,7 +978,7 @@ private abstract class WebSocketClientBase(
                             body = body,
                             notificationId = message.pingedByDeviceName.hashCode()
                         )
-                        session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.Pong(notificationSent))
+                        session.sendOrLog(TrailsWebSocketAppMessage.Pong(notificationSent), logger)
                     }
 
                     is TrailsWebSocketServerMessage.Ring -> {
@@ -990,7 +986,7 @@ private abstract class WebSocketClientBase(
                             causedByDeviceName = message.ringedByDeviceName,
                             onStop = { scope.launch { session.sendOrLog(TrailsWebSocketAppMessage.RingStop, logger) } }
                         )
-                        session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.RingStart)
+                        session.sendOrLog(TrailsWebSocketAppMessage.RingStart, logger)
                     }
 
                     is TrailsWebSocketServerMessage.RingStop -> {
@@ -1057,7 +1053,7 @@ private abstract class WebSocketClientBase(
                     // the server is waiting for, as proof that the app — not a proxy in
                     // between — is still on the other end.
                     is TrailsWebSocketServerMessage.Heartbeat -> {
-                        session.sendSerialized<TrailsWebSocketAppMessage>(TrailsWebSocketAppMessage.HeartbeatAck)
+                        session.sendOrLog(TrailsWebSocketAppMessage.HeartbeatAck, logger)
                     }
 
                     is TrailsWebSocketServerMessage.OnlineState -> {
