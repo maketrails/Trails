@@ -1,0 +1,10 @@
+{
+  "title": "Better optimized trails",
+  "description": "Optimized trails now keep the shape of corners and curves instead of cutting them, and outliers are removed more reliably, including two or three bad positions in a row. Sharp U-turns stay in the trail. Existing trails benefit after re-optimizing them.",
+  "localized": {
+    "de": {
+      "title": "Besser optimierte Trails",
+      "description": "Optimierte Trails behalten jetzt die Form von Ecken und Kurven, statt sie abzuschneiden, und Ausreißer werden zuverlässiger entfernt, auch zwei oder drei fehlerhafte Positionen hintereinander. Scharfe Wendungen bleiben erhalten. Bestehende Trails profitieren nach einer erneuten Optimierung."
+    }
+  }
+}
