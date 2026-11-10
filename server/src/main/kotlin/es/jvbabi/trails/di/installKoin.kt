@@ -13,6 +13,9 @@ import es.jvbabi.trails.data.ReverseGeocoding
 import es.jvbabi.trails.data.ReverseGeocodingRepository
 import es.jvbabi.trails.data.TrailOptimizerScheduler
 import es.jvbabi.trails.data.UserRepository
+import es.jvbabi.trails.data.elevation.ElevationProvider
+import es.jvbabi.trails.data.elevation.HttpTileFetcher
+import es.jvbabi.trails.data.elevation.TerrainTileElevationProvider
 import es.jvbabi.trails.database.DatabaseManager
 import io.ktor.server.application.*
 import org.koin.dsl.module
@@ -34,6 +37,18 @@ private val coreModule = module {
     single<ReverseGeocoding> { NominatimService() }
     single { ReverseGeocodingRepository() }
     single { TrailOptimizerScheduler() }
+    single<ElevationProvider> {
+        val config = get<ApplicationConfig>()
+
+        if (!config.elevation.enabled) return@single ElevationProvider.Disabled
+
+        val fetcher = HttpTileFetcher(config.elevation.tileUrl)
+        TerrainTileElevationProvider(
+            cacheDirectory = config.elevationTiles,
+            fetcher = fetcher,
+            onClose = fetcher::close,
+        )
+    }
 }
 
 fun Application.installKoin(
@@ -57,5 +72,8 @@ fun Application.installKoin(
 
         val trailOptimizerScheduler by inject<TrailOptimizerScheduler>()
         trailOptimizerScheduler.close()
+
+        val elevationProvider by inject<ElevationProvider>()
+        elevationProvider.close()
     }
 }
