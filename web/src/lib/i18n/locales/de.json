@@ -228,6 +228,14 @@
     "zoom_in": "Vergrößern",
     "zoom_out": "Verkleinern",
     "fit": "Gesamten Verlauf anzeigen",
+    "shortcuts": {
+      "label": "Zeitraum",
+      "last_6_hours": {"label": "6 Std.", "title": "Letzte 6 Stunden"},
+      "last_24_hours": {"label": "24 Std.", "title": "Letzte 24 Stunden"},
+      "today": {"label": "Heute", "title": "Heute, seit Mitternacht"},
+      "last_week": {"label": "Woche", "title": "Letzte 7 Tage"},
+      "all": {"label": "Alle", "title": "Der gesamte verfügbare Verlauf"}
+    },
     "touch": {
       "select_hint": "Gedrückt halten und ziehen, um einen Bereich zu markieren"
     },

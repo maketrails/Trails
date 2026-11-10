@@ -10,6 +10,7 @@
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
     import TrailToolbar from "$lib/app/shell/map/TrailToolbar.svelte";
+    import RangeShortcuts from "$lib/app/shell/map/RangeShortcuts.svelte";
     import {trailDisplayMode} from "$lib/state/trail_display_mode.svelte";
     import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
     import MovementLane from "$lib/app/devices/MovementLane.svelte";
@@ -141,7 +142,7 @@
 {#snippet timeline()}
     {#if history.points.length > 0}
         <div class="flex flex-col gap-2">
-            <TrailToolbar />
+            <TrailToolbar end={rangeShortcuts} />
 
             <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
                 <Timeline
@@ -164,4 +165,17 @@
 
 {#snippet legend()}
     <TrailLegend marked={timelineSelection != null} mode={trailDisplayMode.mode} />
+{/snippet}
+
+{#snippet rangeShortcuts()}
+    <RangeShortcuts
+            grantSeconds={history.historySeconds}
+            oldest={new Date(history.points[0].timestamp)}
+            newest={new Date(history.points[history.points.length - 1].timestamp)}
+            view={timelineView}
+            onselect={(range) => {
+                timelineView = range;
+                timelineSelection = null;
+            }}
+    />
 {/snippet}

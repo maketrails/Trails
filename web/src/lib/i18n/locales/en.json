@@ -228,6 +228,14 @@
     "zoom_in": "Zoom in",
     "zoom_out": "Zoom out",
     "fit": "Show the whole history",
+    "shortcuts": {
+      "label": "Time range",
+      "last_6_hours": {"label": "6h", "title": "Last 6 hours"},
+      "last_24_hours": {"label": "24h", "title": "Last 24 hours"},
+      "today": {"label": "Today", "title": "Today, since midnight"},
+      "last_week": {"label": "Week", "title": "Last 7 days"},
+      "all": {"label": "All", "title": "The whole available history"}
+    },
     "touch": {
       "select_hint": "Hold and drag to mark a range"
     },
