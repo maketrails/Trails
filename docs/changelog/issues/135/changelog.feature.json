@@ -1,0 +1,10 @@
+{
+  "title": "Easier timeline on touch screens",
+  "description": "On a touch screen, the web timeline now pans with one finger and coasts on when flicked, zooms with a pinch around your fingers, and marks a range when you hold and drag. Tapping shows what happened at that moment on the map, and tapping outside a marked range clears it. Buttons and handles are bigger under a finger.",
+  "localized": {
+    "de": {
+      "title": "Einfachere Timeline auf Touchscreens",
+      "description": "Auf Touchscreens lässt sich die Timeline im Web jetzt mit einem Finger verschieben und gleitet nach einem Wischen weiter, zoomt per Zwei-Finger-Geste um die Fingermitte und markiert einen Bereich, wenn man gedrückt hält und zieht. Ein Tippen zeigt auf der Karte, was zu diesem Zeitpunkt passiert ist, und ein Tippen außerhalb eines markierten Bereichs hebt ihn auf. Schaltflächen und Griffe sind unter dem Finger größer."
+    }
+  }
+}
