@@ -1,0 +1,10 @@
+{
+  "title": "Time range shortcuts on the timeline",
+  "description": "Next to the trail switcher, the web timeline now has shortcuts for the last 6 hours, the last 24 hours, today, the last week and the whole history. A shortcut only appears if the period is actually available to you: your own devices show all of them, a share only those within the history its owner granted.",
+  "localized": {
+    "de": {
+      "title": "Zeitraum-Schnellwahl auf der Timeline",
+      "description": "Neben dem Spur-Umschalter hat die Timeline im Web jetzt Schnellwahlen für die letzten 6 Stunden, die letzten 24 Stunden, heute, die letzte Woche und den gesamten Verlauf. Eine Schnellwahl erscheint nur, wenn der Zeitraum für dich tatsächlich verfügbar ist: Eigene Geräte zeigen alle, eine Freigabe nur die, die im vom Besitzer freigegebenen Verlauf liegen."
+    }
+  }
+}
