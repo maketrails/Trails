@@ -219,6 +219,9 @@
     "zoom_in": "Vergrößern",
     "zoom_out": "Verkleinern",
     "fit": "Gesamten Verlauf anzeigen",
+    "touch": {
+      "select_hint": "Gedrückt halten und ziehen, um einen Bereich zu markieren"
+    },
     "scrollbar": {
       "window": "Sichtbarer Ausschnitt",
       "start": "Beginn des sichtbaren Ausschnitts",

@@ -78,3 +78,52 @@ describe("Timeline opening window", () => {
         expect(view()).toBe(moved);
     });
 });
+
+describe("Timeline on touch", () => {
+    /** A finger that lands and lifts without moving. */
+    async function tap(target: Element, clientX = 500) {
+        await fireEvent.pointerDown(target, {pointerId: 1, pointerType: "touch", clientX});
+        await fireEvent.pointerUp(target, {pointerId: 1, pointerType: "touch", clientX});
+    }
+
+    const track = () => screen.getByRole("region", {name: "History timeline"});
+
+    // jsdom lays nothing out, so every tap on the track lands in its middle: noon.
+    const aroundNoon = {start: Date.parse("2026-09-29T11:00:00Z"), end: Date.parse("2026-09-29T13:00:00Z")};
+
+    it("marks the stretch a lane block stands for when it is tapped", async () => {
+        render(TimelinePickHarness, {oldestPoint, newestPoint, pick});
+
+        await tap(screen.getByTestId("block"));
+
+        expect(screen.getByTestId("selection")).toHaveTextContent(`${pick.start},${pick.end}`);
+    });
+
+    it("drops a marked range on a tap outside it", async () => {
+        render(TimelinePickHarness, {oldestPoint, newestPoint, pick});
+        await tap(screen.getByTestId("block"));
+
+        await tap(track());
+
+        expect(screen.getByTestId("selection")).toHaveTextContent("none");
+    });
+
+    it("keeps a marked range on a tap inside it", async () => {
+        render(TimelinePickHarness, {oldestPoint, newestPoint, pick: aroundNoon});
+        await tap(screen.getByTestId("block"));
+
+        await tap(track());
+
+        expect(screen.getByTestId("selection")).toHaveTextContent(`${aroundNoon.start},${aroundNoon.end}`);
+    });
+
+    it("pans rather than marks when a finger swipes", async () => {
+        render(TimelinePickHarness, {oldestPoint, newestPoint, pick});
+
+        await fireEvent.pointerDown(track(), {pointerId: 1, pointerType: "touch", clientX: 500});
+        await fireEvent.pointerMove(track(), {pointerId: 1, pointerType: "touch", clientX: 400});
+        await fireEvent.pointerUp(track(), {pointerId: 1, pointerType: "touch", clientX: 400});
+
+        expect(screen.getByTestId("selection")).toHaveTextContent("none");
+    });
+});

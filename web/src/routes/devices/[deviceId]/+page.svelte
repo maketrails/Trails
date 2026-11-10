@@ -147,7 +147,7 @@
                 download
                 title={$_("devices.export_gpx")}
                 aria-label={$_("devices.export_gpx")}
-                class="flex size-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+                class="flex size-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent pointer-coarse:size-11"
         >
             <DownloadSimpleIcon size={16} />
         </a>
