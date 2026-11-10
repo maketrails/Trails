@@ -178,6 +178,7 @@
       }
     },
     "source": {
+      "label": "Daten",
       "optimized": "Optimiert",
       "raw": "Rohdaten"
     },
@@ -212,6 +213,14 @@
     },
     "bundle": {
       "label": "{count} Geräte an dieser Stelle"
+    },
+    "trail_display": {
+      "label": "Wie der Verlauf auf der Karte gezeichnet wird",
+      "modes": {
+        "none": "Keine Spur",
+        "trail": "Spur",
+        "heatmap": "Heatmap"
+      }
     }
   },
   "timeline": {
@@ -240,7 +249,12 @@
     "legend": {
       "label": "Was die Farben der Linie bedeuten",
       "track": "Strecke",
-      "marked": "Markiert"
+      "marked": "Markiert",
+      "heatmap": {
+        "label": "Wo wie viel Zeit verbracht wurde",
+        "less": "Wenig Zeit",
+        "more": "Viel Zeit"
+      }
     }
   }
 }

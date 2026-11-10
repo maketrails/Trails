@@ -12,6 +12,8 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
+    import TrailToolbar from "$lib/app/shell/map/TrailToolbar.svelte";
+    import {trailDisplayMode} from "$lib/state/trail_display_mode.svelte";
     import {DownloadSimpleIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
     import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
@@ -139,7 +141,7 @@
 <!-- The server names the file after the device and the window, so the link carries
      no name of its own. -->
 {#snippet exportAction()}
-    <TrailLegend marked={timelineSelection != null} />
+    <TrailLegend marked={timelineSelection != null} mode={trailDisplayMode.mode} />
 
     {#if gpxUrl != null}
         <a
@@ -159,19 +161,29 @@
 {/snippet}
 
 <!-- Nothing to lay a timeline over until the history has arrived, and the two
-     ends below would read past the end of an empty list. -->
+     ends below would read past the end of an empty list. Above it, how the history is
+     drawn on the map, next to the same source switch the card carries: the strip only
+     exists on wide screens, and the card's switch is the one left on narrow ones. -->
 {#snippet timeline()}
     {#if history.points.length > 0}
-        <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
-            <Timeline
-                    oldestPoint={new Date(history.points[0].timestamp)}
-                    newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
-                    bind:view={timelineView}
-                    bind:selection={timelineSelection}
-                    onhover={(at) => mapTrail.hover(at)}
-                    actions={exportAction}
-                    lanes={history.movements.length > 0 ? movementLane : undefined}
-            />
+        <div class="flex flex-col gap-2">
+            {#if isOwnDevice}
+                <TrailToolbar bind:source={historySource} />
+            {:else}
+                <TrailToolbar />
+            {/if}
+
+            <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+                <Timeline
+                        oldestPoint={new Date(history.points[0].timestamp)}
+                        newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+                        bind:view={timelineView}
+                        bind:selection={timelineSelection}
+                        onhover={(at) => mapTrail.hover(at)}
+                        actions={exportAction}
+                        lanes={history.movements.length > 0 ? movementLane : undefined}
+                />
+            </div>
         </div>
     {/if}
 {/snippet}

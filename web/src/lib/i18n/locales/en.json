@@ -178,6 +178,7 @@
       }
     },
     "source": {
+      "label": "Data",
       "optimized": "Optimized",
       "raw": "Raw data"
     },
@@ -212,6 +213,14 @@
     },
     "bundle": {
       "label": "{count} devices at this spot"
+    },
+    "trail_display": {
+      "label": "How the history is drawn on the map",
+      "modes": {
+        "none": "No trail",
+        "trail": "Trail",
+        "heatmap": "Heatmap"
+      }
     }
   },
   "timeline": {
@@ -240,7 +249,12 @@
     "legend": {
       "label": "What the colours on the line mean",
       "track": "Track",
-      "marked": "Marked"
+      "marked": "Marked",
+      "heatmap": {
+        "label": "How much time was spent where",
+        "less": "Less time",
+        "more": "More time"
+      }
     }
   }
 }
