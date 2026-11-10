@@ -8,6 +8,8 @@
     import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
     import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
+    import { trailDisplayMode, type TrailDisplayMode } from "$lib/state/trail_display_mode.svelte";
+    import { EMPTY_HEATMAP, heatmapColors, heatmapData, heatmapRange, type HeatmapData } from "./heatmap_features";
     import {
         coordinateAt,
         createTrailSource,
@@ -99,6 +101,8 @@
     const TRAIL_POINT_LAYER = "location-history-points-hover";
     const TRAIL_PUCK_SOURCE = "location-history-puck";
     const TRAIL_PUCK_LAYER = "location-history-puck-dot";
+    const HEATMAP_SOURCE = "location-history-heat";
+    const HEATMAP_LAYER = "location-history-heatmap";
     /**
      * How the line answers the timeline: only what the window shows is drawn, in the
      * track's colour or the colour of the movement it belongs to. A marked range is
@@ -212,6 +216,36 @@
             // beforeId does the same job in the classic night style. Inserting several
             // layers before the same one stacks them in insertion order.
             const beforeId = firstSymbolLayerId(currentMap);
+
+            /*
+             * Where the device spent its time, for the heatmap display mode. Under the
+             * line layers, though only one of the two is ever filled at a time. Weights
+             * arrive already relative to the heaviest cell (see heatmap_features), so
+             * the zoom only decides how far each one spreads and how strongly they add
+             * up: zoomed out, a city's worth of cells shares a few pixels and needs no
+             * help to glow; zoomed in, they are far apart and need a wider, stronger
+             * kernel to still read as one place rather than a scatter of dots.
+             */
+            currentMap.addSource(HEATMAP_SOURCE, {type: "geojson", data: EMPTY_HEATMAP});
+            currentMap.addLayer({
+                id: HEATMAP_LAYER,
+                type: "heatmap",
+                slot: "middle",
+                source: HEATMAP_SOURCE,
+                paint: {
+                    "heatmap-weight": ["get", "weight"],
+                    "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 0.6, 10, 1, 15, 1.6, 18, 2.2],
+                    "heatmap-radius": ["interpolate", ["exponential", 1.6], ["zoom"], 0, 3, 8, 10, 13, 18, 16, 30, 19, 48],
+                    "heatmap-color": [
+                        "interpolate",
+                        ["linear"],
+                        ["heatmap-density"],
+                        ...heatmapColors(darkMode.current).flat()
+                    ] as mapboxgl.ExpressionSpecification,
+                    "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 0, 0.85, 18, 0.7]
+                }
+            }, beforeId);
+
             // Solid stretches only — a solid casing under the dots would undo the
             // point of drawing them faintly.
             currentMap.addLayer({
@@ -440,6 +474,13 @@
         // Bound to the map rather than to the layer, so it also fires beside the trail.
         // The layer is gone between style swaps and while no trail is shown.
         if (currentMap == null || currentMap.getLayer(TRAIL_POINT_LAYER) == null) return;
+        // Only a line can be hovered. Without one there is nothing on the map to aim at,
+        // and a puck turning up beside an invisible track would only puzzle; the
+        // timeline still places it.
+        if (trailDisplayMode.mode !== "trail") {
+            pointerHover = null;
+            return;
+        }
 
         const coordinates = drawn.coordinates;
         const times = drawn.times;
@@ -555,7 +596,7 @@
     }
 
     /** What the last draw was made of, so a camera move can ask for it again. */
-    let lastDrawn: {points: HistoryPoint[]; focus: TrailFocus} | null = null;
+    let lastDrawn: {points: HistoryPoint[]; focus: TrailFocus; mode: TrailDisplayMode} | null = null;
 
     /**
      * Redraws at the detail the camera has come to rest at.
@@ -572,7 +613,7 @@
         const last = lastDrawn;
         if (currentMap == null || last == null) return;
 
-        scheduleDraw(() => drawTrail(currentMap, last.points, trailAnimationStart, last.focus));
+        scheduleDraw(() => drawTrail(currentMap, last.points, trailAnimationStart, last.focus, last.mode));
     }
 
     function cancelScheduledDraw() {
@@ -657,15 +698,48 @@
         return drawn;
     }
 
+    /** What the heat was last made of, so a camera move does not bin the history again. */
+    let heatFor: {points: HistoryPoint[]; range: string} | null = null;
+
+    /**
+     * Fills the heatmap with [points] as [focus] frames them, or empties it with `null`.
+     * Unlike the line it does not depend on the camera — mapbox spreads the heat per
+     * zoom by itself — so it is only rebuilt when the history or the framed range
+     * changes.
+     */
+    function setHeatmap(currentMap: mapboxgl.Map, points: HistoryPoint[] | null, focus: TrailFocus) {
+        const range = heatmapRange(focus);
+        const signature = range == null ? "all" : `${range.start}|${range.end}`;
+        if (points != null && heatFor?.points === points && heatFor.range === signature) return;
+        if (points == null && heatFor == null) return;
+
+        const data: HeatmapData = points == null ? EMPTY_HEATMAP : heatmapData(points, focus);
+        const source = currentMap.getSource(HEATMAP_SOURCE);
+        if (source?.type === "geojson") source.setData(data);
+        heatFor = points == null ? null : {points, range: signature};
+    }
+
     function drawTrail(
         currentMap: mapboxgl.Map,
         points: HistoryPoint[],
         animateFrom: number | null,
-        focus: TrailFocus
+        focus: TrailFocus,
+        mode: TrailDisplayMode
     ) {
         cancelTrailAnimation();
 
         const {coordinates, times, gaps, raws, breaks} = trackOf(currentMap, points);
+
+        // The track is chosen whatever the mode: the puck answering the timeline stands
+        // on it, and is still wanted with no line drawn under it. Only what is drawn
+        // differs — the line, the heat, or neither.
+        setHeatmap(currentMap, mode === "heatmap" ? points : null, focus);
+        if (mode !== "trail") {
+            trailAnimationStart = null;
+            setTrailCoordinates(currentMap, []);
+            return;
+        }
+
         const bands = bandFlags(times, focus);
         const movements = movementFlags(times, focus.movements);
         if (animateFrom == null || coordinates.length < 2) {
@@ -793,7 +867,8 @@
     $effect(() => {
         const currentMap = map;
         const at = mapTrail.hoveredAt;
-        const pointer = pointerHover;
+        // The cursor only counts on a drawn line, see updateHover.
+        const pointer = trailDisplayMode.mode === "trail" ? pointerHover : null;
         const focus = {window: mapTrail.window, selection: mapTrail.selection, movements: mapTrail.movements};
         if (currentMap == null || currentMap.getLayer(TRAIL_PUCK_LAYER) == null) return;
 
@@ -806,6 +881,9 @@
     // effect for the *same* track — a style swap, a history that arrived in pieces —
     // restores or continues the line instead of replaying it.
     let animatedTrailKey: string | null = null;
+
+    /** The style load the heat was last filled for, see setHeatmap. */
+    let heatEpoch = 0;
 
     // Draw the published location history (see setMapTrail). Clearing it on
     // teardown is what removes the line when the detail view navigates away —
@@ -825,6 +903,9 @@
         // The key has not changed then, so it is redrawn where its animation left it
         // rather than growing in again.
         const focus = { window: mapTrail.window, selection: mapTrail.selection, movements: mapTrail.movements };
+        // Switching it swaps what is drawn without replaying the grow-in: the track has
+        // not changed, only how it is shown.
+        const mode = trailDisplayMode.mode;
 
         // `style.load` (epoch > 0) is the signal that a style is in place, and
         // deliberately not isStyleLoaded() — that one also waits for every tile to
@@ -832,6 +913,11 @@
         // long ready, and nothing would ever retry.
         if (currentMap == null || epoch === 0) return;
         if (!addTrailLayers(currentMap)) return;
+        // A style swap wiped the heat along with its source, so it has to be made again.
+        if (epoch !== heatEpoch) {
+            heatEpoch = epoch;
+            heatFor = null;
+        }
 
         /*
          * A newly opened track grows in. The same track re-published — its cached part
@@ -860,8 +946,8 @@
 
         // Kept so the camera can ask for the same line again at a new zoom, without
         // the view being part of the reactive graph (see redrawForView).
-        lastDrawn = {points, focus};
-        scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus));
+        lastDrawn = {points, focus, mode};
+        scheduleDraw(() => drawTrail(currentMap, points, animateFrom, focus, mode));
 
         // Only the drawing is stopped here. Clearing the line as well would blank it
         // on every re-run — and this effect re-runs whenever the timeline moves, which
