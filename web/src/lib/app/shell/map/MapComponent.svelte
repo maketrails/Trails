@@ -620,9 +620,20 @@
         const padLng = (east - west) * VIEW_PADDING;
         const padLat = (north - south) * VIEW_PADDING;
 
+        // Recorded positions run from -180 to 180, while a view across the antimeridian
+        // reports longitudes past either end (or west beyond east). Clipping against
+        // such a box would cut away the part of the trail on the other side of the
+        // line, so the view then only clips by latitude.
+        let lngFrom = west - padLng;
+        let lngTo = east + padLng;
+        if (west > east || lngFrom < -180 || lngTo > 180) {
+            lngFrom = -180;
+            lngTo = 180;
+        }
+
         return {
             tolerance: toleranceFor(currentMap.getZoom(), currentMap.getCenter().lat),
-            bounds: [west - padLng, south - padLat, east + padLng, north + padLat]
+            bounds: [lngFrom, south - padLat, lngTo, north + padLat]
         };
     }
 

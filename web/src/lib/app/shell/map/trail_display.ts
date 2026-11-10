@@ -36,6 +36,11 @@ const MAX_RUNGS = 10;
  * How many consecutive points share one bounding box. Clipping a fine rung would
  * otherwise walk a million points to find the handful on screen; with a box per
  * chunk it walks the boxes instead and only opens the ones it has to.
+ *
+ * A chunk's box also takes in the first point of the chunk after it, so it bounds
+ * every stretch that starts inside the chunk — including the one that leads out of
+ * it. A box that misses the view therefore guarantees that none of those stretches
+ * can cross it.
  */
 const CHUNK = 64;
 
@@ -100,6 +105,58 @@ export interface TrailView {
     /** What to clip to, or `null` to draw the track wherever it runs. */
     bounds: TrailBounds | null;
     budget?: number;
+}
+
+const within = (bounds: TrailBounds, lng: number, lat: number) =>
+    lng >= bounds[0] && lng <= bounds[2] && lat >= bounds[1] && lat <= bounds[3];
+
+/**
+ * Whether the straight stretch from `(x1, y1)` to `(x2, y2)` touches [bounds] anywhere,
+ * ends included. Liang–Barsky: the stretch is clipped against each of the four edges in
+ * turn, and it touches the box if anything of it is left.
+ *
+ * Straight in degrees, which is how the map draws a line between two positions at the
+ * zooms a clip happens at.
+ */
+export function segmentCrosses(
+    bounds: TrailBounds,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+): boolean {
+    if (within(bounds, x1, y1) || within(bounds, x2, y2)) return true;
+
+    // Both ends beyond the same edge: the cheap and by far most common answer.
+    if ((x1 < bounds[0] && x2 < bounds[0]) || (x1 > bounds[2] && x2 > bounds[2])) return false;
+    if ((y1 < bounds[1] && y2 < bounds[1]) || (y1 > bounds[3] && y2 > bounds[3])) return false;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    let enter = 0;
+    let leave = 1;
+
+    const edges: [number, number][] = [
+        [-dx, x1 - bounds[0]],
+        [dx, bounds[2] - x1],
+        [-dy, y1 - bounds[1]],
+        [dy, bounds[3] - y1],
+    ];
+    for (const [p, q] of edges) {
+        if (p === 0) {
+            if (q < 0) return false;
+            continue;
+        }
+        const t = q / p;
+        if (p < 0) {
+            if (t > leave) return false;
+            if (t > enter) enter = t;
+        } else {
+            if (t < enter) return false;
+            if (t < leave) leave = t;
+        }
+    }
+    return enter <= leave;
 }
 
 /**
@@ -297,7 +354,9 @@ export function createTrailSource(points: HistoryPoint[]): TrailSource {
             let north = -Infinity;
 
             const from = chunk * CHUNK;
-            const to = Math.min(from + CHUNK, length);
+            // One past the chunk: the stretch from its last point to the next chunk's
+            // first one starts in here and has to be bounded by this box too.
+            const to = Math.min(from + CHUNK + 1, length);
             for (let i = from; i < to; i++) {
                 const lng = coordinates[i * 2];
                 const lat = coordinates[i * 2 + 1];
@@ -315,7 +374,7 @@ export function createTrailSource(points: HistoryPoint[]): TrailSource {
         return boxes;
     }
 
-    /** Whether the chunk's box lies wholly off screen. */
+    /** Whether the chunk's box, and with it every stretch starting in the chunk, lies wholly off screen. */
     const chunkMisses = (rung: Rung, chunk: number, bounds: TrailBounds) =>
         rung.boxes[chunk * 4] > bounds[2]
         || rung.boxes[chunk * 4 + 2] < bounds[0]
@@ -340,18 +399,19 @@ export function createTrailSource(points: HistoryPoint[]): TrailSource {
         return count;
     }
 
-    const within = (bounds: TrailBounds, lng: number, lat: number) =>
-        lng >= bounds[0] && lng <= bounds[2] && lat >= bounds[1] && lat <= bounds[3];
-
     /**
-     * The rung cut down to what is on screen. A point just outside is kept when a
-     * neighbour is inside, so a line entering the view comes from off screen rather
-     * than starting at its edge; everything else becomes a break.
+     * The rung cut down to what is on screen. What decides is the stretch, not the
+     * point: a point is kept when a stretch leading into or out of it crosses the
+     * view, even if the point itself lies outside. So a line entering the view comes
+     * from off screen rather than starting at its edge, and a long stretch whose two
+     * ends both lie off screen is still drawn where it cuts across the view.
+     * Everything else becomes a break.
      *
-     * Whole chunks whose box misses the view are stepped over — all their points are
-     * outside, so only the two at their ends can be somebody's inside neighbour, and
-     * only those two are looked at. That is what makes clipping a million-point rung
-     * cost about as much as clipping the handful actually on screen.
+     * Whole chunks whose box misses the view are stepped over — no stretch starting
+     * in them can cross it, so only their first point can still be kept, for the
+     * stretch that leads into the chunk from the one before. That is what makes
+     * clipping a million-point rung cost about as much as clipping the handful
+     * actually on screen.
      */
     function clip(rung: Rung, bounds: TrailBounds | null): DisplayTrack {
         const coordinates: number[][] = [];
@@ -378,13 +438,23 @@ export function createTrailSource(points: HistoryPoint[]): TrailSource {
             carriedRaw = 0;
         };
 
-        /** Whether [i] is on screen, or next to a point that is. */
+        /** Whether the stretch from [i] to the point after it crosses the view. */
+        const stretchCrosses = (i: number) =>
+            bounds != null
+            && i + 1 < rung.length
+            && segmentCrosses(
+                bounds,
+                rung.coordinates[i * 2],
+                rung.coordinates[i * 2 + 1],
+                rung.coordinates[i * 2 + 2],
+                rung.coordinates[i * 2 + 3],
+            );
+
+        /** Whether [i] is on screen, or an end of a stretch that crosses it. */
         const isNear = (i: number) => {
             if (bounds == null) return true;
             if (within(bounds, rung.coordinates[i * 2], rung.coordinates[i * 2 + 1])) return true;
-            if (i > 0 && within(bounds, rung.coordinates[i * 2 - 2], rung.coordinates[i * 2 - 1])) return true;
-            return i + 1 < rung.length
-                && within(bounds, rung.coordinates[i * 2 + 2], rung.coordinates[i * 2 + 3]);
+            return (i > 0 && stretchCrosses(i - 1)) || stretchCrosses(i);
         };
 
         for (let i = 0; i < rung.length; ) {
@@ -402,7 +472,6 @@ export function createTrailSource(points: HistoryPoint[]): TrailSource {
                     carriedRaw |= rung.raws[k];
                 }
                 if (isNear(i)) keep(i);
-                if (to - 1 > i && isNear(to - 1)) keep(to - 1);
                 i = to;
                 continue;
             }
