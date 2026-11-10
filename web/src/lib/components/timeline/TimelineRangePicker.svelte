@@ -67,7 +67,7 @@
 
 <Popover>
     <PopoverTrigger
-            class="flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-card-foreground transition-colors hover:bg-accent"
+            class="flex min-w-0 cursor-pointer flex-row items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs pointer-coarse:py-2 text-card-foreground transition-colors hover:bg-accent"
             title={$_("timeline.range.edit")}
     >
         <CalendarBlankIcon size={14} />

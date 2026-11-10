@@ -219,6 +219,9 @@
     "zoom_in": "Zoom in",
     "zoom_out": "Zoom out",
     "fit": "Show the whole history",
+    "touch": {
+      "select_hint": "Hold and drag to mark a range"
+    },
     "scrollbar": {
       "window": "Visible window",
       "start": "Start of the visible window",

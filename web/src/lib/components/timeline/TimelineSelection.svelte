@@ -116,11 +116,12 @@
                 onpointerup={onHandleUp}
                 onpointercancel={onHandleUp}
                 onkeydown={(event) => onHandleKey(handle.edge, event)}
-                class="absolute inset-y-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
+                class="absolute inset-y-0 w-3 -translate-x-1/2 cursor-ew-resize pointer-coarse:w-11 touch-none outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50"
                 style:left="{handle.x}px"
         >
             <!-- The grab area is wider than the mark, so the end can be caught with a
-                 finger without the line having to be thick. -->
+                 finger without the line having to be thick — 44 px, a fingertip, on a
+                 touch screen. -->
             <div class="mx-auto h-full w-1 rounded-full bg-amber-500"></div>
         </div>
     {/if}
