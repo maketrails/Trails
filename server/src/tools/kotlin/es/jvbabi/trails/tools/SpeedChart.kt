@@ -3,6 +3,7 @@ package es.jvbabi.trails.tools
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.file
@@ -11,6 +12,11 @@ import database.DataSnapshots
 import es.jvbabi.trails.data.TrackPipeline
 import es.jvbabi.trails.data.TrackPipeline.Position
 import es.jvbabi.trails.data.TrailOptimizer
+import es.jvbabi.trails.config.ApplicationConfigFile
+import es.jvbabi.trails.data.elevation.ElevationProvider
+import es.jvbabi.trails.data.elevation.HttpTileFetcher
+import es.jvbabi.trails.data.elevation.TerrainTileElevationProvider
+import kotlinx.coroutines.runBlocking
 import es.jvbabi.trails.data.model.Movement
 import es.jvbabi.trails.database.Device
 import kotlinx.datetime.LocalDateTime
@@ -52,6 +58,10 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
     val to by option("--to", help = "Only show positions recorded before this local time")
     val out by option("--out", help = "HTML file to write").file(canBeDir = false)
         .default(java.io.File("speed-charts/speed.html"))
+    val elevationCache by option("--elevation-cache", help = "Elevation tile cache, shared with the server")
+        .file(canBeFile = false)
+        .default(java.io.File("server/data/elevation-tiles"))
+    val noElevation by option("--no-elevation", help = "Classify as if every track were flat").flag()
 
     override fun run() {
         val deviceId = Uuid.parse(device)
@@ -86,14 +96,28 @@ private class SpeedChartCommand : CliktCommand("speed-chart") {
         val segments = mutableListOf<TrackPipeline.Segment>()
         val runs = mutableListOf<List<TrackPipeline.Leg>>()
 
+        val fetcher = HttpTileFetcher(ApplicationConfigFile.Elevation.DEFAULT_TILE_URL)
+        val elevationProvider = if (noElevation) ElevationProvider.Disabled
+        else TerrainTileElevationProvider(elevationCache, fetcher)
+
         for (batch in raw.chunked(TrailOptimizer.BATCH_SIZE)) {
-            val processed = TrackPipeline.process(batch)
+            // The same selection the optimizer fetches elevation for.
+            val elevation = runBlocking {
+                elevationProvider.lookupFor(
+                    batch
+                        .filter { it.accuracy < TrackPipeline.MAX_MOVING_ACCURACY_METERS }
+                        .map { it.latitude to it.longitude }
+                )
+            }
+            val processed = TrackPipeline.process(batch, elevation)
             segments += processed
 
             val update = movements.add(processed.flatMap { it.legs })
             update.replaceFrom?.let { from -> runs.removeAll { run -> run.first().start >= from } }
             runs += update.runs
         }
+
+        fetcher.close()
 
         for (run in runs) {
             val reassigned = run.count { it.mode != it.measuredMode }
