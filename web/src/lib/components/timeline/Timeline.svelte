@@ -1,6 +1,6 @@
 <script lang="ts">
     import {ArrowsOutLineHorizontalIcon, MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon, XIcon} from "phosphor-svelte";
-    import type {Snippet} from "svelte";
+    import {type Snippet, untrack} from "svelte";
     import {_, locale} from "svelte-i18n";
     import TimelineAxis from "./TimelineAxis.svelte";
     import TimelineScrollbar from "./TimelineScrollbar.svelte";
@@ -151,10 +151,36 @@
 
     // Open on the most recent week, or on the whole history if it is shorter: months
     // of points squeezed into one strip say nothing, and what a device did lately is
-    // what a reader looks for first. Only ever runs while there is no window — a
-    // later history update must not yank the view away from where the user scrolled.
+    // what a reader looks for first. The history arrives oldest first and in pieces, so
+    // the newest point keeps moving while it loads: for as long as the window is still
+    // the one opened here, it follows the bounds. Once the user (or the parent) has
+    // moved it, it stays where it was put.
+    let opened: {start: number; end: number} | null = null;
+
     $effect(() => {
-        if (view == null && width > 0) timeline.openOn(OPENING_SPAN);
+        void oldestPoint.getTime();
+        void newestPoint.getTime();
+        if (width <= 0) return;
+
+        const current = untrack(() => view);
+        const untouched = current != null && opened != null
+            && current.start.getTime() === opened.start && current.end.getTime() === opened.end;
+        if (current != null && !untouched) {
+            opened = null;
+            return;
+        }
+
+        timeline.openOn(OPENING_SPAN);
+        const next = untrack(() => view);
+        opened = next == null ? null : {start: next.start.getTime(), end: next.end.getTime()};
+    });
+
+    // The window belongs to the data on show. Once this timeline goes away — the history
+    // was swapped for another one — a window left in the bound state would stay on the
+    // map as a stale focus, and be taken for a moved one by the next timeline.
+    $effect(() => () => {
+        view = null;
+        selection = null;
     });
 
     /** The moment under the pointer, drawn as a line across the track. */

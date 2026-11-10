@@ -1,5 +1,7 @@
 import {fireEvent, render, screen} from "@testing-library/svelte";
 import {afterAll, beforeAll, describe, expect, it} from "vitest";
+import {tick} from "svelte";
+import TimelineGrowHarness from "./TimelineGrowHarness.svelte";
 import TimelinePickHarness from "./TimelinePickHarness.svelte";
 
 const oldestPoint = new Date("2026-09-29T00:00:00Z");
@@ -38,5 +40,41 @@ describe("Timeline", () => {
         await click(screen.getByRole("region", {name: "History timeline"}));
 
         expect(screen.getByTestId("selection")).toHaveTextContent("none");
+    });
+});
+
+describe("Timeline opening window", () => {
+    const day = 24 * 60 * 60 * 1_000;
+    const oldest = new Date("2026-01-01T00:00:00Z");
+    const at = (days: number) => new Date(oldest.getTime() + days * day);
+    const view = () => screen.getByTestId("view").textContent;
+
+    it("opens on the newest week", async () => {
+        render(TimelineGrowHarness, {oldestPoint: oldest, newestPoint: at(30)});
+        await tick();
+
+        expect(view()).toBe(`${at(23).getTime()},${at(30).getTime()}`);
+    });
+
+    it("follows the newest point while the history is still arriving", async () => {
+        const {rerender} = render(TimelineGrowHarness, {oldestPoint: oldest, newestPoint: at(2)});
+        await tick();
+
+        await rerender({oldestPoint: oldest, newestPoint: at(60)});
+        await tick();
+
+        expect(view()).toBe(`${at(53).getTime()},${at(60).getTime()}`);
+    });
+
+    it("stays where it was put once it has been moved", async () => {
+        const {rerender} = render(TimelineGrowHarness, {oldestPoint: oldest, newestPoint: at(30)});
+        await tick();
+        await fireEvent.click(screen.getByTestId("move"));
+        const moved = view();
+
+        await rerender({oldestPoint: oldest, newestPoint: at(60)});
+        await tick();
+
+        expect(view()).toBe(moved);
     });
 });
