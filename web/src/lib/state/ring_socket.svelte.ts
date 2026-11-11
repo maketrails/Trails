@@ -2,6 +2,19 @@
 type RingSocketMessage =
     | { type: "ring.state"; device_id: string; is_ringing: boolean; ringed_by: string };
 
+/**
+ * How long a connection has to stay open before it counts as established and the
+ * reconnect backoff starts over. Resetting it on `open` alone would let a server
+ * that accepts the upgrade and closes right away drive a reconnect every second.
+ */
+const STABLE_CONNECTION_MS = 10_000;
+
+/**
+ * Close codes the server sends when it refuses this socket for good (unauthenticated,
+ * not the caller's device, invalid id). Retrying cannot change the answer.
+ */
+const PERMANENT_CLOSE_CODES = new Set([1003, 1008]);
+
 function socketUrl(deviceId: string): string {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${location.host}/api/v1/devices/${deviceId}/ring/ws`;
@@ -20,6 +33,7 @@ export class DeviceRingSocket {
 
     #socket: WebSocket | null = null;
     #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    #stableTimer: ReturnType<typeof setTimeout> | null = null;
     #reconnectAttempts = 0;
     #open = false;
 
@@ -45,6 +59,7 @@ export class DeviceRingSocket {
     close() {
         this.#open = false;
         this.#clearReconnect();
+        this.#clearStable();
         this.#reconnectAttempts = 0;
         this.#isRinging = false;
         this.#ringedBy = null;
@@ -62,7 +77,11 @@ export class DeviceRingSocket {
         this.#socket = ws;
 
         ws.onopen = () => {
-            this.#reconnectAttempts = 0;
+            this.#clearStable();
+            this.#stableTimer = setTimeout(() => {
+                this.#stableTimer = null;
+                if (this.#socket === ws) this.#reconnectAttempts = 0;
+            }, STABLE_CONNECTION_MS);
         };
 
         ws.onmessage = (event) => {
@@ -77,8 +96,15 @@ export class DeviceRingSocket {
             ws.close();
         };
 
-        ws.onclose = () => {
-            if (this.#socket === ws) this.#socket = null;
+        ws.onclose = (event) => {
+            // A socket replaced or closed on purpose must not reconnect anything.
+            if (this.#socket !== ws) return;
+            this.#socket = null;
+            this.#clearStable();
+            if (PERMANENT_CLOSE_CODES.has(event.code)) {
+                console.warn(`Ring socket refused (${event.code} ${event.reason}), not reconnecting`);
+                return;
+            }
             this.#scheduleReconnect();
         };
     }
@@ -98,6 +124,13 @@ export class DeviceRingSocket {
         const delay = Math.min(30_000, 1_000 * 2 ** this.#reconnectAttempts);
         this.#reconnectAttempts++;
         this.#reconnectTimer = setTimeout(() => this.#connect(), delay);
+    }
+
+    #clearStable() {
+        if (this.#stableTimer != null) {
+            clearTimeout(this.#stableTimer);
+            this.#stableTimer = null;
+        }
     }
 
     #clearReconnect() {
