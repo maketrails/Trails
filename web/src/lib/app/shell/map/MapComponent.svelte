@@ -9,6 +9,7 @@
     import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import { trailDisplayMode, type TrailDisplayMode } from "$lib/state/trail_display_mode.svelte";
+    import { mapStyleUrl } from "./map_style";
     import { EMPTY_HEATMAP, heatmapColors, heatmapData, heatmapRange, type HeatmapData } from "./heatmap_features";
     import {
         coordinateAt,
@@ -81,11 +82,11 @@
     }
 
     const darkMode = new MediaQuery("(prefers-color-scheme: dark)");
-    const style = $derived(
-        darkMode.current
-            ? "mapbox://styles/mapbox/traffic-night-v2"
-            : "mapbox://styles/mapbox/standard"
-    );
+    // The reduced basemap only while a heatmap is actually drawn: the mode is stored per
+    // viewer, so it is still "heatmap" on pages that publish no trail at all. The key
+    // rather than the points decides, so a history arriving in pieces swaps nothing.
+    const showsHeatmap = $derived(trailDisplayMode.mode === "heatmap" && mapTrail.key != null);
+    const style = $derived(mapStyleUrl(darkMode.current, showsHeatmap));
 
     // The location-history line: a light casing under a solid stroke, so the
     // trail stays legible over both map styles. The colours mirror the theme's
@@ -791,6 +792,7 @@
                 return;
             }
 
+            appliedStyle = style;
             map = new mapboxgl.Map({
                 accessToken,
                 container: mapContainer!,
@@ -865,8 +867,17 @@
         };
     });
 
+    // No diff: a diffed swap between two classic styles keeps the map alive without a
+    // `style.load`, which is what tells the trail and heat effects to add their layers back.
+    // Only an actual change reloads: the map was created with the current style already.
+    let appliedStyle: string | null = null;
     $effect(() => {
-        map?.setStyle(style);
+        const next = style;
+        if (map == null || next === appliedStyle) return;
+        appliedStyle = next;
+        // The typings mark the font options as required although the map defaults them;
+        // passing them would override those defaults, so only `diff` goes in.
+        map.setStyle(next, {diff: false} as Parameters<mapboxgl.Map["setStyle"]>[1]);
     });
 
     /**
