@@ -1,0 +1,8 @@
+{
+  "description": "The device page no longer reconnects the ring connection over and over.",
+  "localized": {
+    "de": {
+      "description": "Die Geräteseite baut die Klingel-Verbindung nicht mehr ständig neu auf."
+    }
+  }
+}
