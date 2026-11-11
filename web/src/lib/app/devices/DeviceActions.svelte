@@ -12,9 +12,14 @@
 
     // The ring socket is per-device and only lives while this actions panel is
     // mounted (i.e. while the device's detail view is open). No global socket.
+    //
+    // The parent hands the id in as `device.id`, and every device update replaces
+    // that object. Reading the prop in the effect would tie it to the object and
+    // reopen the socket on each update; the derived only changes with the id itself.
+    let ringDeviceId = $derived(deviceId);
     let ringSocket = $state<DeviceRingSocket | null>(null);
     $effect(() => {
-        const socket = new DeviceRingSocket(deviceId);
+        const socket = new DeviceRingSocket(ringDeviceId);
         socket.open();
         ringSocket = socket;
         return () => {
