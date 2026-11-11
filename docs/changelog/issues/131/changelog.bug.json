@@ -1,0 +1,8 @@
+{
+  "description": "Trails on the web map are no longer cut off near the screen edges while part of them is still in view.",
+  "localized": {
+    "de": {
+      "description": "Pfade auf der Web-Karte werden am Bildschirmrand nicht mehr abgeschnitten, solange ein Teil von ihnen noch sichtbar ist."
+    }
+  }
+}
