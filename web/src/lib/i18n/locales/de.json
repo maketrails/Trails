@@ -264,5 +264,67 @@
         "more": "Viel Zeit"
       }
     }
+  },
+  "lab": {
+    "timeline": {
+      "badge": "Experimentell",
+      "title": "Labor: Neue Zeitleiste",
+      "description": "Drei Prototypen einer neuen Zeitleiste, auf einer erzeugten Woche Verlauf. Nichts hier spricht mit dem Server oder bewegt die echte Karte, und nichts verlinkt hierher.",
+      "proposals": {
+        "label": "Vorschlag",
+        "day_strip": {
+          "name": "Tagesstreifen",
+          "pitch": "Eine Zeile pro Tag, wie ein Kalender: Jeder Tag ist gleich breit, so lassen sich Tage auf einen Blick vergleichen. Tippe auf einen Tag, um ihn zu öffnen, und auf eine Bewegung darin, um sie zu fokussieren."
+        },
+        "scrubber": {
+          "name": "Scrubber",
+          "pitch": "Oben der ganze Verlauf als Übersicht, mit einem Rahmen für den Ausschnitt darunter. Der Ausschnitt gleitet unter einer festen Nadel hindurch, und die Anzeige sagt, was dort gerade passierte."
+        },
+        "story": {
+          "name": "Geschichte",
+          "pitch": "Aufenthalte und Wege als Liste, das Neueste zuerst und nach Tagen gruppiert, mit Orten, Dauern und Strecken. Die schmale Leiste darüber zeigt, wo die Liste steht, und springt auf Druck dorthin."
+        }
+      },
+      "preview_width": {
+        "label": "Vorschaubreite",
+        "wide": "Breit",
+        "phone": "Handy"
+      },
+      "map_stand_in": {
+        "label": "Karte:",
+        "nothing": "zeigt den ganzen Verlauf als {mode}.",
+        "focus": "würde {range} einrahmen, gezeichnet als {mode}."
+      },
+      "places": {
+        "home": "Zuhause",
+        "work": "Arbeit",
+        "station": "Bahnhof",
+        "cafe": "Café",
+        "park": "Park",
+        "lake": "See",
+        "friends": "Freunde"
+      },
+      "episodes": {
+        "stay": "{place}",
+        "no_data": "Keine Daten",
+        "no_data_for": "{duration} ohne Daten",
+        "route": "{from} → {to}"
+      },
+      "day_strip": {
+        "days": "Tage",
+        "hint": "Tippe auf einen Tag, um ihn zu öffnen",
+        "summary": "{count, plural, =0 {Keine Wege} one {# Weg} other {# Wege}} · {distance} · {moving} unterwegs"
+      },
+      "scrubber": {
+        "overview": "Ganzer Verlauf",
+        "window": "Ausschnitt",
+        "detail": "Ausschnitt im Detail",
+        "hint": "Ziehen zum Spulen · Kneifen oder Strg + Scrollen zum Zoomen"
+      },
+      "story": {
+        "scrubber": "Wo die Liste im Zeitraum steht",
+        "empty": "In diesem Zeitraum ist nichts passiert."
+      }
+    }
   }
 }

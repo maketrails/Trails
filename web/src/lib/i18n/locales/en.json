@@ -264,5 +264,67 @@
         "more": "More time"
       }
     }
+  },
+  "lab": {
+    "timeline": {
+      "badge": "Experimental",
+      "title": "Timeline redesign lab",
+      "description": "Three prototypes of a new timeline, on a generated week of history. Nothing here talks to the server or moves the real map, and nothing links here.",
+      "proposals": {
+        "label": "Proposal",
+        "day_strip": {
+          "name": "Day strip",
+          "pitch": "One row per day, like a calendar: every day is the same 24 hours wide, so days can be compared at a glance. Tap a day to open it, tap a movement inside to focus it."
+        },
+        "scrubber": {
+          "name": "Scrubber",
+          "pitch": "The whole history as an overview on top, with a brush framing the detail below. The detail slides under a fixed needle, and the readout says what was happening there."
+        },
+        "story": {
+          "name": "Story",
+          "pitch": "Stays and trips as a list, newest first and grouped by day, with places, durations and distances. The slim bar above shows where the list is and jumps it on a press."
+        }
+      },
+      "preview_width": {
+        "label": "Preview width",
+        "wide": "Wide",
+        "phone": "Phone"
+      },
+      "map_stand_in": {
+        "label": "Map:",
+        "nothing": "shows the whole history as {mode}.",
+        "focus": "would frame {range}, drawn as {mode}."
+      },
+      "places": {
+        "home": "Home",
+        "work": "Work",
+        "station": "Station",
+        "cafe": "Café",
+        "park": "Park",
+        "lake": "Lake",
+        "friends": "Friends"
+      },
+      "episodes": {
+        "stay": "At {place}",
+        "no_data": "No data",
+        "no_data_for": "No data for {duration}",
+        "route": "{from} → {to}"
+      },
+      "day_strip": {
+        "days": "Days",
+        "hint": "Tap a day to open it",
+        "summary": "{count, plural, =0 {No trips} one {# trip} other {# trips}} · {distance} · {moving} on the move"
+      },
+      "scrubber": {
+        "overview": "Whole history",
+        "window": "Detail window",
+        "detail": "Detail",
+        "hint": "Drag to scrub · pinch or ctrl + scroll to zoom"
+      },
+      "story": {
+        "scrubber": "Where the list is in the range",
+        "empty": "Nothing happened in this range."
+      }
+    }
   }
 }
