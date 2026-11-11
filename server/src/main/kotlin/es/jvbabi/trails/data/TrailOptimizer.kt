@@ -9,6 +9,7 @@ import es.jvbabi.trails.database.DatabaseManager
 import es.jvbabi.trails.database.Device
 import es.jvbabi.trails.database.TrackRebuild
 import es.jvbabi.trails.data.TrackPipeline.Position
+import es.jvbabi.trails.data.elevation.ElevationProvider
 import io.ktor.util.logging.KtorSimpleLogger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -55,6 +56,8 @@ class TrailOptimizer(
     private val db by inject<DatabaseManager>()
 
     private val deviceRepository by inject<DeviceRepository>()
+
+    private val elevationProvider by inject<ElevationProvider>()
 
     /** The measurements of this device — the input, never written to. */
     private val raw get() = (DataSnapshots.device eq deviceId) and (DataSnapshots.isRaw eq true)
@@ -318,7 +321,15 @@ class TrailOptimizer(
 
             if (batch.isEmpty()) break
 
-            val segments = TrackPipeline.process(batch)
+            // Fetched before the pipeline runs, which is pure and must not wait on downloads.
+            // Positions the trust filter is bound to drop do not get to download tiles.
+            val elevation = elevationProvider.lookupFor(
+                batch
+                    .filter { it.accuracy < TrackPipeline.MAX_MOVING_ACCURACY_METERS }
+                    .map { it.latitude to it.longitude }
+            )
+
+            val segments = TrackPipeline.process(batch, elevation)
             val update = movements.add(segments.flatMap { it.legs })
 
             // A trip that may still go on is logged once it is complete.

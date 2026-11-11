@@ -19,10 +19,14 @@ class ApplicationConfig(
     val database = config.database ?: ApplicationConfigFile.Database.Sqlite(path = File(storageDirectory).resolve("database.db").absolutePath)
     val mapboxAccessToken = config.mapbox?.accessToken
     val nominatimBaseUrl = config.nominatim?.baseUrl ?: ApplicationConfigFile.Nominatim.DEFAULT_BASE_URL
+    val elevation = config.elevation ?: ApplicationConfigFile.Elevation()
 
     val url = URLBuilder(baseUrl)
     val storage = File(storageDirectory).apply { mkdirs() }
     val deviceImages = this.storage.resolve("device-images").apply { mkdirs() }
+
+    /** Downloaded elevation tiles, see [ApplicationConfigFile.Elevation]. Created on first download. */
+    val elevationTiles = this.storage.resolve("elevation-tiles")
     val jwtSecret = storage.resolve("jwt-secret.key")
         .let { file ->
             if (!file.exists()) file.writeText(Random.nextBytes(32).joinToString(separator = "") { "%02x".format(it) })
@@ -37,6 +41,7 @@ data class ApplicationConfigFile(
     @SerialName("auth") val auth: Auth? = null,
     @SerialName("mapbox") val mapbox: Mapbox? = null,
     @SerialName("nominatim") val nominatim: Nominatim? = null,
+    @SerialName("elevation") val elevation: Elevation? = null,
 ) {
     @Serializable
     data class Mapbox(
@@ -52,6 +57,22 @@ data class ApplicationConfigFile(
         }
     }
 
+    /**
+     * Terrain elevation for the trail optimizer, which takes the gradient into account
+     * when it tells walking, cycling and motorised travel apart. Tiles are downloaded
+     * on demand from [tileUrl] and cached in the `elevation-tiles` folder of the data
+     * directory. Without elevation, every track is classified as if it were flat.
+     */
+    @Serializable
+    data class Elevation(
+        @SerialName("enabled") val enabled: Boolean = true,
+        /** Terrarium encoded PNG tiles; `{z}`, `{x}` and `{y}` are replaced by the tile coordinates. */
+        @SerialName("tile_url") val tileUrl: String = DEFAULT_TILE_URL,
+    ) {
+        companion object {
+            const val DEFAULT_TILE_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+        }
+    }
 
     @Serializable
     sealed class Database {

@@ -19,13 +19,15 @@ algorithm.
 ./gradlew :server:speedChart --args="--device <device uuid>"
 ```
 
-| Option     | Default                   | Meaning                                                     |
-|------------|---------------------------|-------------------------------------------------------------|
-| `--device` | —                         | UUID of the device, see the `devices` table                 |
-| `--db`     | `server/data/database.db` | SQLite database of the server                               |
-| `--from`   | —                         | Only show positions recorded from this local time on        |
-| `--to`     | —                         | Only show positions recorded before this local time         |
-| `--out`    | `speed-charts/speed.html` | HTML file to write; `speed-charts/` is ignored by git       |
+| Option              | Default                       | Meaning                                               |
+|---------------------|-------------------------------|-------------------------------------------------------|
+| `--device`          | —                             | UUID of the device, see the `devices` table           |
+| `--db`              | `server/data/database.db`     | SQLite database of the server                         |
+| `--from`            | —                             | Only show positions recorded from this local time on  |
+| `--to`              | —                             | Only show positions recorded before this local time   |
+| `--out`             | `speed-charts/speed.html`     | HTML file to write; `speed-charts/` is ignored by git |
+| `--elevation-cache` | `server/data/elevation-tiles` | Elevation tile cache, the same folder the server uses |
+| `--no-elevation`    | —                             | Classify as if every track were flat                  |
 
 Paths are relative to the repository root, times are local ISO times such as
 `2026-09-29T08:30`. Besides the chart, the tool prints every run of the same movement
@@ -35,4 +37,5 @@ In the chart, drag across the plot to zoom in; the zoom is kept in the URL
 (`#from=…&to=…`), so a reload or a shared link opens the same range. *Reset zoom* shows
 everything again, and *Table view* lists every value.
 
-Only SQLite databases are supported.
+Only SQLite databases are supported. Elevation tiles the server has not cached yet are
+downloaded into the cache, like the server would.
