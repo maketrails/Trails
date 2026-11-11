@@ -1,0 +1,10 @@
+{
+  "title": "Calm map for the heatmap",
+  "description": "While the heatmap is shown, the map switches to a reduced light or dark style without colourful roads, points of interest and 3D buildings, so the heat stands out.",
+  "localized": {
+    "de": {
+      "title": "Ruhige Karte für die Heatmap",
+      "description": "Solange die Heatmap angezeigt wird, wechselt die Karte auf einen reduzierten hellen oder dunklen Stil ohne bunte Straßen, Orte und 3D-Gebäude, damit die Heatmap hervorsticht."
+    }
+  }
+}
