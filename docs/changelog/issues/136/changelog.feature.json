@@ -1,0 +1,10 @@
+{
+  "title": "Trail, heatmap or nothing on the map",
+  "description": "Above the web timeline, a switcher now chooses how a device's history is drawn on the map: no trail at all, the trail as before, or a heatmap of where the device spent its time. The heatmap follows the timeline like the trail does and works with both raw and optimized data. For your own devices, the raw/optimized switch sits right next to it. The choice is remembered in your browser.",
+  "localized": {
+    "de": {
+      "title": "Spur, Heatmap oder nichts auf der Karte",
+      "description": "Über der Timeline im Web wählt ein Umschalter jetzt, wie der Verlauf eines Geräts auf der Karte gezeichnet wird: gar keine Spur, die Spur wie bisher oder eine Heatmap, wo sich das Gerät aufgehalten hat. Die Heatmap folgt der Timeline wie die Spur und funktioniert mit Roh- und optimierten Daten. Bei eigenen Geräten sitzt der Umschalter zwischen Roh- und optimierten Daten direkt daneben. Die Wahl merkt sich dein Browser."
+    }
+  }
+}

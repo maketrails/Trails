@@ -20,4 +20,19 @@ describe("TrailLegend", () => {
 
         expect(entries()).toContain("Marked");
     });
+
+    it("explains the heat's scale instead of the line's colours", () => {
+        render(TrailLegend, {mode: "heatmap"});
+
+        expect(screen.queryByRole("list", {name: "What the colours on the line mean"})).toBeNull();
+        const scale = screen.getByRole("img", {name: "How much time was spent where"});
+        expect(scale.textContent).toContain("Less time");
+        expect(scale.textContent).toContain("More time");
+    });
+
+    it("explains nothing while nothing is drawn", () => {
+        const {container} = render(TrailLegend, {mode: "none"});
+
+        expect(container.textContent?.trim()).toBe("");
+    });
 });

@@ -178,6 +178,7 @@
       }
     },
     "source": {
+      "label": "Daten",
       "optimized": "Optimiert",
       "raw": "Rohdaten"
     },
@@ -212,6 +213,14 @@
     },
     "bundle": {
       "label": "{count} Geräte an dieser Stelle"
+    },
+    "trail_display": {
+      "label": "Wie der Verlauf auf der Karte gezeichnet wird",
+      "modes": {
+        "none": "Keine Spur",
+        "trail": "Spur",
+        "heatmap": "Heatmap"
+      }
     }
   },
   "timeline": {
@@ -219,6 +228,17 @@
     "zoom_in": "Vergrößern",
     "zoom_out": "Verkleinern",
     "fit": "Gesamten Verlauf anzeigen",
+    "shortcuts": {
+      "label": "Zeitraum",
+      "last_6_hours": {"label": "6 Std.", "title": "Letzte 6 Stunden"},
+      "last_24_hours": {"label": "24 Std.", "title": "Letzte 24 Stunden"},
+      "today": {"label": "Heute", "title": "Heute, seit Mitternacht"},
+      "last_week": {"label": "Woche", "title": "Letzte 7 Tage"},
+      "all": {"label": "Alle", "title": "Der gesamte verfügbare Verlauf"}
+    },
+    "touch": {
+      "select_hint": "Gedrückt halten und ziehen, um einen Bereich zu markieren"
+    },
     "scrollbar": {
       "window": "Sichtbarer Ausschnitt",
       "start": "Beginn des sichtbaren Ausschnitts",
@@ -237,7 +257,12 @@
     "legend": {
       "label": "Was die Farben der Linie bedeuten",
       "track": "Strecke",
-      "marked": "Markiert"
+      "marked": "Markiert",
+      "heatmap": {
+        "label": "Wo wie viel Zeit verbracht wurde",
+        "less": "Wenig Zeit",
+        "more": "Viel Zeit"
+      }
     }
   }
 }

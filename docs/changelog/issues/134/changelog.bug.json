@@ -1,0 +1,8 @@
+{
+  "description": "The web timeline now opens on the newest week and filters the trail on the map correctly, even while the history is still loading.",
+  "localized": {
+    "de": {
+      "description": "Die Timeline im Web öffnet jetzt auf der neuesten Woche und filtert den Verlauf auf der Karte von Anfang an richtig, auch während die Historie noch lädt."
+    }
+  }
+}

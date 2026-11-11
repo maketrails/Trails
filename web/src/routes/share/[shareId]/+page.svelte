@@ -9,6 +9,9 @@
     import {claimMapTrail} from "$lib/state/map_trail.svelte";
     import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
     import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
+    import TrailToolbar from "$lib/app/shell/map/TrailToolbar.svelte";
+    import RangeShortcuts from "$lib/app/shell/map/RangeShortcuts.svelte";
+    import {trailDisplayMode} from "$lib/state/trail_display_mode.svelte";
     import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
     import MovementLane from "$lib/app/devices/MovementLane.svelte";
     import {_} from "svelte-i18n";
@@ -134,19 +137,24 @@
 </div>
 
 <!-- Nothing to lay a timeline over until the history has arrived, and the two ends
-     below would read past the end of an empty list. -->
+     below would read past the end of an empty list. Above it, how the history is drawn
+     on the map — without a source switch: a share hands out one series only. -->
 {#snippet timeline()}
     {#if history.points.length > 0}
-        <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
-            <Timeline
-                    oldestPoint={new Date(history.points[0].timestamp)}
-                    newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
-                    bind:view={timelineView}
-                    bind:selection={timelineSelection}
-                    onhover={(at) => mapTrail.hover(at)}
-                    actions={legend}
-                    lanes={history.movements.length > 0 ? movementLane : undefined}
-            />
+        <div class="flex flex-col gap-2">
+            <TrailToolbar end={rangeShortcuts} />
+
+            <div class="pointer-events-auto rounded-3xl border border-border bg-accent/65 text-card-foreground shadow-2xl backdrop-blur-lg h-48">
+                <Timeline
+                        oldestPoint={new Date(history.points[0].timestamp)}
+                        newestPoint={new Date(history.points[history.points.length - 1].timestamp)}
+                        bind:view={timelineView}
+                        bind:selection={timelineSelection}
+                        onhover={(at) => mapTrail.hover(at)}
+                        actions={legend}
+                        lanes={history.movements.length > 0 ? movementLane : undefined}
+                />
+            </div>
         </div>
     {/if}
 {/snippet}
@@ -156,5 +164,18 @@
 {/snippet}
 
 {#snippet legend()}
-    <TrailLegend marked={timelineSelection != null} />
+    <TrailLegend marked={timelineSelection != null} mode={trailDisplayMode.mode} />
+{/snippet}
+
+{#snippet rangeShortcuts()}
+    <RangeShortcuts
+            grantSeconds={history.historySeconds}
+            oldest={new Date(history.points[0].timestamp)}
+            newest={new Date(history.points[history.points.length - 1].timestamp)}
+            view={timelineView}
+            onselect={(range) => {
+                timelineView = range;
+                timelineSelection = null;
+            }}
+    />
 {/snippet}

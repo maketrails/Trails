@@ -1,5 +1,6 @@
 <script lang="ts">
     import {_, locale} from "svelte-i18n";
+    import {MediaQuery} from "svelte/reactivity";
     import type {TimelineWindow} from "./timeline_window";
 
     let {
@@ -9,8 +10,12 @@
         timeline: TimelineWindow;
     } = $props();
 
-    /** Narrowest the thumb may be drawn, so its two grips stay grabbable. */
-    const MIN_THUMB = 24;
+    /**
+     * Narrowest the thumb may be drawn, so its two grips stay grabbable. The grips are
+     * wider under a finger (see the `pointer-coarse:` classes below), and so is this.
+     */
+    const coarsePointer = new MediaQuery("(pointer: coarse)");
+    let minThumb = $derived(coarsePointer.current ? 48 : 24);
 
     /** Which part of the thumb a gesture holds: the bar itself, or one of its ends. */
     type Grip = "window" | "start" | "end";
@@ -25,7 +30,7 @@
         if (barWidth === 0) return null;
 
         const scale = barWidth / space.length;
-        const width = Math.min(barWidth, Math.max(MIN_THUMB, timeline.span * scale));
+        const width = Math.min(barWidth, Math.max(minThumb, timeline.span * scale));
         const left = Math.min(Math.max((timeline.start - space.start) * scale, 0), barWidth - width);
         return {left, width};
     });
@@ -97,7 +102,7 @@
      instead of moving it — dragging them zooms. -->
 <div
         bind:clientWidth={barWidth}
-        class="relative h-3 w-full shrink-0 overflow-hidden rounded-full bg-card/60"
+        class="relative h-3 w-full shrink-0 pointer-coarse:h-6 overflow-hidden rounded-full bg-card/60"
 >
     {#if thumb != null}
         <div
@@ -108,7 +113,7 @@
             {@render grip({
                 grip: "start",
                 label: $_("timeline.scrollbar.start"),
-                classes: "w-3 shrink-0 cursor-ew-resize rounded-l-full bg-primary/60 hover:bg-primary/80",
+                classes: "w-3 shrink-0 cursor-ew-resize rounded-l-full pointer-coarse:w-6 bg-primary/60 hover:bg-primary/80",
                 min: space.start,
                 max: timeline.end - timeline.minSpan,
                 now: timeline.start,
@@ -124,7 +129,7 @@
             {@render grip({
                 grip: "end",
                 label: $_("timeline.scrollbar.end"),
-                classes: "w-3 shrink-0 cursor-ew-resize rounded-r-full bg-primary/60 hover:bg-primary/80",
+                classes: "w-3 shrink-0 cursor-ew-resize rounded-r-full pointer-coarse:w-6 bg-primary/60 hover:bg-primary/80",
                 min: timeline.start + timeline.minSpan,
                 max: space.start + space.length,
                 now: timeline.end,

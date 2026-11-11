@@ -1,6 +1,6 @@
 <script lang="ts">
     import {ArrowsOutLineHorizontalIcon, MagnifyingGlassMinusIcon, MagnifyingGlassPlusIcon, XIcon} from "phosphor-svelte";
-    import type {Snippet} from "svelte";
+    import {type Snippet, untrack} from "svelte";
     import {_, locale} from "svelte-i18n";
     import TimelineAxis from "./TimelineAxis.svelte";
     import TimelineScrollbar from "./TimelineScrollbar.svelte";
@@ -66,6 +66,9 @@
     /** What one arrow key does, as a share of the window. */
     const PAN_STEP = 0.1;
 
+    /** How close to the inspected moment a tap has to land to put it away again, in pixels. */
+    const INSPECT_TOGGLE_DISTANCE = 24;
+
     // The window lives in the bindable prop and the model only reads and writes it,
     // so there is one source of truth no matter which side moves the timeline.
     const timeline = createTimelineWindow({
@@ -126,6 +129,21 @@
                 sweepTarget = null;
             },
         },
+        // A finger has no hover, so a tap is how it asks what happened at a moment: the
+        // moment is pinned under the line until the next tap moves it, or a tap on it
+        // puts it away again. A tap on a block marks that block's stretch, like a click;
+        // a tap outside a marked range drops the range, one inside it leaves it be — it
+        // is where the reader is looking.
+        tap(anchor: number, target: EventTarget | null) {
+            const at = timeAt(anchor);
+            const again = hoverAt != null && Math.abs(hoverAt - at) <= INSPECT_TOGGLE_DISTANCE * msPerPixel;
+            hoverAt = again ? null : at;
+            onhover?.(hoverAt == null ? null : new Date(hoverAt));
+
+            const picked = pickedRange(target);
+            if (picked != null) selection = picked;
+            else if (selection != null && (at < selection.start.getTime() || at > selection.end.getTime())) selection = null;
+        },
     };
 
     /**
@@ -151,10 +169,36 @@
 
     // Open on the most recent week, or on the whole history if it is shorter: months
     // of points squeezed into one strip say nothing, and what a device did lately is
-    // what a reader looks for first. Only ever runs while there is no window — a
-    // later history update must not yank the view away from where the user scrolled.
+    // what a reader looks for first. The history arrives oldest first and in pieces, so
+    // the newest point keeps moving while it loads: for as long as the window is still
+    // the one opened here, it follows the bounds. Once the user (or the parent) has
+    // moved it, it stays where it was put.
+    let opened: {start: number; end: number} | null = null;
+
     $effect(() => {
-        if (view == null && width > 0) timeline.openOn(OPENING_SPAN);
+        void oldestPoint.getTime();
+        void newestPoint.getTime();
+        if (width <= 0) return;
+
+        const current = untrack(() => view);
+        const untouched = current != null && opened != null
+            && current.start.getTime() === opened.start && current.end.getTime() === opened.end;
+        if (current != null && !untouched) {
+            opened = null;
+            return;
+        }
+
+        timeline.openOn(OPENING_SPAN);
+        const next = untrack(() => view);
+        opened = next == null ? null : {start: next.start.getTime(), end: next.end.getTime()};
+    });
+
+    // The window belongs to the data on show. Once this timeline goes away — the history
+    // was swapped for another one — a window left in the bound state would stay on the
+    // map as a stale focus, and be taken for a moved one by the next timeline.
+    $effect(() => () => {
+        view = null;
+        selection = null;
     });
 
     /** The moment under the pointer, drawn as a line across the track. */
@@ -180,6 +224,10 @@
      * looking, so a running sweep keeps the report on its own moving end.
      */
     function onPointerMove(event: PointerEvent) {
+        // A finger is only over the track while it is moving it; what it inspects is
+        // set by a tap instead (see `gestures.tap`).
+        if (event.pointerType === "touch") return;
+
         const rect = event.currentTarget instanceof HTMLElement
             ? event.currentTarget.getBoundingClientRect()
             : null;
@@ -190,7 +238,8 @@
         onhover?.(new Date(hoverAt));
     }
 
-    function onPointerLeave() {
+    function onPointerLeave(event: PointerEvent) {
+        if (event.pointerType === "touch") return;
         hoverAt = null;
         onhover?.(null);
     }
@@ -239,13 +288,18 @@
                         onclick={() => (selection = null)}
                         title={$_("timeline.selection.clear")}
                         aria-label={$_("timeline.selection.clear")}
-                        class="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+                        class="flex size-6 shrink-0 cursor-pointer pointer-coarse:size-11 items-center justify-center rounded-full transition-colors hover:bg-accent"
                 >
                     <XIcon size={14} />
                 </button>
             </div>
         {:else}
-            <span class="truncate text-xs text-muted-foreground">{rangeLabel}</span>
+            <span class="truncate text-xs text-muted-foreground">
+                {rangeLabel}
+                <!-- Touch has no cursor to suggest what a press does, and holding is the
+                     one gesture nobody tries by accident. -->
+                <span class="hidden pointer-coarse:inline">· {$_("timeline.touch.select_hint")}</span>
+            </span>
         {/if}
 
         <div class="flex shrink-0 flex-row items-center gap-1">
@@ -257,7 +311,9 @@
     </div>
 
     <!-- `touch-none` hands every finger to the gestures above: without it the browser
-         would scroll the page instead of the timeline. -->
+         would pan or zoom the page — or pull it down to refresh — instead of the
+         timeline. Nothing around the strip scrolls vertically, so there is no page
+         scroll to leave to the browser either. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <!-- A scrollable region is focusable on purpose (ARIA APG): the arrow keys and
@@ -319,7 +375,7 @@
             onclick={press}
             title={label}
             aria-label={label}
-            class="flex size-7 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-accent"
+            class="flex size-7 cursor-pointer items-center pointer-coarse:size-11 justify-center rounded-full transition-colors hover:bg-accent"
     >
         <Icon size={16} />
     </button>
