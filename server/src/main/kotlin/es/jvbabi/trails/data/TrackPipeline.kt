@@ -19,16 +19,21 @@ import kotlin.time.Instant
  *    gap is removed first, while the positions on both sides can still see it.
  * 3. **Stale repeat removal** — a fix reported again under a later timestamp
  *    while the device moves squeezes the next step into too little time.
- * 4. **Spike removal** — a position whose two neighbours are much closer to
- *    each other than to it is GPS noise: real movement continues in some
- *    direction, noise leaves and comes back.
+ * 4. **Spike removal** — a run of up to [SPIKE_MAX_RUN] positions whose two
+ *    neighbours are much closer to each other than to it is GPS noise: real
+ *    movement continues in some direction, noise leaves and comes back. A
+ *    sharp U-turn that the positions around it lead into and out of at the
+ *    same pace stays. So does a detour only reachable at a speed or
+ *    acceleration the movement around it does not explain.
  * 5. **Stationary collapse** — a cloud of positions that stays inside
  *    [STATIONARY_RADIUS_METERS] for at least [STATIONARY_MIN_SECONDS] becomes
  *    one accuracy weighted center, written twice so the pause keeps its
  *    duration instead of the device wandering around while it sits still.
- * 6. **Smoothing** — the positions in motion are fitted to a line through
- *    their neighbours in time, see [SMOOTHING_SIGMA_SECONDS]. Pauses are left as
- *    they are, so a stop stays a stop instead of turning into a slow crawl.
+ * 6. **Smoothing** — the positions in motion are fitted to a parabola through
+ *    their neighbours in time, see [SMOOTHING_SIGMA_SECONDS]. Pauses and turns
+ *    are left as they are, so a stop stays a stop instead of turning into a slow
+ *    crawl and a corner is not cut. No position moves further than its own
+ *    accuracy, see [SMOOTHING_MAX_SHIFT_METERS].
  *
  * The thresholds were tuned against a 79 day, 156k position export in the
  * `optimizer/` Python playground, where 40 % of the positions failed the trust
@@ -61,6 +66,41 @@ internal object TrackPipeline {
     const val SPIKE_PASSES = 4
 
     /**
+     * How many consecutive positions may form one spike. A phone that loses its
+     * fix tends to report two or three bad positions in a row before it is back;
+     * a longer excursion has enough positions to be told from noise by its shape.
+     */
+    const val SPIKE_MAX_RUN = 3
+
+    /**
+     * A step into or out of an excursion still continues the track around it while
+     * it turns by less than this. A U-turn is led into straight on and left the
+     * same way; a spike leaves the track at an angle and comes back at another.
+     */
+    const val SPIKE_SUPPORT_MAX_TURN_DEGREES = 60.0
+
+    /**
+     * A step into or out of an excursion continues the track around it only while it
+     * is at most this many times as fast as its neighbouring step — see
+     * [SPIKE_SUPPORT_MIN_SPEED_METERS_PER_SECOND] for the floor that speed is
+     * compared against.
+     */
+    const val SPIKE_SUPPORT_SPEED_FACTOR = 2.0
+
+    /**
+     * Floor for the neighbouring speed in [SPIKE_SUPPORT_SPEED_FACTOR]: standing
+     * still, jitter of a few metres must not make any step look fast.
+     */
+    const val SPIKE_SUPPORT_MIN_SPEED_METERS_PER_SECOND = 1.0
+
+    /**
+     * Change of speed a device can plausibly build up between two fixes, in m/s².
+     * A brisk car start manages about 2.5. A step faster than the speed around it
+     * allows for — plus what its accuracy explains — is a jump, not a ride.
+     */
+    const val MAX_ACCELERATION_METERS_PER_SECOND_SQUARED = 2.5
+
+    /**
      * Same order of magnitude as the accuracy we trust: inside it, noise
      * and movement cannot be told apart.
      */
@@ -84,6 +124,27 @@ internal object TrackPipeline {
 
     /** Neighbours further away than this count too little to be worth reading. */
     const val SMOOTHING_WINDOW_SECONDS = 2 * SMOOTHING_SIGMA_SECONDS
+
+    /**
+     * Upper bound for how far smoothing may move a position, which also never
+     * moves one further than its own accuracy. Whatever the fit still gets wrong
+     * in a bend stays within what the fix itself could be off.
+     */
+    const val SMOOTHING_MAX_SHIFT_METERS = 10.0
+
+    /**
+     * A position where the track turns by at least this much is a turn: smoothing
+     * leaves it where it is and does not look past it, so the line fitted on one
+     * side of a corner does not pull the other side inwards.
+     */
+    const val TURN_MIN_DEGREES = 35.0
+
+    /**
+     * The direction into and out of a position is read towards the nearest
+     * neighbours at least this far away — or twice the position's accuracy, if
+     * that is more — so jitter between closely spaced fixes does not read as a turn.
+     */
+    const val TURN_MIN_ARM_METERS = 10.0
 
     /**
      * A leg is judged by the speed it stays below for this share of its time,
@@ -351,30 +412,116 @@ internal object TrackPipeline {
 
     /**
      * Whether [current] leaves the way from [previous] to [following] and comes
-     * back: both neighbours are much closer to each other than to it, further
-     * apart than their accuracy explains.
+     * back, without any context to tell it from a U-turn — see [isNeedle].
      */
-    private fun isSpike(previous: Position, current: Position, following: Position): Boolean {
-        val toCurrent = distance(previous, current)
-        val fromCurrent = distance(current, following)
+    private fun isSpike(previous: Position, current: Position, following: Position): Boolean =
+        isNeedle(previous, listOf(current), following, before = null, after = null)
+
+    /**
+     * Whether [run] leaves the way from [previous] to [following] and comes back:
+     * the two are much closer to each other than the way through [run] is long,
+     * and [run] reaches further out than their accuracy explains.
+     *
+     * A real U-turn has that shape too. It is told apart by the positions around
+     * it: [before] leads into it and [after] out of it at the same pace and in the
+     * same direction, see [continues]. Without both of them, the shape decides.
+     */
+    private fun isNeedle(
+        previous: Position,
+        run: List<Position>,
+        following: Position,
+        before: Position?,
+        after: Position?,
+    ): Boolean {
+        val path = listOf(previous) + run + following
+        val length = path.zipWithNext().sumOf { (first, second) -> distance(first, second) }
         val skipping = distance(previous, following)
 
-        val excursion = min(toCurrent, fromCurrent)
-        val noise = previous.accuracy + current.accuracy
+        val excursion = run.maxOf { min(distance(previous, it), distance(it, following)) }
+        val noise = previous.accuracy + run.maxOf { it.accuracy }
 
-        val returns = skipping <= SPIKE_RETURN_RATIO * (toCurrent + fromCurrent)
+        val returns = skipping <= SPIKE_RETURN_RATIO * length
         val farEnough = excursion >= max(SPIKE_MIN_EXCURSION_METERS, noise)
+        if (!returns || !farEnough) return false
 
-        return farEnough && returns
+        val ledInto = before != null && continues(before, previous, previous, run.first())
+        val ledOutOf = after != null && continues(following, after, run.last(), following)
+
+        return !(ledInto && ledOutOf)
     }
 
     /**
-     * Removes positions that jump away and immediately come back.
+     * Whether the step from [stepFrom] to [stepTo] continues the step from
+     * [contextFrom] to [contextTo] next to it: about the same direction, see
+     * [SPIKE_SUPPORT_MAX_TURN_DEGREES], and not much faster, see
+     * [SPIKE_SUPPORT_SPEED_FACTOR].
+     */
+    private fun continues(contextFrom: Position, contextTo: Position, stepFrom: Position, stepTo: Position): Boolean {
+        val contextSpeed = speedMetersPerSecond(contextFrom, contextTo) ?: return false
+        val stepSpeed = speedMetersPerSecond(stepFrom, stepTo) ?: return false
+
+        val fastEnough = stepSpeed <=
+                SPIKE_SUPPORT_SPEED_FACTOR * max(contextSpeed, SPIKE_SUPPORT_MIN_SPEED_METERS_PER_SECOND)
+
+        return fastEnough && turnDegrees(contextFrom, contextTo, stepFrom, stepTo) <= SPIKE_SUPPORT_MAX_TURN_DEGREES
+    }
+
+    /**
+     * Whether the way from [previous] through [run] to [following] takes a step
+     * faster than the movement around it allows for, while going from [previous]
+     * to [following] directly does not — see
+     * [MAX_ACCELERATION_METERS_PER_SECOND_SQUARED].
+     *
+     * The movement around it is the faster of the steps [before] and [after] the
+     * stretch. Without both of them only [MAX_SPEED_METERS_PER_SECOND] counts:
+     * an accelerating car at the edge of a batch would look like a jump.
+     */
+    private fun isJump(
+        previous: Position,
+        run: List<Position>,
+        following: Position,
+        before: Position?,
+        after: Position?,
+    ): Boolean {
+        val around = if (before != null && after != null) {
+            max(
+                speedMetersPerSecond(before, previous) ?: 0.0,
+                speedMetersPerSecond(following, after) ?: 0.0,
+            )
+        } else {
+            null
+        }
+
+        fun implausible(first: Position, second: Position): Boolean {
+            val seconds = seconds(first, second)
+            if (seconds <= 0) return true
+
+            val limit = if (around == null) MAX_SPEED_METERS_PER_SECOND else min(
+                MAX_SPEED_METERS_PER_SECOND,
+                around + MAX_ACCELERATION_METERS_PER_SECOND_SQUARED * seconds / 2 +
+                        (first.accuracy + second.accuracy) / seconds
+            )
+
+            return distance(first, second) / seconds > limit
+        }
+
+        if (implausible(previous, following)) return false
+
+        return (listOf(previous) + run + following).zipWithNext().any { (first, second) -> implausible(first, second) }
+    }
+
+    /**
+     * Removes positions that jump away and immediately come back, alone or in a
+     * run of up to [SPIKE_MAX_RUN].
      *
      * Real movement continues in some direction. GPS noise around a spot
      * leaves the track and returns to where it came from, so the two
      * neighbours of a spike are close to each other while both are far away
-     * from the position in between.
+     * from the positions in between — see [isNeedle]. A detour that only a jump
+     * could have made goes too, see [isJump].
+     *
+     * The shortest run that explains the excursion is removed, so a single bad
+     * position never takes a good neighbour with it.
      */
     private fun dropSpikes(segment: List<Position>): List<Position> {
         var kept = segment
@@ -393,24 +540,18 @@ internal object TrackPipeline {
             val survivors = mutableListOf(kept[start])
             var removed = start
 
-            for (index in start + 1 until kept.lastIndex) {
-                val previous = survivors.last()
-                val current = kept[index]
-                val following = kept[index + 1]
+            var index = start + 1
 
-                if (isSpike(previous, current, following)) {
-                    removed++
-                    continue
+            while (index < kept.lastIndex) {
+                val spike = spikeLength(survivors, kept, index)
+
+                if (spike > 0) {
+                    removed += spike
+                    index += spike
+                } else {
+                    survivors += kept[index]
+                    index++
                 }
-
-                // Only credible as a jump if the successor stays reachable —
-                // otherwise the whole stretch moved, and this position is fine.
-                if (unreachable(previous, current) && !unreachable(previous, following)) {
-                    removed++
-                    continue
-                }
-
-                survivors += current
             }
 
             val last = kept.last()
@@ -425,6 +566,32 @@ internal object TrackPipeline {
         }
 
         return kept
+    }
+
+    /**
+     * How many positions from `kept[index]` on form a spike, 0 if none do. The
+     * position before them is the last one that survived, the one after them is
+     * the next one in [kept]; one more on either side tells a spike from a U-turn.
+     * The segment's last position is never part of a spike here, see [dropSpikes].
+     */
+    private fun spikeLength(survivors: List<Position>, kept: List<Position>, index: Int): Int {
+        val previous = survivors.last()
+        val before = survivors.getOrNull(survivors.lastIndex - 1)
+
+        for (length in 1..SPIKE_MAX_RUN) {
+            val followingIndex = index + length
+            if (followingIndex > kept.lastIndex) break
+
+            val run = kept.subList(index, followingIndex)
+            val following = kept[followingIndex]
+            val after = kept.getOrNull(followingIndex + 1)
+
+            if (isNeedle(previous, run, following, before, after) || isJump(previous, run, following, before, after)) {
+                return length
+            }
+        }
+
+        return 0
     }
 
     /**
@@ -491,15 +658,19 @@ internal object TrackPipeline {
     }
 
     /**
-     * Moves every moving position onto a line fitted through its neighbours in
-     * time, weighted by [SMOOTHING_SIGMA_SECONDS] and by accuracy.
+     * Moves every moving position onto a curve fitted through its neighbours in
+     * time, weighted by [SMOOTHING_SIGMA_SECONDS] and by accuracy, see [LocalFit].
      *
      * Positions that share their coordinates with a neighbour are pinned: that is
      * the arrival and departure pair [collapseStationary] leaves behind, or a device
      * standing still. They are neither moved nor looked past, so the movement on
      * one side of a stop does not leak into the other and the stop keeps a speed of
      * zero. The segment edges are pinned as well — with neighbours on one side only,
-     * the average would drag them into the segment.
+     * the average would drag them into the segment. So are turns, see [isTurn]: a
+     * curve fitted across a corner would cut it.
+     *
+     * What is left of a bend is bounded too: no position moves further than its
+     * accuracy or [SMOOTHING_MAX_SHIFT_METERS].
      */
     private fun smooth(segment: List<Position>): List<Position> {
         fun samePlace(first: Position, second: Position) =
@@ -508,7 +679,8 @@ internal object TrackPipeline {
         val pinned = segment.indices.map { index ->
             index == 0 || index == segment.lastIndex ||
                     samePlace(segment[index - 1], segment[index]) ||
-                    samePlace(segment[index], segment[index + 1])
+                    samePlace(segment[index], segment[index + 1]) ||
+                    isTurn(segment, index)
         }
 
         return segment.mapIndexed { index, position ->
@@ -517,32 +689,25 @@ internal object TrackPipeline {
             /*
              * A weighted mean would be pulled towards whichever side has more
              * neighbours — a fix missing on one side shifts a fast device by a
-             * hundred metres. Fitting a straight line through the neighbours and
-             * reading it at this position's time stays on the track however they
-             * are spread. Offsets from the position keep the sums small.
+             * hundred metres. Fitting a curve through the neighbours and reading it
+             * at this position's time stays on the track however they are spread.
+             * A parabola rather than a straight line: a line through a bend sits
+             * on its inside, a parabola follows it. Offsets from the position keep
+             * the sums small.
              */
-            var weightSum = 0.0
-            var weightedTime = 0.0
-            var weightedTimeSquared = 0.0
-            var latitude = 0.0
-            var longitude = 0.0
-            var latitudeTime = 0.0
-            var longitudeTime = 0.0
+            val fit = LocalFit()
 
             fun include(neighbour: Position) {
                 val time = seconds(position, neighbour)
                 val weight = exp(-time.pow(2) / (2 * SMOOTHING_SIGMA_SECONDS.pow(2))) /
                         max(neighbour.accuracy, 1.0).pow(2)
-                val latitudeOffset = neighbour.latitude - position.latitude
-                val longitudeOffset = neighbour.longitude - position.longitude
 
-                weightSum += weight
-                weightedTime += weight * time
-                weightedTimeSquared += weight * time * time
-                latitude += weight * latitudeOffset
-                longitude += weight * longitudeOffset
-                latitudeTime += weight * time * latitudeOffset
-                longitudeTime += weight * time * longitudeOffset
+                fit.add(
+                    time = time,
+                    weight = weight,
+                    latitudeOffset = neighbour.latitude - position.latitude,
+                    longitudeOffset = neighbour.longitude - position.longitude,
+                )
             }
 
             include(position)
@@ -559,17 +724,128 @@ internal object TrackPipeline {
                 }
             }
 
-            // Zero without a neighbour: no line to fit, the position stays as it is.
-            val determinant = weightSum * weightedTimeSquared - weightedTime * weightedTime
-            if (determinant <= 0) return@mapIndexed position
+            // Null without a neighbour: nothing to fit, the position stays as it is.
+            val (latitudeShift, longitudeShift) = fit.valueAtZero() ?: return@mapIndexed position
+
+            val shift = distance(
+                position.latitude, position.longitude,
+                position.latitude + latitudeShift, position.longitude + longitudeShift
+            )
+            val maxShift = min(position.accuracy, SMOOTHING_MAX_SHIFT_METERS)
+            val scale = if (shift > maxShift) maxShift / shift else 1.0
 
             position.copy(
-                latitude = position.latitude +
-                        (weightedTimeSquared * latitude - weightedTime * latitudeTime) / determinant,
-                longitude = position.longitude +
-                        (weightedTimeSquared * longitude - weightedTime * longitudeTime) / determinant
+                latitude = position.latitude + scale * latitudeShift,
+                longitude = position.longitude + scale * longitudeShift
             )
         }
+    }
+
+    /**
+     * Weighted least squares fit of latitude and longitude offsets over time, for
+     * [smooth]: a parabola where the neighbours pin one down, a straight line where
+     * they only span two distinct times.
+     */
+    private class LocalFit {
+        /** `moments[k]` is the weighted sum of `time^k`. */
+        private val moments = DoubleArray(5)
+        private val latitude = DoubleArray(3)
+        private val longitude = DoubleArray(3)
+
+        fun add(time: Double, weight: Double, latitudeOffset: Double, longitudeOffset: Double) {
+            var power = weight
+
+            for (k in 0..4) {
+                moments[k] += power
+                if (k < 3) {
+                    latitude[k] += power * latitudeOffset
+                    longitude[k] += power * longitudeOffset
+                }
+                power *= time
+            }
+        }
+
+        /** The fitted offsets at time zero, or null if nothing can be fitted. */
+        fun valueAtZero(): Pair<Double, Double>? = quadratic() ?: linear()
+
+        private fun quadratic(): Pair<Double, Double>? {
+            val (s0, s1, s2, s3, s4) = moments
+
+            // Cramer's rule for the intercept: the system's determinant with its
+            // first column replaced by (a, b, c).
+            fun determinant(a: Double, b: Double, c: Double) =
+                a * (s2 * s4 - s3 * s3) - s1 * (b * s4 - s3 * c) + s2 * (b * s3 - s2 * c)
+
+            val determinant = determinant(s0, s1, s2)
+
+            // Fewer than three distinct times: no parabola, only a line.
+            if (determinant <= QUADRATIC_MIN_CONDITION * s0 * s2 * s4) return null
+
+            return determinant(latitude[0], latitude[1], latitude[2]) / determinant to
+                    determinant(longitude[0], longitude[1], longitude[2]) / determinant
+        }
+
+        private fun linear(): Pair<Double, Double>? {
+            val (s0, s1, s2) = moments
+            val determinant = s0 * s2 - s1 * s1
+            if (determinant <= 0) return null
+
+            return (s2 * latitude[0] - s1 * latitude[1]) / determinant to
+                    (s2 * longitude[0] - s1 * longitude[1]) / determinant
+        }
+
+        private companion object {
+            /** Below this share of its scale the parabola's system counts as singular. */
+            const val QUADRATIC_MIN_CONDITION = 1e-6
+        }
+    }
+
+    /**
+     * Whether the track turns at `segment[index]` by at least [TURN_MIN_DEGREES].
+     *
+     * The direction in is read from the nearest earlier position at least an arm's
+     * length away, the direction out towards the nearest later one, see
+     * [TURN_MIN_ARM_METERS]; only positions within [SMOOTHING_WINDOW_SECONDS] are
+     * looked at, as smoothing would not reach further either. Without such a
+     * position on both sides, the movement is too small against the noise to tell.
+     */
+    private fun isTurn(segment: List<Position>, index: Int): Boolean {
+        val position = segment[index]
+        val arm = max(TURN_MIN_ARM_METERS, 2 * position.accuracy)
+
+        fun reach(direction: Int): Position? {
+            var neighbour = index + direction
+
+            while (neighbour in segment.indices &&
+                abs(seconds(segment[neighbour], position)) <= SMOOTHING_WINDOW_SECONDS
+            ) {
+                if (distance(segment[neighbour], position) >= arm) return segment[neighbour]
+                neighbour += direction
+            }
+
+            return null
+        }
+
+        val earlier = reach(-1) ?: return false
+        val later = reach(1) ?: return false
+
+        return turnDegrees(earlier, position, position, later) >= TURN_MIN_DEGREES
+    }
+
+    /**
+     * By how many degrees, 0 to 180, the direction from [secondFrom] to [secondTo]
+     * differs from the one from [firstFrom] to [firstTo].
+     */
+    private fun turnDegrees(firstFrom: Position, firstTo: Position, secondFrom: Position, secondTo: Position): Double {
+        val difference = abs(heading(secondFrom, secondTo) - heading(firstFrom, firstTo)) % 360
+        return if (difference > 180) 360 - difference else difference
+    }
+
+    /** Direction from [from] to [to] in degrees, on a plane — fine across a few hundred metres. */
+    private fun heading(from: Position, to: Position): Double {
+        val north = to.latitude - from.latitude
+        val east = (to.longitude - from.longitude) * cos(Math.toRadians((from.latitude + to.latitude) / 2))
+        return Math.toDegrees(atan2(east, north))
     }
 
     /** The legs of [segment] that cover enough ground to be judged, see [classifyMovement]. */
@@ -815,6 +1091,13 @@ internal object TrackPipeline {
         }
 
         return latitude / weightSum to longitude / weightSum
+    }
+
+    private fun speedMetersPerSecond(first: Position, second: Position): Double? {
+        val seconds = seconds(first, second)
+        if (seconds <= 0) return null
+
+        return distance(first, second) / seconds
     }
 
     private fun unreachable(first: Position, second: Position): Boolean {
