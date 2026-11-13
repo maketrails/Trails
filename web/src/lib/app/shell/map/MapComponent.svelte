@@ -37,6 +37,7 @@
     import {MOVEMENT_COLORS, movementAt, type MovementType} from "$lib/app/movements";
     import type { HistoryPoint, MovementItem } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
+    import {fade} from "svelte/transition";
     import MapPin from "./MapPin.svelte";
     import MapBundle from "./MapBundle.svelte";
     import {bundleSpread, shouldDrawSpread, spreadRing, type BundleSpread} from "./bundle_spread";
@@ -873,12 +874,71 @@
     let appliedStyle: string | null = null;
     $effect(() => {
         const next = style;
-        if (map == null || next === appliedStyle) return;
+        const currentMap = map;
+        if (currentMap == null || next === appliedStyle) return;
         appliedStyle = next;
+        untrack(() => swapStyle(currentMap, next));
+    });
+
+    /**
+     * A picture of the map as it looked before the current style swap, laid over the
+     * map until the new style has drawn its tiles. Without it a swap shows the new
+     * style's empty background and tiles popping in one by one; with it the old map
+     * simply fades into the finished new one.
+     */
+    let styleSnapshot = $state<string | null>(null);
+
+    /** How long the snapshot may cover the map at most, should the new style never settle. */
+    const STYLE_SNAPSHOT_MAX_MS = 4000;
+    const STYLE_FADE_MS = 300;
+
+    /** Counts swaps, so a callback of a swap that has been overtaken by a newer one is ignored. */
+    let styleSwaps = 0;
+
+    function swapStyle(currentMap: mapboxgl.Map, next: string) {
+        const swap = ++styleSwaps;
         // The typings mark the font options as required although the map defaults them;
         // passing them would override those defaults, so only `diff` goes in.
-        map.setStyle(next, {diff: false} as Parameters<mapboxgl.Map["setStyle"]>[1]);
-    });
+        const apply = () => currentMap.setStyle(next, {diff: false} as Parameters<mapboxgl.Map["setStyle"]>[1]);
+
+        if (reducedMotion.current) {
+            styleSnapshot = null;
+            apply();
+            return;
+        }
+
+        // The canvas does not keep its contents once a frame is presented, so it can only
+        // be read from inside a `render` — the frame that was just drawn is still there.
+        currentMap.once("render", () => {
+            if (swap !== styleSwaps) return;
+            // A swap that overtakes a running one keeps the picture it already has: the
+            // map underneath is still half-loaded and would make a worse one.
+            if (styleSnapshot == null) {
+                try {
+                    styleSnapshot = currentMap.getCanvas().toDataURL();
+                } catch {
+                    styleSnapshot = null;
+                }
+            }
+            apply();
+
+            let settled = false;
+            const reveal = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                currentMap.off("idle", reveal);
+                currentMap.off("movestart", reveal);
+                if (swap === styleSwaps) styleSnapshot = null;
+            };
+            // `idle`: the new style is loaded and every visible tile drawn. A camera move
+            // lets go early, because the picture would no longer line up with the map.
+            const timeout = setTimeout(reveal, STYLE_SNAPSHOT_MAX_MS);
+            currentMap.on("idle", reveal);
+            currentMap.on("movestart", reveal);
+        });
+        currentMap.triggerRepaint();
+    }
 
     /**
      * The puck stands wherever something is pointing: the timeline first — a reader
@@ -1603,11 +1663,17 @@
         class="h-full w-full object-cover object-center"
     />
 {:else}
-    <div
-            bind:this={mapContainer}
-            class="map-surface h-full w-full"
-            class:show-reconnecting-animation={$isReconnecting}
-    ></div>
+    <div class="map-surface relative h-full w-full" class:show-reconnecting-animation={$isReconnecting}>
+        <div bind:this={mapContainer} class="h-full w-full"></div>
+        {#if styleSnapshot != null}
+            <img
+                src={styleSnapshot}
+                alt=""
+                class="pointer-events-none absolute inset-0 h-full w-full"
+                out:fade={{duration: STYLE_FADE_MS}}
+            />
+        {/if}
+    </div>
 {/if}
 
 <style>
