@@ -9,6 +9,7 @@
     import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "$lib/state/map_camera.svelte";
     import { mapTrail } from "$lib/state/map_trail.svelte";
     import { trailDisplayMode, type TrailDisplayMode } from "$lib/state/trail_display_mode.svelte";
+    import { mapStyleUrl } from "./map_style";
     import { EMPTY_HEATMAP, heatmapColors, heatmapData, heatmapRange, type HeatmapData } from "./heatmap_features";
     import {
         coordinateAt,
@@ -36,6 +37,7 @@
     import {MOVEMENT_COLORS, movementAt, type MovementType} from "$lib/app/movements";
     import type { HistoryPoint, MovementItem } from "$lib/api/history/history_repository";
     import {cubicOut} from "svelte/easing";
+    import {fade} from "svelte/transition";
     import MapPin from "./MapPin.svelte";
     import MapBundle from "./MapBundle.svelte";
     import {bundleSpread, shouldDrawSpread, spreadRing, type BundleSpread} from "./bundle_spread";
@@ -81,11 +83,11 @@
     }
 
     const darkMode = new MediaQuery("(prefers-color-scheme: dark)");
-    const style = $derived(
-        darkMode.current
-            ? "mapbox://styles/mapbox/traffic-night-v2"
-            : "mapbox://styles/mapbox/standard"
-    );
+    // The reduced basemap only while a heatmap is actually drawn: the mode is stored per
+    // viewer, so it is still "heatmap" on pages that publish no trail at all. The key
+    // rather than the points decides, so a history arriving in pieces swaps nothing.
+    const showsHeatmap = $derived(trailDisplayMode.mode === "heatmap" && mapTrail.key != null);
+    const style = $derived(mapStyleUrl(darkMode.current, showsHeatmap));
 
     // The location-history line: a light casing under a solid stroke, so the
     // trail stays legible over both map styles. The colours mirror the theme's
@@ -791,6 +793,7 @@
                 return;
             }
 
+            appliedStyle = style;
             map = new mapboxgl.Map({
                 accessToken,
                 container: mapContainer!,
@@ -865,9 +868,77 @@
         };
     });
 
+    // No diff: a diffed swap between two classic styles keeps the map alive without a
+    // `style.load`, which is what tells the trail and heat effects to add their layers back.
+    // Only an actual change reloads: the map was created with the current style already.
+    let appliedStyle: string | null = null;
     $effect(() => {
-        map?.setStyle(style);
+        const next = style;
+        const currentMap = map;
+        if (currentMap == null || next === appliedStyle) return;
+        appliedStyle = next;
+        untrack(() => swapStyle(currentMap, next));
     });
+
+    /**
+     * A picture of the map as it looked before the current style swap, laid over the
+     * map until the new style has drawn its tiles. Without it a swap shows the new
+     * style's empty background and tiles popping in one by one; with it the old map
+     * simply fades into the finished new one.
+     */
+    let styleSnapshot = $state<string | null>(null);
+
+    /** How long the snapshot may cover the map at most, should the new style never settle. */
+    const STYLE_SNAPSHOT_MAX_MS = 4000;
+    const STYLE_FADE_MS = 300;
+
+    /** Counts swaps, so a callback of a swap that has been overtaken by a newer one is ignored. */
+    let styleSwaps = 0;
+
+    function swapStyle(currentMap: mapboxgl.Map, next: string) {
+        const swap = ++styleSwaps;
+        // The typings mark the font options as required although the map defaults them;
+        // passing them would override those defaults, so only `diff` goes in.
+        const apply = () => currentMap.setStyle(next, {diff: false} as Parameters<mapboxgl.Map["setStyle"]>[1]);
+
+        if (reducedMotion.current) {
+            styleSnapshot = null;
+            apply();
+            return;
+        }
+
+        // The canvas does not keep its contents once a frame is presented, so it can only
+        // be read from inside a `render` — the frame that was just drawn is still there.
+        currentMap.once("render", () => {
+            if (swap !== styleSwaps) return;
+            // A swap that overtakes a running one keeps the picture it already has: the
+            // map underneath is still half-loaded and would make a worse one.
+            if (styleSnapshot == null) {
+                try {
+                    styleSnapshot = currentMap.getCanvas().toDataURL();
+                } catch {
+                    styleSnapshot = null;
+                }
+            }
+            apply();
+
+            let settled = false;
+            const reveal = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                currentMap.off("idle", reveal);
+                currentMap.off("movestart", reveal);
+                if (swap === styleSwaps) styleSnapshot = null;
+            };
+            // `idle`: the new style is loaded and every visible tile drawn. A camera move
+            // lets go early, because the picture would no longer line up with the map.
+            const timeout = setTimeout(reveal, STYLE_SNAPSHOT_MAX_MS);
+            currentMap.on("idle", reveal);
+            currentMap.on("movestart", reveal);
+        });
+        currentMap.triggerRepaint();
+    }
 
     /**
      * The puck stands wherever something is pointing: the timeline first — a reader
@@ -1592,11 +1663,17 @@
         class="h-full w-full object-cover object-center"
     />
 {:else}
-    <div
-            bind:this={mapContainer}
-            class="map-surface h-full w-full"
-            class:show-reconnecting-animation={$isReconnecting}
-    ></div>
+    <div class="map-surface relative h-full w-full" class:show-reconnecting-animation={$isReconnecting}>
+        <div bind:this={mapContainer} class="h-full w-full"></div>
+        {#if styleSnapshot != null}
+            <img
+                src={styleSnapshot}
+                alt=""
+                class="pointer-events-none absolute inset-0 h-full w-full"
+                out:fade={{duration: STYLE_FADE_MS}}
+            />
+        {/if}
+    </div>
 {/if}
 
 <style>
