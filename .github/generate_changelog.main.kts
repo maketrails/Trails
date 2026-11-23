@@ -1,6 +1,6 @@
 #!/usr/bin/env kotlin
 @file:DependsOn("com.kgit2:kommand-jvm:2.3.0")
-@file:DependsOn("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+@file:DependsOn("org.jetbrains.kotlinx:kotlinx-serialization-json:1.13.0")
 
 import com.kgit2.kommand.io.Output
 import com.kgit2.kommand.process.Command

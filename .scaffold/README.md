@@ -1,6 +1,6 @@
 # Scaffold
 
-This project is based on [Scaffold v0.2](https://github.com/Julius-Babies/Scaffold/tree/v0.2).
+This project is based on [Scaffold v0.3](https://github.com/Julius-Babies/Scaffold/tree/v0.3).
 Files derived from it: `.github/`.
 
 ## Parameters
@@ -16,7 +16,7 @@ The values the Scaffold components ask the project to fill in.
 
 ## Deviations
 
-Everything else that differs from Scaffold v0.2. *Upstream* marks deviations that
+Everything else that differs from Scaffold v0.3. *Upstream* marks deviations that
 would help every project and should move to Scaffold.
 
 | File | Deviation | Reason | Upstream |
