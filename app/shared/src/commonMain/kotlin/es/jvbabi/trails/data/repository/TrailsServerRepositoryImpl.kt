@@ -76,7 +76,15 @@ class TrailsServerRepositoryImpl(
     )
     private val logger = Logger.withTag("TrailsServerRepositoryImpl")
     private var websocketSession: DefaultClientWebSocketSession? = null
-    private val crashDetectionMarkers = mutableMapOf<String, Uuid>()
+    /**
+     * The crash-detection marker of every live connection, keyed by server.
+     *
+     * A marker is a `Disconnected` event that is kept alive while the connection is up (see
+     * [startCrashDetection]). As long as its connection lives it is hidden from
+     * [getConnectionEvents]; after a crash this map starts out empty, so the marker left behind
+     * shows up as the disconnect.
+     */
+    private val crashDetectionMarkers = MutableStateFlow<Map<String, Uuid>>(emptyMap())
     private val crashDetectionJobs = mutableMapOf<String, Job>()
     private val homeServerSocketClient = HomeServerWebSocketClient(
         scope = scope,
@@ -724,28 +732,33 @@ class TrailsServerRepositoryImpl(
         }.joinAll()
     }
 
+    /**
+     * Leaves a `Disconnected` marker in the database that is refreshed every
+     * [CRASH_DETECTION_HEARTBEAT] while the connection to [server] is up.
+     *
+     * The marker carries the time of the last heartbeat, so if the app dies without closing the
+     * connection, the marker remains as the disconnect — at most one heartbeat before the real
+     * crash. A clean shutdown removes it again in [stopCrashDetection].
+     *
+     * The heartbeat is deliberately slow: every write wakes the process, costs flash I/O and
+     * invalidates every Room flow observing `connection_events`.
+     */
     private suspend fun startCrashDetection(server: String) {
         val markerId = Uuid.random()
-        crashDetectionMarkers[server] = markerId
-        database.connectionEventDao.upsert(
+        crashDetectionMarkers.update { it + (server to markerId) }
+        suspend fun writeMarker() = database.connectionEventDao.upsert(
             ConnectionEvent(
                 id = markerId,
                 server = server,
-                timestamp = Clock.System.now() + 2.seconds,
+                timestamp = Clock.System.now(),
                 data = ConnectionEvent.Event.Disconnected,
             ).toEntity()
         )
+        writeMarker()
         crashDetectionJobs[server] = scope.launch {
             while (isActive) {
-                delay(1.seconds)
-                database.connectionEventDao.upsert(
-                    ConnectionEvent(
-                        id = markerId,
-                        server = server,
-                        timestamp = Clock.System.now() + 2.seconds,
-                        data = ConnectionEvent.Event.Disconnected,
-                    ).toEntity()
-                )
+                delay(CRASH_DETECTION_HEARTBEAT)
+                writeMarker()
             }
         }
     }
@@ -753,19 +766,19 @@ class TrailsServerRepositoryImpl(
     private fun stopCrashDetection(server: String) {
         crashDetectionJobs[server]?.cancel()
         crashDetectionJobs.remove(server)
-        crashDetectionMarkers.remove(server)?.let { markerId ->
-            scope.launch { database.connectionEventDao.delete(markerId) }
-        }
+        val markerId = crashDetectionMarkers.value[server]
+        crashDetectionMarkers.update { it - server }
+        markerId?.let { scope.launch { database.connectionEventDao.delete(it) } }
     }
 
     override fun getConnectionEvents(server: String): Flow<List<ConnectionEvent>> {
-        return database.connectionEventDao.getEvents(server).map { events ->
-            val connectionEvents = events.map(DbConnectionEvent::toModel)
-            val now = Clock.System.now()
-            val latestDisconnect = connectionEvents.firstOrNull { it.data is ConnectionEvent.Event.Disconnected }
-            if (latestDisconnect != null && latestDisconnect.timestamp - now > 0.seconds) {
-                connectionEvents.filterNot { it.id == latestDisconnect.id }
-            } else connectionEvents
+        return combine(
+            database.connectionEventDao.getEvents(server),
+            crashDetectionMarkers.map { it[server] }.distinctUntilChanged(),
+        ) { events, liveMarkerId ->
+            events
+                .filterNot { it.id == liveMarkerId }
+                .map(DbConnectionEvent::toModel)
         }
     }
 
@@ -823,6 +836,12 @@ private val SNAPSHOT_BACKLOG_BATCH_INTERVAL = 5.seconds
 
 /** Pause while there is nothing to catch up on. */
 private val SNAPSHOT_BACKLOG_IDLE_INTERVAL = 60.seconds
+
+/**
+ * How often the crash-detection marker of a live connection is refreshed. A crash is recorded at
+ * most this long before it actually happened.
+ */
+private val CRASH_DETECTION_HEARTBEAT = 60.seconds
 
 private fun Snapshot.toDataSnapshotMessage() = TrailsWebSocketAppMessage.DataSnapshot(
     snapshotId = id,

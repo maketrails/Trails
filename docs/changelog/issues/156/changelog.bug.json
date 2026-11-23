@@ -1,0 +1,8 @@
+{
+  "description": "The app no longer writes to its database every second while it is connected to the server, which saves battery.",
+  "localized": {
+    "de": {
+      "description": "Die App schreibt bei bestehender Serververbindung nicht mehr jede Sekunde in ihre Datenbank, was Akku spart."
+    }
+  }
+}
