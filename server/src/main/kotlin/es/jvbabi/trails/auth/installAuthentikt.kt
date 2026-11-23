@@ -4,7 +4,6 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import es.jvbabi.authentikt.core.AuthentiktUser
 import es.jvbabi.authentikt.core.installAuthentikt
-import es.jvbabi.authentikt.core.session.SessionDestination
 import es.jvbabi.authentikt.core.step.plugins.builtin.*
 import es.jvbabi.trails.config.ApplicationConfig
 import es.jvbabi.trails.data.DeviceRepository
@@ -34,6 +33,15 @@ import kotlin.uuid.Uuid
 val deviceModelAttribute = AttributeKey<String>("device_model")
 val deviceManufacturerAttribute = AttributeKey<String>("device_manufacturer")
 val authSessionSelectedDeviceIdAttribute = AttributeKey<Uuid>("auth_session_selected_device_id")
+
+/**
+ * Where a sign-in flow returns to, set by the route that starts the session.
+ *
+ * This is deliberately not an Authentikt [es.jvbabi.authentikt.core.session.SessionDestination]: a
+ * `SessionDestination.OAuth` makes Authentikt run its own authorization code grant and ignore the redirect of
+ * [DonePlugin]'s `onSuccess`, while Trails hands out its own tokens right there.
+ */
+val loginDestinationAttribute = AttributeKey<LoginDestination>("login_destination")
 
 /**
  * How Authentikt sees an account. Wraps the domain model, not a database entity:
@@ -97,9 +105,12 @@ fun Application.installAuthentikt() {
                 userInfoEndpoint = applicationConfig.config.auth!!.oauth!!.userinfoEndpoint
                 tokenEndpoint = applicationConfig.config.auth!!.oauth!!.tokenEndpoint
                 scopes(*applicationConfig.config.auth!!.oauth!!.scopes.toTypedArray())
+                jwksUri = applicationConfig.config.auth!!.oauth!!.jwksUri
+                issuer = applicationConfig.config.auth!!.oauth!!.issuer
 
                 onUserInfo { response, _ ->
-                    val map = response.body<Map<String, String>>()
+                    // The user info endpoint is always configured, so there is always a response.
+                    val map = response!!.body<Map<String, String>>()
                     val user = userRepository.findByEmail(map["email"]!!)
                     if (user == null) return@onUserInfo UserInfo.Result.Failure("user not found")
                     return@onUserInfo UserInfo.Result.Success(TrailsAuthentiktUser(user))
@@ -111,7 +122,7 @@ fun Application.installAuthentikt() {
         val donePlugin = DonePlugin<UserModel> {
             onSuccess { session, user ->
 
-                when (session.destination) {
+                when (session.attributes[loginDestinationAttribute]) {
                     Destination.App -> {
                         val deviceId = session.attributes[authSessionSelectedDeviceIdAttribute]
                         val device = deviceRepository.getById(deviceId!!)!!
@@ -172,7 +183,7 @@ fun Application.installAuthentikt() {
                         redirect(Destination.Webapp.redirectUri)
                     }
 
-                    else -> {}
+                    null -> error("Session ${session.sessionId} has no login destination")
                 }
             }
         }
@@ -193,7 +204,7 @@ fun Application.installAuthentikt() {
                 if (user == null) return@authorization oauthPlugin!!
             }
 
-            if (session.destination == Destination.App) {
+            if (session.attributes[loginDestinationAttribute] == Destination.App) {
                 val nextStep = authSessionDeviceSelection(session, user.user)
                 if (nextStep != null) return@authorization nextStep
             }
@@ -205,25 +216,28 @@ fun Application.installAuthentikt() {
     loadKoinModules(module { single { instance } })
 }
 
+/**
+ * A client that a sign-in flow can return to, stored in [loginDestinationAttribute].
+ *
+ * @param redirectUri where the browser is sent once the user is signed in.
+ */
+data class LoginDestination(val redirectUri: String)
+
 object Destination : KoinComponent {
     private val applicationConfig by inject<ApplicationConfig>()
 
-    val App = SessionDestination.OAuth(
+    val App = LoginDestination(
         redirectUri = URLBuilder().apply {
             protocol = URLProtocol("trailsapp", -1)
             host = "application"
             appendPathSegments(applicationConfig.url.host)
             appendPathSegments("auth", "redirect")
         }.buildString(),
-        applicationId = "app",
-        applicationName = "Trails App",
     )
 
-    val Webapp = SessionDestination.OAuth(
+    val Webapp = LoginDestination(
         redirectUri = URLBuilder(applicationConfig.url).apply {
             appendPathSegments("auth", "webapp", "callback")
         }.buildString(),
-        applicationId = "webapp",
-        applicationName = "Trails Webapp",
     )
 }

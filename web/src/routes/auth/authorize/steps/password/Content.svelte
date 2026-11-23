@@ -6,6 +6,7 @@
     import {ArrowRight, Loader} from "@lucide/svelte";
     import type {PasswordPluginInstance} from "@julius-babies/authentikt-svelte";
     import {_} from "svelte-i18n";
+    import dayjs from "$lib/dayjs";
 
     let {
         plugin,
@@ -32,19 +33,25 @@
                 type="password"
                 id="password-{id}"
                 bind:value={plugin.password}
+                disabled={plugin.rateLimit?.isLocked}
                 bind:ref={input}
                 placeholder="&bullet;&bullet;&bullet;&bullet;&bullet;&bullet;"
                 onsubmit={plugin.submit}
         />
     </form>
 
-    {#if plugin.status !== "ready" && plugin.status !== "loading"}
+    {#if plugin.rateLimit?.isLocked || (plugin.status !== "ready" && plugin.status !== "loading")}
                                         <span
                                                 class="text-sm text-red-500 mt-2"
                                                 transition:slide={{ duration: 200 }}
                                         >
-                                            {#if plugin.status === "password_incorrect"}
+                                            {#if plugin.rateLimit?.isLocked}
+                                                {$_("auth.rate_limit.locked", {values: {when: dayjs().add(plugin.rateLimit.remainingLockSeconds, "second").fromNow()}})}
+                                            {:else if plugin.status === "password_incorrect"}
                                                 {$_("auth.password.incorrect")}
+                                                {#if plugin.rateLimit}
+                                                    {$_("auth.rate_limit.remaining_tries", {values: {count: plugin.rateLimit.remainingTries}})}
+                                                {/if}
                                             {:else if plugin.status === "error"}
                                                 {$_("common.error")}
                                             {/if}
@@ -54,6 +61,6 @@
     <Button
             class="mt-2"
             onclick={plugin.submit}
-            disabled={plugin.status === "loading" || plugin.password === ""}
+            disabled={plugin.status === "loading" || plugin.password === "" || plugin.rateLimit?.isLocked}
     >{$_("common.next")} {#if plugin.status === "loading"}<Loader class="animate-spin" />{:else}<ArrowRight />{/if}</Button>
 </div>

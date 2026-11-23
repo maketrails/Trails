@@ -34,7 +34,7 @@ server-gson = "2.15.0"
 server-logback = "1.6.8"
 server-sqlite = "3.54.1.0"
 server-postgres = "42.7.15"
-server-authentikt = "0.4.8"
+server-authentikt = "0.7.1"
 server-commonapi = "v2026.01.10"
 
 [libraries]

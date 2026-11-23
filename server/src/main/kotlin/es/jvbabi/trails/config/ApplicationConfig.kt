@@ -82,7 +82,14 @@ data class ApplicationConfigFile(
             @SerialName("token_endpoint") val tokenEndpoint: String,
             @SerialName("userinfo_endpoint") val userinfoEndpoint: String,
             @SerialName("redirect_uri") val redirectUri: String,
-            @SerialName("scopes") val scopes: List<String> = listOf("openid", "profile", "email")
+            @SerialName("scopes") val scopes: List<String> = listOf("openid", "profile", "email"),
+            /**
+             * The provider's JSON Web Key Set (`jwks_uri` from its discovery document), used to verify the
+             * signature of the ID token. Required as long as [scopes] contains `openid`.
+             */
+            @SerialName("jwks_uri") val jwksUri: String? = null,
+            /** Expected `iss` claim of the ID token. The issuer is not checked if unset. */
+            @SerialName("issuer") val issuer: String? = null,
         )
     }
 }

@@ -6,6 +6,7 @@
     import {ArrowRight, Loader} from "@lucide/svelte";
     import {type EmailUserSelectionPluginInstance} from "@julius-babies/authentikt-svelte";
     import {_} from "svelte-i18n";
+    import dayjs from "$lib/dayjs";
 
     const id = $props.id();
 
@@ -36,18 +37,21 @@
                 id="email-{id}"
                 inputmode="email"
                 bind:value={plugin.email}
+                disabled={plugin.rateLimit?.isLocked}
                 bind:ref={inputField}
                 placeholder={$_("auth.email.placeholder")}
                 onsubmit={plugin.submit}
         />
     </form>
 
-    {#if plugin.status !== "ready" && plugin.status !== "loading"}
+    {#if plugin.rateLimit?.isLocked || (plugin.status !== "ready" && plugin.status !== "loading")}
                                         <span
                                                 class="text-sm text-red-500 mt-2"
                                                 transition:slide={{ duration: 200 }}
                                         >
-                                            {#if plugin.status === "user_not_existing"}
+                                            {#if plugin.rateLimit?.isLocked}
+                                                {$_("auth.rate_limit.locked", {values: {when: dayjs().add(plugin.rateLimit.remainingLockSeconds, "second").fromNow()}})}
+                                            {:else if plugin.status === "user_not_existing"}
                                                 {$_("auth.email.user_not_found")}
                                             {:else if plugin.status === "error"}
                                                 {$_("common.error")}
@@ -58,6 +62,6 @@
     <Button
             class="mt-2"
             onclick={plugin.submit}
-            disabled={plugin.status === "loading" || plugin.email === ""}
+            disabled={plugin.status === "loading" || plugin.email === "" || plugin.rateLimit?.isLocked}
     >{$_("common.next")} {#if plugin.status === "loading"}<Loader />{:else}<ArrowRight />{/if}</Button>
 </div>

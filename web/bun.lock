@@ -5,7 +5,7 @@
     "": {
       "name": "web",
       "dependencies": {
-        "@julius-babies/authentikt-svelte": "^0.4.8",
+        "@julius-babies/authentikt-svelte": "^0.7.1",
         "@lucide/svelte": "^1.78.0",
         "@sveltejs/adapter-node": "^5.5.8",
         "dayjs": "^1.11.23",
@@ -133,7 +133,7 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@julius-babies/authentikt-svelte": ["@julius-babies/authentikt-svelte@0.4.8", "", { "dependencies": { "@lucide/svelte": "^1.8.0", "@zerodevx/svelte-json-view": "^1.0.11" }, "peerDependencies": { "svelte": "^5.0.0" } }, "sha512-Uw5kTBZxj6hLghrIARpYd1dmvvr5ywTWqCTAZRH5IW6YgC7d+4p5WLxweSomXrFUzaWycQYtIoEoJfL5vhJgbA=="],
+    "@julius-babies/authentikt-svelte": ["@julius-babies/authentikt-svelte@0.7.1", "", { "dependencies": { "@lucide/svelte": "^1.8.0", "@zerodevx/svelte-json-view": "^1.0.11" }, "peerDependencies": { "svelte": "^5.7.0" } }, "sha512-pEl7Bc9yrwzz/9fkB6ipx+GnTDjaM9jwWkVS93+YlCty6rhvQ8V/6fF80P84SX2ZCXsD1oK4kXYRUuZcrpKOVw=="],
 
     "@lucide/svelte": ["@lucide/svelte@1.78.0", "", { "peerDependencies": { "svelte": "^5" } }, "sha512-j/UQMuE3o/JU4oq3DAUlQpmTCG5JsLi4LxEpNS7mIGqVxfmV8wozq3MeOSNHcsk07dHC0RZtUfpBrxyEMelOHA=="],
 
