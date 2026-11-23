@@ -1,0 +1,10 @@
+{
+  "title": "Slope-aware movement detection",
+  "description": "Movement detection now takes the gradient of the terrain into account. Climbing a hill slowly on a bike is no longer recorded as walking, and rolling downhill fast is no longer recorded as motorised travel. The server downloads the elevation data it needs on its own and keeps it in its data directory. Existing trails benefit after re-optimizing them.",
+  "localized": {
+    "de": {
+      "title": "Steigungsbewusste Bewegungserkennung",
+      "description": "Die Bewegungserkennung berücksichtigt jetzt die Steigung des Geländes. Wer langsam mit dem Rad bergauf fährt, wird nicht mehr als zu Fuß erkannt, und eine schnelle Abfahrt nicht mehr als motorisierte Fahrt. Der Server lädt die nötigen Höhendaten selbst herunter und speichert sie in seinem Datenverzeichnis. Bestehende Trails profitieren nach einer erneuten Optimierung."
+    }
+  }
+}

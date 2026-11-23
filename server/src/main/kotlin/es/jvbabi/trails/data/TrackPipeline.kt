@@ -1,5 +1,6 @@
 package es.jvbabi.trails.data
 
+import es.jvbabi.trails.data.elevation.ElevationLookup
 import es.jvbabi.trails.data.model.Movement
 import kotlin.math.*
 import kotlin.time.Instant
@@ -41,7 +42,9 @@ import kotlin.time.Instant
  *
  * After smoothing, every segment is cut into legs at its pauses, and each leg is
  * classified as walking, bike or travel by its speed — see [classifyMovement] and
- * [smoothMovement].
+ * [smoothMovement]. Where the terrain elevation is known, the speed is read against
+ * the gradient first, see [gradeAdjustedKmh]: a cyclist climbing at walking pace stays
+ * a cyclist, one rolling downhill at car speed does not become a car.
  */
 internal object TrackPipeline {
     const val MAX_ACCURACY_METERS = 20.0
@@ -221,6 +224,53 @@ internal object TrackPipeline {
     /** Below this, a handful of traffic lights decides — too few to count on. */
     const val SLOWDOWN_MIN_DISTANCE_METERS = 1_000.0
 
+    /**
+     * The gradient of a step is the slope of the terrain across this distance around
+     * it. Elevation models are off by several metres from one pixel to the next; over
+     * a few positions 15 m apart that would read as a wall, over 80 m it evens out.
+     */
+    const val GRADE_WINDOW_METERS = 80.0
+
+    /**
+     * Without this much track to measure across, the gradient is left at zero: the
+     * elevation difference would be mostly noise.
+     */
+    const val GRADE_MIN_SPAN_METERS = 30.0
+
+    /**
+     * The first percent of every gradient is ignored: elevation noise, and too little
+     * slope to change how anybody moves.
+     */
+    const val GRADE_DEADBAND = 0.01
+
+    /** Gradients beyond this are elevation errors — a bridge, a tunnel, a cliff edge. */
+    const val GRADE_MAX = 0.25
+
+    /**
+     * A cyclist as [gradeAdjustedKmh] models one: rider and bike, steady pedalling
+     * power, rolling resistance and air drag (½ · air density · drag area of an upright
+     * rider). On the flat that cruises at about 27 km/h.
+     */
+    const val CYCLIST_MASS_KG = 90.0
+    const val CYCLIST_POWER_WATTS = 150.0
+    const val CYCLIST_ROLLING_RESISTANCE = 0.006
+    const val CYCLIST_DRAG = 0.25
+
+    /**
+     * Uphill, walking ends no lower than this. Walkers slow down on a climb too, to
+     * 4–5 km/h on 6 %, while a cyclist rarely drops below 7; a climb ridden slower is
+     * one pushed.
+     */
+    const val UPHILL_WALKING_MIN_KMH = 6.5
+
+    /**
+     * Downhill, bike speed ends no higher than this however steep it gets. Faster is a
+     * car on a mountain road far more often than a racing cyclist.
+     */
+    const val DOWNHILL_BIKE_MAX_KMH = 60.0
+
+    private const val GRAVITY = 9.81
+
     private const val EARTH_RADIUS_METERS = 6_371_000.0
 
     /**
@@ -308,13 +358,13 @@ internal object TrackPipeline {
      * stages and cuts every resulting segment into classified legs. Feed those to a
      * [MovementStream] to get the movements.
      */
-    fun process(positions: List<Position>): List<Segment> = positions
+    fun process(positions: List<Position>, elevation: ElevationLookup = ElevationLookup.NONE): List<Segment> = positions
         .let(::dropUntrusted)
         .let(::dropGapSpikes)
         .let(::splitSegments)
         .map { segment ->
             val track = smooth(collapseStationary(dropSpikes(dropStaleRepeats(segment))))
-            Segment(track, classifiedLegs(track))
+            Segment(track, classifiedLegs(track, elevation))
         }
 
     /**
@@ -848,14 +898,151 @@ internal object TrackPipeline {
         return Math.toDegrees(atan2(east, north))
     }
 
-    /** The legs of [segment] that cover enough ground to be judged, see [classifyMovement]. */
-    private fun classifiedLegs(segment: List<Position>): List<Leg> = legs(segment).mapNotNull { positions ->
-        val distance = positions.zipWithNext().sumOf { (first, second) -> distance(first, second) }
-        if (distance < MOVEMENT_MIN_DISTANCE_METERS) return@mapNotNull null
+    /**
+     * The legs of [segment] that cover enough ground to be judged, see [classifyMovement].
+     *
+     * Every step's speed is read against its gradient first, see [gradeAdjustedKmh], and
+     * the leg is classified by the percentile of those. A leg can climb and descend, so
+     * this happens step by step rather than once per leg.
+     */
+    private fun classifiedLegs(segment: List<Position>, elevation: ElevationLookup): List<Leg> {
+        val grades = stepGrades(segment, elevation)
 
-        val speed = speedPercentileKmh(positions, MOVEMENT_SPEED_PERCENTILE) ?: return@mapNotNull null
-        Leg(positions, distance, speed, classifyMovement(speed))
+        return legs(segment).mapNotNull { range ->
+            val positions = segment.subList(range.first, range.last + 1)
+
+            val distance = positions.zipWithNext().sumOf { (first, second) -> distance(first, second) }
+            if (distance < MOVEMENT_MIN_DISTANCE_METERS) return@mapNotNull null
+
+            val speed = speedPercentileKmh(positions, MOVEMENT_SPEED_PERCENTILE) ?: return@mapNotNull null
+
+            val adjusted = (range.first until range.last).mapNotNull { step ->
+                val seconds = seconds(segment[step], segment[step + 1])
+                if (seconds <= 0) null
+                else gradeAdjustedKmh(distance(segment[step], segment[step + 1]) / seconds * 3.6, grades[step]) to seconds
+            }
+            val adjustedSpeed = percentile(adjusted, MOVEMENT_SPEED_PERCENTILE) ?: return@mapNotNull null
+
+            Leg(positions, distance, speed, classifyMovement(adjustedSpeed))
+        }
     }
+
+    /**
+     * The signed gradient of every step of [segment] — `grades[i]` for the step from
+     * position `i` to `i + 1`, positive uphill — measured across [GRADE_WINDOW_METERS]
+     * of track around the step's middle.
+     *
+     * All zero, the flat track the classification assumed before elevation, as soon as
+     * the elevation of one position is unknown: a gradient made up from the positions
+     * around a gap would be a guess.
+     */
+    private fun stepGrades(segment: List<Position>, elevation: ElevationLookup): DoubleArray {
+        val grades = DoubleArray(max(segment.size - 1, 0))
+        if (segment.size < 2) return grades
+
+        val elevations = segment.map { elevation.elevationAt(it.latitude, it.longitude) ?: return grades }
+
+        val along = DoubleArray(segment.size)
+        for (index in 1 until segment.size) along[index] = along[index - 1] + distance(segment[index - 1], segment[index])
+
+        /** The elevation [meters] along the track, linear between two positions. */
+        fun elevationAlong(meters: Double): Double {
+            val target = meters.coerceIn(0.0, along.last())
+            val found = along.binarySearch(target)
+            val index = (if (found >= 0) found else -found - 2).coerceIn(0, segment.size - 2)
+
+            val span = along[index + 1] - along[index]
+            val fraction = if (span <= 0) 0.0 else (target - along[index]) / span
+            return elevations[index] + fraction * (elevations[index + 1] - elevations[index])
+        }
+
+        for (step in grades.indices) {
+            val middle = (along[step] + along[step + 1]) / 2
+            val from = max(0.0, middle - GRADE_WINDOW_METERS / 2)
+            val to = min(along.last(), middle + GRADE_WINDOW_METERS / 2)
+            if (to - from < GRADE_MIN_SPAN_METERS) continue
+
+            grades[step] = ((elevationAlong(to) - elevationAlong(from)) / (to - from)).coerceIn(-GRADE_MAX, GRADE_MAX)
+        }
+
+        return grades
+    }
+
+    /**
+     * What a speed of [kmh] on a gradient of [grade] amounts to on the flat, as far as
+     * [classifyMovement] is concerned: the scale is stretched so that the speed limits of
+     * walking and cycling at this gradient — [walkingMaxKmh] and [bikeMaxKmh] — land on
+     * [WALKING_MAX_KMH] and [BIKE_MAX_KMH]. Anything faster is shifted by the same amount
+     * the bike limit was. On the flat, and without elevation, nothing changes.
+     *
+     * Speed alone tells walking from cycling on the flat because a cyclist is three to
+     * four times as fast. Uphill a cyclist loses far more of that speed than a walker
+     * does, downhill a cyclist gains speed a walker does not, and the limits move with it.
+     */
+    private fun gradeAdjustedKmh(kmh: Double, grade: Double): Double {
+        if (effectiveGrade(grade) == 0.0) return kmh
+
+        val walkingMax = walkingMaxKmh(grade)
+        val bikeMax = bikeMaxKmh(grade)
+
+        return when {
+            kmh <= walkingMax -> kmh * WALKING_MAX_KMH / walkingMax
+            kmh <= bikeMax -> WALKING_MAX_KMH + (kmh - walkingMax) / (bikeMax - walkingMax) * (BIKE_MAX_KMH - WALKING_MAX_KMH)
+            else -> BIKE_MAX_KMH + (kmh - bikeMax)
+        }
+    }
+
+    /**
+     * Where walking ends on [grade]. Uphill, [WALKING_MAX_KMH] shrinks the way a cyclist's
+     * speed does at the same power — see [cyclingKmh] — but not below
+     * [UPHILL_WALKING_MIN_KMH]. Downhill a walker is no faster, so nothing changes.
+     */
+    private fun walkingMaxKmh(grade: Double): Double {
+        val climb = effectiveGrade(grade)
+        if (climb <= 0) return WALKING_MAX_KMH
+
+        return max(UPHILL_WALKING_MIN_KMH, WALKING_MAX_KMH * cyclingKmh(climb) / flatCyclingKmh)
+    }
+
+    /**
+     * Where cycling ends on [grade]. Downhill it is the speed a cyclist reaches just
+     * rolling, without pedalling — where gravity and drag cancel out — if that exceeds
+     * [BIKE_MAX_KMH], capped at [DOWNHILL_BIKE_MAX_KMH]. An e-bike keeps its speed
+     * uphill, so the limit does not drop there.
+     */
+    private fun bikeMaxKmh(grade: Double): Double {
+        val descent = -effectiveGrade(grade)
+        if (descent <= CYCLIST_ROLLING_RESISTANCE) return BIKE_MAX_KMH
+
+        val rolling = sqrt(CYCLIST_MASS_KG * GRAVITY * (descent - CYCLIST_ROLLING_RESISTANCE) / CYCLIST_DRAG) * 3.6
+        return rolling.coerceIn(BIKE_MAX_KMH, DOWNHILL_BIKE_MAX_KMH)
+    }
+
+    /** [grade] without its first [GRADE_DEADBAND]. */
+    private fun effectiveGrade(grade: Double): Double = sign(grade) * max(0.0, abs(grade) - GRADE_DEADBAND)
+
+    /**
+     * How fast the modelled cyclist rides up [grade] at [CYCLIST_POWER_WATTS]: the speed
+     * at which climbing, rolling resistance and drag take up exactly that power.
+     */
+    private fun cyclingKmh(grade: Double): Double {
+        fun power(metersPerSecond: Double) =
+            CYCLIST_MASS_KG * GRAVITY * (grade + CYCLIST_ROLLING_RESISTANCE) * metersPerSecond +
+                    CYCLIST_DRAG * metersPerSecond.pow(3)
+
+        // The power grows with the speed, so halving the interval finds it.
+        var low = 0.0
+        var high = 30.0
+        repeat(50) {
+            val middle = (low + high) / 2
+            if (power(middle) < CYCLIST_POWER_WATTS) low = middle else high = middle
+        }
+
+        return (low + high) / 2 * 3.6
+    }
+
+    /** [cyclingKmh] on the flat, the reference [walkingMaxKmh] scales against. */
+    private val flatCyclingKmh by lazy { cyclingKmh(0.0) }
 
     /**
      * Irons out modes that do not last: within a trip, a stretch of the same mode
@@ -990,27 +1177,25 @@ internal object TrackPipeline {
     }
 
     /**
-     * The stretches of [segment] between two pauses, each with at least two positions.
+     * The index ranges of the stretches of [segment] between two pauses, each with at
+     * least two positions.
      *
      * A pause is either the arrival and departure pair [collapseStationary] leaves
      * behind or a single step that is long and slow, see [isPause]: a phone that
      * stands still often stops delivering fixes altogether, so a stop at a station
      * or a traffic light never gathers the positions a collapse needs.
      */
-    private fun legs(segment: List<Position>): List<List<Position>> {
-        val legs = mutableListOf<List<Position>>()
-        var current = mutableListOf<Position>()
+    private fun legs(segment: List<Position>): List<IntRange> {
+        val legs = mutableListOf<IntRange>()
+        var start = 0
 
-        for ((index, position) in segment.withIndex()) {
-            if (index > 0 && isPause(segment, index)) {
-                if (current.size >= 2) legs += current
-                current = mutableListOf()
+        for (index in 1..segment.size) {
+            if (index == segment.size || isPause(segment, index)) {
+                if (index - start >= 2) legs += start until index
+                start = index
             }
-
-            current += position
         }
 
-        if (current.size >= 2) legs += current
         return legs
     }
 
@@ -1043,24 +1228,31 @@ internal object TrackPipeline {
      * rather than by step, so a burst of closely spaced fixes does not count more
      * than the same stretch recorded sparsely. Null if no time passes on the leg.
      */
-    private fun speedPercentileKmh(leg: List<Position>, percentile: Double): Double? {
-        val steps = leg.zipWithNext()
-            .mapNotNull { (first, second) ->
-                val seconds = seconds(first, second)
-                if (seconds <= 0) null else distance(first, second) / seconds * 3.6 to seconds
-            }
-            .sortedBy { (speed, _) -> speed }
+    private fun speedPercentileKmh(leg: List<Position>, percentile: Double): Double? = percentile(
+        leg.zipWithNext().mapNotNull { (first, second) ->
+            val seconds = seconds(first, second)
+            if (seconds <= 0) null else distance(first, second) / seconds * 3.6 to seconds
+        },
+        percentile,
+    )
 
-        val total = steps.sumOf { (_, seconds) -> seconds }
+    /**
+     * The value that [steps] — pairs of a value and how many seconds it lasted — stay
+     * below for [percentile] of their time, or null if no time passes.
+     */
+    private fun percentile(steps: List<Pair<Double, Double>>, percentile: Double): Double? {
+        val sorted = steps.sortedBy { (value, _) -> value }
+
+        val total = sorted.sumOf { (_, seconds) -> seconds }
         if (total <= 0) return null
 
         var covered = 0.0
-        for ((speed, seconds) in steps) {
+        for ((value, seconds) in sorted) {
             covered += seconds
-            if (covered >= percentile * total) return speed
+            if (covered >= percentile * total) return value
         }
 
-        return steps.last().first
+        return sorted.last().first
     }
 
     private fun classifyMovement(speedKmh: Double): Movement.Type = when {
