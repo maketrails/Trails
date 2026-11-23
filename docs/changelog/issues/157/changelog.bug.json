@@ -1,0 +1,8 @@
+{
+  "description": "The location marker on the map now shows your position as Trails records it instead of the raw GPS position.",
+  "localized": {
+    "de": {
+      "description": "Die Standortmarkierung auf der Karte zeigt jetzt deine Position so, wie Trails sie aufzeichnet, statt der reinen GPS-Position."
+    }
+  }
+}

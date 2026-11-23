@@ -38,7 +38,6 @@ import com.mapbox.maps.extension.compose.annotation.ViewAnnotation
 import com.mapbox.maps.extension.compose.annotation.generated.PolygonAnnotation
 import com.mapbox.maps.extension.compose.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.extension.compose.style.MapStyle
-import com.mapbox.maps.plugin.PuckBearing
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.gestures
@@ -318,6 +317,12 @@ actual fun Map(
     // the bundling is decided on.
     var mapboxMap by remember { mutableStateOf<MapboxMap?>(null) }
 
+    // The puck shows where Trails puts this device, not where GPS does.
+    val locationProvider = remember { TrailsLocationProvider() }
+    LaunchedEffect(state.currentDeviceLocation) {
+        locationProvider.update(state.currentDeviceLocation)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         MapboxMap(
             modifier = Modifier.fillMaxSize(),
@@ -357,10 +362,10 @@ actual fun Map(
         ) {
             MapEffect(Unit) { mapView ->
                 mapboxMap = mapView.mapboxMap
+                mapView.location.setLocationProvider(locationProvider)
                 mapView.location.updateSettings {
                     locationPuck = createDefault2DPuck(withBearing = true)
                     puckBearingEnabled = true
-                    puckBearing = PuckBearing.HEADING
                     enabled = true
                 }
                 mapView.mapboxMap.setBounds(
