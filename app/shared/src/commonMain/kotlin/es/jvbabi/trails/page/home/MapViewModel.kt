@@ -68,7 +68,7 @@ class MapViewModel(
                 .distinctUntilChangedBy { stateSnapshot ->
                     listOf(
                         stateSnapshot.trackingMode,
-                        stateSnapshot.ownLocation,
+                        stateSnapshot.currentDevice,
                         stateSnapshot.devices
                     ).sumOf { it.hashCode() }
                 }
@@ -76,7 +76,7 @@ class MapViewModel(
                     object {
                         val devices = it.devices
                         val trackingMode = it.trackingMode
-                        val ownLocation = it.ownLocation
+                        val ownLocation = it.currentDeviceLocation
                     }
                 }
 
@@ -111,7 +111,8 @@ class MapViewModel(
                         state.update { it.copy(targetCameraState = null) }
                     }
                     MapState.TrackingMode.Overview -> {
-                        val bounds = calculateBounds(emission.ownLocation, emission.devices) ?: return@combine
+                        // This device is among the devices already, at its Trails position.
+                        val bounds = calculateBounds(null, emission.devices) ?: return@combine
                         val cameraState = bounds.toMapCamera(
                             viewportWidthPx = measurements.viewport.width,
                             viewportHeightPx = measurements.viewport.height,
@@ -207,6 +208,14 @@ data class MapState(
     val targetCameraState: MapCamera? = null,
     val trackingMode: TrackingMode = TrackingMode.Overview,
 ) {
+    /**
+     * Where Trails puts this device: the location of its latest snapshot. Unlike
+     * [ownLocation], the raw GPS fix, it only moves once Trails records a new position,
+     * so it is what the location puck and the own-location camera follow.
+     */
+    val currentDeviceLocation: Location?
+        get() = devices.firstOrNull { it.device.id == currentDevice?.id }?.snapshot?.location
+
     enum class TrackingMode {
         Overview, OwnLocation, None
     }
