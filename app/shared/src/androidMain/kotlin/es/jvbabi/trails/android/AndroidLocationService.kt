@@ -15,7 +15,6 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
@@ -48,7 +47,6 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     }
 
     private lateinit var locationManager: LocationManager
-    private var wakeLock: PowerManager.WakeLock? = null
 
     private var foregroundStarted = false
 
@@ -75,18 +73,14 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
 
     private var isStarted = false
 
-    @SuppressLint("MissingPermission", "WakelockTimeout")
+    @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!foregroundStarted) {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (wakeLock == null) {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Trails:LocationWakeLock")
-            wakeLock?.acquire()
-        }
-
+        // No wake lock here: the LocationManager wakes the device to deliver each fix, and a
+        // wake lock held for the whole lifetime of the service kept the CPU from ever sleeping.
         if (!isStarted) {
             isStarted = true
             serviceScope.launch {
@@ -190,10 +184,6 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     @RequiresPermission(anyOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
     override fun onDestroy() {
         super.onDestroy()
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
-        wakeLock = null
         serviceScope.cancel()
         locationManager.removeUpdates(this)
         _isRunning.value = false
