@@ -35,9 +35,9 @@ import com.phosphor.icons.PhIcons
 import com.phosphor.icons.regular.CornersOut
 import com.phosphor.icons.regular.Gear
 import com.phosphor.icons.regular.GpsFix
-import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import es.jvbabi.trails.ThemeWrapper
@@ -228,16 +228,16 @@ fun HomeContent(
                 }
             },
             cardContent = { contentPadding ->
-                val hazeStyle = HazeMaterials.thin()
+                val materialStyle = HazeMaterials.thin()
+                // The style block reads the sheet progress as snapshot state, so the blur follows
+                // the drag without recomposing.
+                val hazeStyle = remember(materialStyle) {
+                    materialStyle.then { blurRadius(8.dp + draggableCardSheetState.progress * 4.dp) }
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .hazeEffect(hazeState) {
-                            blurEffect {
-                                blurRadius = 8.dp + draggableCardSheetState.progress * 4.dp
-                                style = hazeStyle
-                            }
-                        }
+                        .hazeBlur(HazeInput.Sources(hazeState), style = hazeStyle)
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = draggableCardSheetState.progress/(1/0.8f) + 0.8f))
                 ) {
                     Box(
