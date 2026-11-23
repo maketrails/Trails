@@ -27,9 +27,9 @@ import com.phosphor.icons.regular.BellRinging
 import com.phosphor.icons.regular.PencilSimple
 import com.phosphor.icons.regular.Trash
 import com.phosphor.icons.regular.Vibrate
-import dev.chrisbanes.haze.blur.blurEffect
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
-import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 import es.jvbabi.trails.domain.model.Device
 import es.jvbabi.trails.page.devices.Screen
@@ -38,6 +38,7 @@ import es.jvbabi.trails.ui.components.TopBarAction
 import es.jvbabi.trails.ui.components.TopBarActionDisplay
 import es.jvbabi.trails.ui.components.DeviceImage
 import es.jvbabi.trails.ui.components.LocalHazeState
+import es.jvbabi.trails.ui.components.withBlurRadius
 import es.jvbabi.trails.utils.PaddingValues
 import es.jvbabi.trails.utils.padding
 import es.jvbabi.trails.utils.rememberBitmapFromBytes
@@ -98,7 +99,7 @@ fun DeviceContent(
 
     val isOwner = state.currentUser != null && state.currentUser.id == state.device.device.owner.id
 
-    val hazeStyle = HazeMaterials.thin()
+    val hazeStyle = HazeMaterials.thin().withBlurRadius(8.dp)
 
     ConfigureTopBar(
         title = state.device.device.displayName,
@@ -108,12 +109,7 @@ fun DeviceContent(
                 onClick = onBack,
                 modifier = Modifier
                     .clip(CircleShape)
-                    .hazeEffect(LocalHazeState.current) {
-                        blurEffect {
-                            blurRadius = 8.dp
-                            style = hazeStyle
-                        }
-                    }
+                    .hazeBlur(HazeInput.Sources(LocalHazeState.current), style = hazeStyle)
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f))
             ) {
                 Icon(

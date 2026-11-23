@@ -34,9 +34,10 @@ import com.phosphor.icons.PhIcons
 import com.phosphor.icons.regular.ArrowLeft
 import com.phosphor.icons.regular.DotsThreeVertical
 import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.blurEffect
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.blur.materials.HazeMaterials
-import dev.chrisbanes.haze.hazeEffect
 import es.jvbabi.trails.ThemeWrapper
 import org.jetbrains.compose.resources.stringResource
 import trails.app.shared.generated.resources.*
@@ -85,17 +86,12 @@ fun TopBar(
                 .align(Alignment.Center)
                 .padding(vertical = 4.dp)
         ) {
-            val hazeStyle = HazeMaterials.thin()
+            val hazeStyle = HazeMaterials.thin().withBlurRadius(8.dp)
             Column(
                 modifier = Modifier
                     .padding(horizontal = titleHorizontalPadding)
                     .clip(RoundedCornerShape(50))
-                    .hazeEffect(LocalHazeState.current) {
-                        blurEffect {
-                            blurRadius = 8.dp
-                            style = hazeStyle
-                        }
-                    }
+                    .hazeBlur(HazeInput.Sources(LocalHazeState.current), style = hazeStyle)
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f))
                     .padding(vertical = 4.dp, horizontal = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -191,15 +187,10 @@ val LocalTopBarActionsMaxWidth = compositionLocalOf { Dp.Infinity }
 @Composable
 private fun topBarActionBackground(): Modifier {
     val hazeState = LocalHazeState.current
-    val hazeStyle = HazeMaterials.thin()
+    val hazeStyle = HazeMaterials.thin().withBlurRadius(8.dp)
     return Modifier
         .clip(CircleShape)
-        .hazeEffect(hazeState) {
-            blurEffect {
-                blurRadius = 8.dp
-                style = hazeStyle
-            }
-        }
+        .hazeBlur(HazeInput.Sources(hazeState), style = hazeStyle)
         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f))
 }
 
@@ -450,3 +441,10 @@ private fun TopBarLongTextPreview() {
 private fun TopBarEmptyPreview() {
     TopBar(state = remember { TopBarState() })
 }
+/**
+ * This material with a fixed blur [radius]. Remembered, because a combined [HazeBlurStyle]
+ * compares by identity and would otherwise update the haze node on every recomposition.
+ */
+@Composable
+fun HazeBlurStyle.withBlurRadius(radius: Dp): HazeBlurStyle =
+    remember(this, radius) { then { blurRadius(radius) } }
