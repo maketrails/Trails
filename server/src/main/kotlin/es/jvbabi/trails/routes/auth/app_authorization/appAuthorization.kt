@@ -5,6 +5,7 @@ import es.jvbabi.trails.auth.Destination
 import es.jvbabi.trails.auth.TrailsAuthentiktUser
 import es.jvbabi.trails.auth.deviceManufacturerAttribute
 import es.jvbabi.trails.auth.deviceModelAttribute
+import es.jvbabi.trails.auth.loginDestinationAttribute
 import es.jvbabi.trails.config.ApplicationConfig
 import io.ktor.http.*
 import io.ktor.server.response.*
@@ -15,7 +16,8 @@ fun Route.appAuthorization() {
     get {
         val authentikt by inject<AuthentiktInstance<TrailsAuthentiktUser>>()
         val applicationConfig by inject<ApplicationConfig>()
-        val session = authentikt.createNewSession(Destination.App)
+        val session = authentikt.createNewSession()
+        session.attributes[loginDestinationAttribute] = Destination.App
 
         val deviceManufacturer = call.parameters["device_manufacturer"]
         val deviceModel = call.parameters["device_model"]
