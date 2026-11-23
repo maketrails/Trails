@@ -1,0 +1,8 @@
+{
+  "description": "Location tracking no longer keeps the phone awake all the time, which greatly reduces battery drain in the background.",
+  "localized": {
+    "de": {
+      "description": "Die Standortaufzeichnung hält das Handy nicht mehr dauerhaft wach, was den Akkuverbrauch im Hintergrund deutlich senkt."
+    }
+  }
+}
