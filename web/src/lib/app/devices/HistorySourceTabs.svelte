@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type {HistorySource} from "$lib/api/history/history_repository";
+    import type {HistorySource} from "#lib/api/history/history_repository.ts";
     import {_} from "svelte-i18n";
 
     let {

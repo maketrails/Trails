@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {HistoryPoint} from "$lib/api/history/history_repository";
+import type {HistoryPoint} from "#lib/api/history/history_repository.ts";
 import {createTrailSource, segmentCrosses, type TrailBounds} from "./trail_display";
 
 const VIEW: TrailBounds = [0, 0, 1, 1];

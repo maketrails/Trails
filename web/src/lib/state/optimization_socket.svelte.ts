@@ -1,4 +1,4 @@
-import type {OptimizationProgress} from "$lib/api/devices/optimization";
+import type {OptimizationProgress} from "#lib/api/devices/optimization.ts";
 
 type OptimizationSocketMessage = {
     type: "optimization.progress";

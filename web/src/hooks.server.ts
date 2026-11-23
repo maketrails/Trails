@@ -1,6 +1,6 @@
-import type {Handle} from "@sveltejs/kit";
-import {locale} from "svelte-i18n";
-import {localeFromAcceptLanguage} from "$lib/i18n";
+import type { Handle } from "@sveltejs/kit/hooks";
+import { locale } from "svelte-i18n";
+import { localeFromAcceptLanguage } from "#lib/i18n/index.ts";
 
 /**
  * Negotiates the response language from `Accept-Language` and applies it before

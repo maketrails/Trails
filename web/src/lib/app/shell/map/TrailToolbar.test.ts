@@ -1,6 +1,6 @@
 import {fireEvent, render, screen} from "@testing-library/svelte";
 import {afterEach, describe, expect, it} from "vitest";
-import {setTrailDisplayMode, trailDisplayMode} from "$lib/state/trail_display_mode.svelte";
+import {setTrailDisplayMode, trailDisplayMode} from "#lib/state/trail_display_mode.svelte.ts";
 import TrailToolbar from "./TrailToolbar.svelte";
 
 describe("TrailToolbar", () => {

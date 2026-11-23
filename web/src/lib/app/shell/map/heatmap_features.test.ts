@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {HistoryPoint} from "$lib/api/history/history_repository";
+import type {HistoryPoint} from "#lib/api/history/history_repository.ts";
 import {
     firstIndexFrom,
     HEATMAP_MAX_DWELL_MS,

@@ -6,10 +6,10 @@
         setGeneralCameraMode,
         type DetailCameraMode,
         type GeneralCameraMode,
-    } from "$lib/state/map_camera.svelte";
+    } from "#lib/state/map_camera.svelte.ts";
     import {_} from "svelte-i18n";
-    import {altKeyLabel} from "$lib/platform";
-    import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from "$lib/components/ui/tooltip";
+    import {altKeyLabel} from "#lib/platform.ts";
+    import {Tooltip, TooltipContent, TooltipProvider, TooltipTrigger} from "#lib/components/ui/tooltip/index.ts";
 
     // Which options exist depends on the scope: the overview can only keep every
     // device in view, while a detail view can also frame the target's trail. The

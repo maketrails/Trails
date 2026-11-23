@@ -1,5 +1,5 @@
-import type {HistoryPoint} from "$lib/api/history/history_repository";
-import type {TrailRange} from "$lib/state/map_trail.svelte";
+import type {HistoryPoint} from "#lib/api/history/history_repository.ts";
+import type {TrailRange} from "#lib/state/map_trail.svelte.ts";
 
 /**
  * Turning a location history into the GeoJSON the heatmap layer draws.

@@ -1,4 +1,4 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
 
 /**
  * Device-related server calls. Keeping them here means UI components never touch

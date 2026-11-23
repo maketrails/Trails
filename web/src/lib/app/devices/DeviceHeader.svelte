@@ -6,12 +6,12 @@
         DropdownMenuGroup,
         DropdownMenuItem,
         DropdownMenuTrigger
-    } from "$lib/components/ui/dropdown-menu";
-    import {Button} from "$lib/components/ui/button";
-    import RenameDeviceDialog from "$lib/app/devices/RenameDeviceDialog.svelte";
-    import DeleteDeviceDialog from "$lib/app/devices/DeleteDeviceDialog.svelte";
-    import ReturnShareDialog from "$lib/app/devices/ReturnShareDialog.svelte";
-    import type {Device} from "$lib/state/webapp_socket.svelte";
+    } from "#lib/components/ui/dropdown-menu/index.ts";
+    import {Button} from "#lib/components/ui/button/index.ts";
+    import RenameDeviceDialog from "#lib/app/devices/RenameDeviceDialog.svelte";
+    import DeleteDeviceDialog from "#lib/app/devices/DeleteDeviceDialog.svelte";
+    import ReturnShareDialog from "#lib/app/devices/ReturnShareDialog.svelte";
+    import type {Device} from "#lib/state/webapp_socket.svelte.ts";
     import {_} from "svelte-i18n";
 
     let {

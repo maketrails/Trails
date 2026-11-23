@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {MovementItem} from "$lib/api/history/history_repository";
+import type {MovementItem} from "#lib/api/history/history_repository.ts";
 import {bandOf, isHighlighted, movementFlags, trailData, type TrailFocus} from "./trail_features";
 
 const range = (start: number, end: number) => ({start: new Date(start), end: new Date(end)});

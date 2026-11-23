@@ -4,8 +4,8 @@
         availableShortcuts,
         isShortcutActive,
         shortcutRange,
-    } from "$lib/components/timeline/range_shortcuts";
-    import type {TimelineRange, TimelineView} from "$lib/components/timeline";
+    } from "#lib/components/timeline/range_shortcuts.ts";
+    import type {TimelineRange, TimelineView} from "#lib/components/timeline/index.ts";
 
     let {
         grantSeconds,

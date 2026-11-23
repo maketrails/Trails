@@ -1,4 +1,4 @@
-import type {Battery, LastLocation} from "$lib/state/webapp_socket.svelte";
+import type {Battery, LastLocation} from "#lib/state/webapp_socket.svelte.ts";
 
 /** A shared device's current state, fetched directly from its origin homeserver. */
 export interface ShareSnapshot {

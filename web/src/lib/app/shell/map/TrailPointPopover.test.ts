@@ -1,6 +1,6 @@
 import {render, screen} from "@testing-library/svelte";
 import {describe, expect, it} from "vitest";
-import type {HistoryPoint, MovementItem} from "$lib/api/history/history_repository";
+import type {HistoryPoint, MovementItem} from "#lib/api/history/history_repository.ts";
 import TrailPointPopover from "./TrailPointPopover.svelte";
 
 const point: HistoryPoint = {

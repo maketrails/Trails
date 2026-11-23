@@ -5,7 +5,7 @@ import "dayjs/locale/de";
 import {locale as activeLocale} from "svelte-i18n";
 // Guarantees `init` ran (and with it the fallback locale) before the first
 // subscription below fires.
-import {FALLBACK_LOCALE, SUPPORTED_LOCALES} from "$lib/i18n";
+import {FALLBACK_LOCALE, SUPPORTED_LOCALES} from "#lib/i18n/index.ts";
 
 dayjs.extend(relativeTime);
 // `localizedFormat` adds the L/LT/LLL tokens, so no view has to spell out a

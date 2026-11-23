@@ -11,11 +11,11 @@
     import DeviceSelection from "./steps/device_selection/DeviceSelection.svelte";
     import EmailUserSelection from "./steps/email/EmailUserSelection.svelte";
     import Password from "./steps/password/Password.svelte";
-    import { env } from '$env/dynamic/public';
-    import {_} from "svelte-i18n";
+    import { PUBLIC_BASE_URL } from '$app/env/public';
+    import { _ } from "svelte-i18n";
 
     const config: AuthentiktConfiguration = {
-        baseUrl: env.PUBLIC_BASE_URL + "/api/v1/auth/authentikt/",
+        baseUrl: PUBLIC_BASE_URL + "/api/v1/auth/authentikt/",
         // debug: {show_overlay: false},
         debug: false
     }
@@ -23,9 +23,7 @@
 </script>
 
 <div class="relative flex flex-col w-full h-full">
-    <Authentikt
-            {config}
-    >
+    <Authentikt config={config}>
         {@const authentikt = useAuthentiktContext()}
 
         {#if !!config.debug}

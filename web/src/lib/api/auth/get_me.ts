@@ -1,4 +1,4 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
 
 export async function getMe() {
     const response = await fetch("/api/v1/webapp/me");

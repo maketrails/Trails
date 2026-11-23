@@ -1,7 +1,7 @@
 <script lang="ts">
     import {DeviceMobileIcon} from "phosphor-svelte";
-    import {mapCamera} from "$lib/state/map_camera.svelte";
-    import {isTargetOnline} from "$lib/state/presence.svelte";
+    import {mapCamera} from "#lib/state/map_camera.svelte.ts";
+    import {isTargetOnline} from "#lib/state/presence.svelte.ts";
     import {pinPop} from "./pin_transition";
 
     let {

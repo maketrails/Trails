@@ -1,4 +1,4 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
 
 export type PingDeviceResult =
     | { type: "success"; hasDeliveredNotification: boolean }

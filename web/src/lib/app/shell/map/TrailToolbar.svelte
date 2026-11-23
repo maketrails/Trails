@@ -1,12 +1,12 @@
 <script lang="ts">
     import type {Snippet} from "svelte";
     import {EyeSlashIcon, FireIcon, PathIcon, SparkleIcon, WaveformIcon} from "phosphor-svelte";
-    import type {HistorySource} from "$lib/api/history/history_repository";
+    import type {HistorySource} from "#lib/api/history/history_repository.ts";
     import {
         setTrailDisplayMode,
         trailDisplayMode,
         type TrailDisplayMode,
-    } from "$lib/state/trail_display_mode.svelte";
+    } from "#lib/state/trail_display_mode.svelte.ts";
     import MapSegmentedControl, {type SegmentedOption} from "./MapSegmentedControl.svelte";
 
     let {

@@ -1,5 +1,5 @@
-import type {Battery, LastLocation, ForeignShareRef} from "$lib/state/webapp_socket.svelte";
-import {webappSocket} from "$lib/state/webapp_socket.svelte";
+import type {Battery, LastLocation, ForeignShareRef} from "#lib/state/webapp_socket.svelte.ts";
+import {webappSocket} from "#lib/state/webapp_socket.svelte.ts";
 
 /** A shared device's current state, pushed by its origin homeserver. */
 export interface ShareSnapshot {

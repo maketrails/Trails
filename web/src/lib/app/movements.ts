@@ -1,4 +1,4 @@
-import type {MovementItem} from "$lib/api/history/history_repository";
+import type {MovementItem} from "#lib/api/history/history_repository.ts";
 
 /**
  * The ways of moving this web app knows, and what they are drawn in — on the timeline

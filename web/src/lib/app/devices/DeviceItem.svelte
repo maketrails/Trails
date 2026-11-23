@@ -1,8 +1,8 @@
 <script lang="ts">
-    import type {Device} from "$lib/state/webapp_socket.svelte";
+    import type {Device} from "#lib/state/webapp_socket.svelte.ts";
     import {DeviceMobileIcon} from "phosphor-svelte";
-    import BatteryIcon from "$lib/components/BatteryIcon.svelte";
-    import dayjs from "$lib/dayjs";
+    import BatteryIcon from "#lib/components/BatteryIcon.svelte";
+    import dayjs from "#lib/dayjs.ts";
     import {_} from "svelte-i18n";
 
     let {
