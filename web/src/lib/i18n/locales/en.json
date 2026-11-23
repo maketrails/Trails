@@ -41,6 +41,10 @@
     "password": {
       "label": "Password",
       "incorrect": "The password is incorrect."
+    },
+    "rate_limit": {
+      "locked": "Too many attempts. Try again {when}.",
+      "remaining_tries": "{count, plural, one {# attempt} other {# attempts}} left."
     }
   },
   "device_selection": {
