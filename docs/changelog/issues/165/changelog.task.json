@@ -1,0 +1,8 @@
+{
+  "description": "Sign-in now limits failed password attempts and shows when you can try again.",
+  "localized": {
+    "de": {
+      "description": "Die Anmeldung begrenzt jetzt fehlgeschlagene Passwortversuche und zeigt an, wann du es erneut versuchen kannst."
+    }
+  }
+}
