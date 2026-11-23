@@ -1,0 +1,8 @@
+{
+  "description": "Location tracking now only uses GPS while the device is actually moving and switches to a power-saving mode in the background.",
+  "localized": {
+    "de": {
+      "description": "Die Standortaufzeichnung nutzt GPS nur noch, wenn sich das Gerät tatsächlich bewegt, und wechselt im Hintergrund in einen stromsparenden Modus."
+    }
+  }
+}

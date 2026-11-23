@@ -11,14 +11,15 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
+import androidx.core.location.LocationListenerCompat
+import androidx.core.location.LocationManagerCompat
+import androidx.core.location.LocationRequestCompat
 import co.touchlab.kermit.Logger
 import es.jvbabi.trails.domain.repository.*
 import es.jvbabi.trails.shared.compose.R
@@ -28,7 +29,7 @@ import kotlinx.coroutines.flow.*
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
-class AndroidLocationService: Service(), LocationListener, KoinComponent {
+class AndroidLocationService: Service(), LocationListenerCompat, KoinComponent {
 
     private val serviceScope = CoroutineScope(
         Dispatchers.Default + SupervisorJob() + backgroundExceptionHandler("AndroidLocationService")
@@ -39,16 +40,22 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     private val devicesRepository by inject<DevicesRepository>()
     private val keyValueRepository by inject<KeyValueRepository>()
     private val trailsServerRepository by inject<TrailsServerRepository>()
+    private val applicationRepository by inject<ApplicationRepository>()
 
     companion object {
         private const val NOTIFICATION_ID = 1
+
+        /** Update interval while the app is in the foreground. */
+        private const val FOREGROUND_INTERVAL_MILLIS = 10_000L
+
+        /** Update interval while the app is in the background. */
+        private const val BACKGROUND_INTERVAL_MILLIS = 60_000L
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
     }
 
     private lateinit var locationManager: LocationManager
-    private var wakeLock: PowerManager.WakeLock? = null
 
     private var foregroundStarted = false
 
@@ -75,18 +82,14 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
 
     private var isStarted = false
 
-    @SuppressLint("MissingPermission", "WakelockTimeout")
+    @SuppressLint("MissingPermission")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!foregroundStarted) {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (wakeLock == null) {
-            val pm = getSystemService(POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Trails:LocationWakeLock")
-            wakeLock?.acquire()
-        }
-
+        // No wake lock here: the LocationManager wakes the device to deliver each fix, and a
+        // wake lock held for the whole lifetime of the service kept the CPU from ever sleeping.
         if (!isStarted) {
             isStarted = true
             serviceScope.launch {
@@ -125,14 +128,55 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     private fun startTracking() {
         _isRunning.value = true
         snapshotRepository.startSnapshotCollection(serviceScope)
-        try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                10000L,
-                0f,
-                this
-            )
+        serviceScope.launch {
+            combine(
+                applicationRepository.getApplicationForegroundState(),
+                keyValueRepository.get(Key.MinimumMovementDistanceToNextSnapshot)
+                    .map { it ?: Key.MinimumMovementDistanceToNextSnapshot.defaultValue },
+            ) { inForeground, minimumDistance -> inForeground to minimumDistance }
+                .distinctUntilChanged()
+                .collect { (inForeground, minimumDistance) ->
+                    withContext(Dispatchers.Main) {
+                        requestLocationUpdates(inForeground, minimumDistance)
+                    }
+                }
+        }
+    }
 
+    /**
+     * (Re-)registers this service for location updates. A new request replaces the previous one.
+     *
+     * While the app is in the foreground the user is looking at the map, so fixes come often and
+     * accurate. In the background, the platform may fall back to cheaper sources and deliver
+     * fixes less often.
+     *
+     * In both cases the minimum movement distance is handed to the provider instead of being
+     * applied only after the fact, so a device lying still gets no updates at all and the
+     * platform can save power accordingly.
+     */
+    @SuppressLint("MissingPermission")
+    private fun requestLocationUpdates(inForeground: Boolean, minimumDistanceInMeters: Int) {
+        val request = if (inForeground) {
+            LocationRequestCompat.Builder(FOREGROUND_INTERVAL_MILLIS)
+                .setQuality(LocationRequestCompat.QUALITY_HIGH_ACCURACY)
+        } else {
+            LocationRequestCompat.Builder(BACKGROUND_INTERVAL_MILLIS)
+                .setQuality(LocationRequestCompat.QUALITY_BALANCED_POWER_ACCURACY)
+                .setMinUpdateIntervalMillis(FOREGROUND_INTERVAL_MILLIS)
+        }
+            .setMinUpdateDistanceMeters(minimumDistanceInMeters.toFloat())
+            .build()
+
+        // The fused provider (Android 12+) is the only one that honours the requested quality and
+        // can use Wi-Fi, cell and sensors instead of the GPS chip. Older devices stay on GPS.
+        val provider =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocationManager.FUSED_PROVIDER in locationManager.allProviders) {
+                LocationManager.FUSED_PROVIDER
+            } else LocationManager.GPS_PROVIDER
+
+        try {
+            LocationManagerCompat.requestLocationUpdates(locationManager, provider, request, this, mainLooper)
+            Logger.d { "Requesting location updates from $provider (foreground: $inForeground, min distance: $minimumDistanceInMeters m)" }
         } catch (unlikely: SecurityException) {
             Log.e("LocationService", "Missing permission: $unlikely")
         }
@@ -190,12 +234,8 @@ class AndroidLocationService: Service(), LocationListener, KoinComponent {
     @RequiresPermission(anyOf = [Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION])
     override fun onDestroy() {
         super.onDestroy()
-        wakeLock?.let {
-            if (it.isHeld) it.release()
-        }
-        wakeLock = null
         serviceScope.cancel()
-        locationManager.removeUpdates(this)
+        LocationManagerCompat.removeUpdates(locationManager, this)
         _isRunning.value = false
     }
 
