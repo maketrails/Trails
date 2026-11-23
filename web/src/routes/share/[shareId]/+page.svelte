@@ -1,19 +1,19 @@
 <script lang="ts">
     import {page} from "$app/state";
-    import {webappSocket} from "$lib/state/webapp_socket.svelte";
-    import {claimCameraTarget} from "$lib/state/map_camera.svelte";
-    import DeviceDetails, { type HistoryState } from "$lib/app/devices/DeviceDetails.svelte";
-    import DeviceHeader from "$lib/app/devices/DeviceHeader.svelte";
-    import {ShareSubscription, shareOriginBase} from "$lib/state/share_socket.svelte";
-    import {loadHistory} from "$lib/state/history.svelte";
-    import {claimMapTrail} from "$lib/state/map_trail.svelte";
-    import {claimMapOverlay} from "$lib/state/map_overlay.svelte";
-    import TrailLegend from "$lib/app/shell/map/TrailLegend.svelte";
-    import TrailToolbar from "$lib/app/shell/map/TrailToolbar.svelte";
-    import RangeShortcuts from "$lib/app/shell/map/RangeShortcuts.svelte";
-    import {trailDisplayMode} from "$lib/state/trail_display_mode.svelte";
-    import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "$lib/components/timeline";
-    import MovementLane from "$lib/app/devices/MovementLane.svelte";
+    import {webappSocket} from "#lib/state/webapp_socket.svelte.ts";
+    import {claimCameraTarget} from "#lib/state/map_camera.svelte.ts";
+    import DeviceDetails, { type HistoryState } from "#lib/app/devices/DeviceDetails.svelte";
+    import DeviceHeader from "#lib/app/devices/DeviceHeader.svelte";
+    import {ShareSubscription, shareOriginBase} from "#lib/state/share_socket.svelte.ts";
+    import {loadHistory} from "#lib/state/history.svelte.ts";
+    import {claimMapTrail} from "#lib/state/map_trail.svelte.ts";
+    import {claimMapOverlay} from "#lib/state/map_overlay.svelte.ts";
+    import TrailLegend from "#lib/app/shell/map/TrailLegend.svelte";
+    import TrailToolbar from "#lib/app/shell/map/TrailToolbar.svelte";
+    import RangeShortcuts from "#lib/app/shell/map/RangeShortcuts.svelte";
+    import {trailDisplayMode} from "#lib/state/trail_display_mode.svelte.ts";
+    import {Timeline, type TimelineLaneScale, type TimelineRange, type TimelineView} from "#lib/components/timeline/index.ts";
+    import MovementLane from "#lib/app/devices/MovementLane.svelte";
     import {_} from "svelte-i18n";
 
     let shareId = $derived(page.params.shareId);

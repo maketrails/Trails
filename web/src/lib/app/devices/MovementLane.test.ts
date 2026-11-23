@@ -1,7 +1,7 @@
 import {render, screen, within} from "@testing-library/svelte";
 import {describe, expect, it} from "vitest";
-import type {MovementItem} from "$lib/api/history/history_repository";
-import {TIMELINE_PICK} from "$lib/components/timeline";
+import type {MovementItem} from "#lib/api/history/history_repository.ts";
+import {TIMELINE_PICK} from "#lib/components/timeline/index.ts";
 import MovementLane from "./MovementLane.svelte";
 
 const HOUR = 60 * 60 * 1_000;

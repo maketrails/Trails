@@ -1,4 +1,4 @@
-import type {HistoryPoint} from "$lib/api/history/history_repository";
+import type {HistoryPoint} from "#lib/api/history/history_repository.ts";
 
 /**
  * Turning a recorded history into something a map can draw at sixty frames a

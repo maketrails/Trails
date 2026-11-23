@@ -2,9 +2,9 @@
     import type {DeviceSelectPluginInstance, DeviceSelectSnippet} from "./types.ts";
     import {type FlowUserState, useAuthentiktContext} from "@julius-babies/authentikt-svelte";
     import {DeviceSelectionPlugin} from "./DeviceSelectionPlugin.svelte.ts";
-    import {Button} from "$lib/components/ui/button";
+    import {Button} from "#lib/components/ui/button/index.ts";
     import NewDeviceInfoDialog from "./NewDeviceInfoDialog.svelte";
-    import dayjs from "$lib/dayjs";
+    import dayjs from "#lib/dayjs.ts";
     import {_} from "svelte-i18n";
 
     let {

@@ -1,5 +1,5 @@
 <script lang="ts" module>
-    import type {HistoryLoad} from "$lib/state/history.svelte";
+    import type {HistoryLoad} from "#lib/state/history.svelte.ts";
 
     export type HistoryState =
         { type: "loading" } |
@@ -10,13 +10,13 @@
 <script lang="ts">
     import type {Snippet} from "svelte";
     import {ClockCounterClockwiseIcon, ClockIcon, DeviceMobileIcon, MapPinIcon} from "phosphor-svelte";
-    import BatteryIcon from "$lib/components/BatteryIcon.svelte";
-    import type {Battery, LastLocation} from "$lib/state/webapp_socket.svelte";
-    import {shareOwnerHandle} from "$lib/state/share_socket.svelte";
-    import {currentUser} from "$lib/state/current_user";
-    import dayjs from "$lib/dayjs";
+    import BatteryIcon from "#lib/components/BatteryIcon.svelte";
+    import type {Battery, LastLocation} from "#lib/state/webapp_socket.svelte.ts";
+    import {shareOwnerHandle} from "#lib/state/share_socket.svelte.ts";
+    import {currentUser} from "#lib/state/current_user.ts";
+    import dayjs from "#lib/dayjs.ts";
     import {_} from "svelte-i18n";
-    import {locationHistoryLabel} from "$lib/app/emitted-shares/location_history";
+    import {locationHistoryLabel} from "#lib/app/emitted-shares/location_history.ts";
 
     // A shared device, as assembled by the share detail page. Carries everything
     // needed to render the header, so callers hand over the object rather than

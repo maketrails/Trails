@@ -1,7 +1,7 @@
 <script lang="ts">
-    import type {HistoryPoint, MovementItem} from "$lib/api/history/history_repository";
-    import {formatDistance, MOVEMENT_COLORS, movementTypeOf} from "$lib/app/movements";
-    import dayjs from "$lib/dayjs";
+    import type {HistoryPoint, MovementItem} from "#lib/api/history/history_repository.ts";
+    import {formatDistance, MOVEMENT_COLORS, movementTypeOf} from "#lib/app/movements.ts";
+    import dayjs from "#lib/dayjs.ts";
     import {_, locale} from "svelte-i18n";
 
     /**

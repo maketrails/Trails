@@ -6,7 +6,7 @@
 import "@testing-library/jest-dom/vitest";
 import "fake-indexeddb/auto";
 import {locale, waitLocale} from "svelte-i18n";
-import "$lib/i18n";
+import "#lib/i18n/index.ts";
 
 locale.set("en");
 await waitLocale();

@@ -1,6 +1,6 @@
-import type {MovementItem} from "$lib/api/history/history_repository";
-import {type MovementType, movementTypeOf} from "$lib/app/movements";
-import type {TrailRange} from "$lib/state/map_trail.svelte";
+import type {MovementItem} from "#lib/api/history/history_repository.ts";
+import {type MovementType, movementTypeOf} from "#lib/app/movements.ts";
+import type {TrailRange} from "#lib/state/map_trail.svelte.ts";
 
 /**
  * Turning a location history into the GeoJSON the trail layers draw: which

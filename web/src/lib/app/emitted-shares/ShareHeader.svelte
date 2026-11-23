@@ -1,10 +1,10 @@
 <script lang="ts">
     import { ArrowLeftIcon, DotsThreeVerticalIcon, TrashIcon, PencilIcon } from "phosphor-svelte";
-    import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem} from "$lib/components/ui/dropdown-menu";
-    import Button from "$lib/components/ui/button/button.svelte";
-    import DeleteShareDialog from "$lib/app/emitted-shares/DeleteShareDialog.svelte";
-    import RenameShareDialog from "$lib/app/emitted-shares/RenameShareDialog.svelte";
-    import type {EmittedShare} from "$lib/state/webapp_socket.svelte";
+    import {DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem} from "#lib/components/ui/dropdown-menu/index.ts";
+    import Button from "#lib/components/ui/button/button.svelte";
+    import DeleteShareDialog from "#lib/app/emitted-shares/DeleteShareDialog.svelte";
+    import RenameShareDialog from "#lib/app/emitted-shares/RenameShareDialog.svelte";
+    import type {EmittedShare} from "#lib/state/webapp_socket.svelte.ts";
     import {_} from "svelte-i18n";
 
     let {

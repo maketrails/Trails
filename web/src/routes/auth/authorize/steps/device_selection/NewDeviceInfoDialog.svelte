@@ -6,12 +6,12 @@
         DialogFooter,
         DialogHeader,
         DialogTitle
-    } from "$lib/components/ui/dialog";
-    import {Alert, AlertDescription, AlertTitle} from "$lib/components/ui/alert";
+    } from "#lib/components/ui/dialog/index.ts";
+    import {Alert, AlertDescription, AlertTitle} from "#lib/components/ui/alert/index.ts";
     import {TriangleAlert, Loader} from "@lucide/svelte";
-    import {Input} from "$lib/components/ui/input";
-    import {Button} from "$lib/components/ui/button";
-    import {Field, FieldDescription, FieldError, FieldLabel, FieldSet} from "$lib/components/ui/field";
+    import {Input} from "#lib/components/ui/input/index.ts";
+    import {Button} from "#lib/components/ui/button/index.ts";
+    import {Field, FieldDescription, FieldError, FieldLabel, FieldSet} from "#lib/components/ui/field/index.ts";
     import {slide} from "svelte/transition";
     import type {NewDeviceNameResult} from "./DeviceSelectionPlugin.svelte.ts";
     import {_} from "svelte-i18n";

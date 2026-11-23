@@ -1,13 +1,13 @@
-import {browser} from "$app/environment";
-import {locale, waitLocale} from "svelte-i18n";
-import {localeFromNavigator} from "$lib/i18n";
-import type {LayoutLoad} from "./$types";
+import { browser } from "$app/env";
+import { locale, waitLocale } from "svelte-i18n";
+import { localeFromNavigator } from "#lib/i18n/index.ts";
+import type { LayoutLoad } from "./$types";
 
 // Imported for their side effects: registering the catalogues and calling `init`
 // (i18n), and keeping dayjs' process-global locale in lockstep with the app
 // locale. Both must have happened before the first message or date is formatted.
-import "$lib/i18n";
-import "$lib/dayjs";
+import "#lib/i18n/index.ts";
+import "#lib/dayjs.ts";
 
 /**
  * Settles the active locale before anything renders. In the browser that is the

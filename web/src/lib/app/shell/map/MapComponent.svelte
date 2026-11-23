@@ -3,12 +3,12 @@
     import { MediaQuery } from "svelte/reactivity";
     import mapboxgl from "mapbox-gl";
     import "mapbox-gl/dist/mapbox-gl.css";
-    import { getMapboxToken } from "$lib/api/mapbox/get_mapbox_token";
-    import {webappSocket, shareMainText, isReconnecting} from "$lib/state/webapp_socket.svelte";
-    import { foreignShares, shareOriginBase } from "$lib/state/share_socket.svelte";
-    import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "$lib/state/map_camera.svelte";
-    import { mapTrail } from "$lib/state/map_trail.svelte";
-    import { trailDisplayMode, type TrailDisplayMode } from "$lib/state/trail_display_mode.svelte";
+    import { getMapboxToken } from "#lib/api/mapbox/get_mapbox_token.ts";
+    import {webappSocket, shareMainText, isReconnecting} from "#lib/state/webapp_socket.svelte.ts";
+    import { foreignShares, shareOriginBase } from "#lib/state/share_socket.svelte.ts";
+    import { mapCamera, releaseCameraToUser, setDetailCameraMode, type TrackingSelection } from "#lib/state/map_camera.svelte.ts";
+    import { mapTrail } from "#lib/state/map_trail.svelte.ts";
+    import { trailDisplayMode, type TrailDisplayMode } from "#lib/state/trail_display_mode.svelte.ts";
     import { mapStyleUrl } from "./map_style";
     import { EMPTY_HEATMAP, heatmapColors, heatmapData, heatmapRange, type HeatmapData } from "./heatmap_features";
     import {
@@ -34,8 +34,8 @@
         type TrailBand,
         type TrailFocus
     } from "./trail_features";
-    import {MOVEMENT_COLORS, movementAt, type MovementType} from "$lib/app/movements";
-    import type { HistoryPoint, MovementItem } from "$lib/api/history/history_repository";
+    import {MOVEMENT_COLORS, movementAt, type MovementType} from "#lib/app/movements.ts";
+    import type { HistoryPoint, MovementItem } from "#lib/api/history/history_repository.ts";
     import {cubicOut} from "svelte/easing";
     import {fade} from "svelte/transition";
     import MapPin from "./MapPin.svelte";
@@ -47,8 +47,8 @@
         PIN_WIDTH,
         type PinBundle,
     } from "./pin_bundling";
-    import mapDark from "$lib/assets/map-dark.png";
-    import mapLight from "$lib/assets/map-light.png";
+    import mapDark from "#lib/assets/map-dark.png";
+    import mapLight from "#lib/assets/map-light.png";
 
     let mapContainer: HTMLDivElement | null = $state(null);
     let showPlaceholder = $state(false);

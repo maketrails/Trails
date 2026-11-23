@@ -1,4 +1,4 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
 
 /**
  * Whether the optimizer is working on a device right now. While it runs, `progress`

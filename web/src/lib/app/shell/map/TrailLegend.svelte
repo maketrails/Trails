@@ -1,8 +1,8 @@
 <script lang="ts">
     import {MediaQuery} from "svelte/reactivity";
     import {_} from "svelte-i18n";
-    import {MOVEMENT_COLORS, type MovementType} from "$lib/app/movements";
-    import type {TrailDisplayMode} from "$lib/state/trail_display_mode.svelte";
+    import {MOVEMENT_COLORS, type MovementType} from "#lib/app/movements.ts";
+    import type {TrailDisplayMode} from "#lib/state/trail_display_mode.svelte.ts";
     import {trailLineColors} from "./trail_features";
     import {heatmapColors} from "./heatmap_features";
 

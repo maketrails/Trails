@@ -11,21 +11,21 @@
         LockIcon,
         UsersIcon,
     } from "phosphor-svelte"
-    import {webappSocket} from "$lib/state/webapp_socket.svelte";
-    import {claimCameraTarget} from "$lib/state/map_camera.svelte";
-    import {ShareRepository} from "$lib/api/shares/share_repository";
-    import {locationHistoryLabel, locationHistoryOptionsFor} from "$lib/app/emitted-shares/location_history";
-    import {Checkbox} from "$lib/components/ui/checkbox";
-    import {Select, SelectContent, SelectItem, SelectTrigger} from "$lib/components/ui/select";
-    import {Field, FieldContent, FieldDescription, FieldTitle} from "$lib/components/ui/field";
-    import {Alert, AlertDescription} from "$lib/components/ui/alert";
-    import dayjs from "$lib/dayjs";
-    import ShareHeader from "$lib/app/emitted-shares/ShareHeader.svelte";
-    import { currentUser } from "$lib/state/current_user";
-    import InputGroup from "$lib/components/ui/input-group/input-group.svelte";
-    import InputGroupInput from "$lib/components/ui/input-group/input-group-input.svelte";
-    import InputGroupButton from "$lib/components/ui/input-group/input-group-button.svelte";
-    import InputGroupAddon from "$lib/components/ui/input-group/input-group-addon.svelte";
+    import {webappSocket} from "#lib/state/webapp_socket.svelte.ts";
+    import {claimCameraTarget} from "#lib/state/map_camera.svelte.ts";
+    import {ShareRepository} from "#lib/api/shares/share_repository.ts";
+    import {locationHistoryLabel, locationHistoryOptionsFor} from "#lib/app/emitted-shares/location_history.ts";
+    import {Checkbox} from "#lib/components/ui/checkbox/index.ts";
+    import {Select, SelectContent, SelectItem, SelectTrigger} from "#lib/components/ui/select/index.ts";
+    import {Field, FieldContent, FieldDescription, FieldTitle} from "#lib/components/ui/field/index.ts";
+    import {Alert, AlertDescription} from "#lib/components/ui/alert/index.ts";
+    import dayjs from "#lib/dayjs.ts";
+    import ShareHeader from "#lib/app/emitted-shares/ShareHeader.svelte";
+    import { currentUser } from "#lib/state/current_user.ts";
+    import InputGroup from "#lib/components/ui/input-group/input-group.svelte";
+    import InputGroupInput from "#lib/components/ui/input-group/input-group-input.svelte";
+    import InputGroupButton from "#lib/components/ui/input-group/input-group-button.svelte";
+    import InputGroupAddon from "#lib/components/ui/input-group/input-group-addon.svelte";
     import {_} from "svelte-i18n";
 
     let shareId = $derived(page.params.shareId);

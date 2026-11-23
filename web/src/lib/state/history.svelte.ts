@@ -4,7 +4,7 @@ import {
     type HistorySource,
     type LocationHistory,
     type MovementItem,
-} from "$lib/api/history/history_repository";
+} from "#lib/api/history/history_repository.ts";
 import {
     applyFreshMovements,
     applyFreshPoints,
@@ -12,8 +12,8 @@ import {
     clearCachedSeries,
     readCachedHistory,
     storeCachedHistory,
-} from "$lib/api/history/history_cache";
-import {fetchDeviceOptimization} from "$lib/api/devices/optimization";
+} from "#lib/api/history/history_cache.ts";
+import {fetchDeviceOptimization} from "#lib/api/devices/optimization.ts";
 
 /**
  * What to load a history for — one of the user's own devices, or a share

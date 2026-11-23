@@ -1,7 +1,7 @@
 <script lang="ts">
     import {DeviceMobileIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
-    import {isTargetOnline} from "$lib/state/presence.svelte";
+    import {isTargetOnline} from "#lib/state/presence.svelte.ts";
     import {
         BUNDLE_AVATAR_SIZE,
         BUNDLE_BORDER,

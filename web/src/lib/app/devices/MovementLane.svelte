@@ -1,8 +1,8 @@
 <script lang="ts">
     import {_, locale} from "svelte-i18n";
-    import type {MovementItem} from "$lib/api/history/history_repository";
-    import {pickValue, TIMELINE_PICK, type TimelineLaneScale} from "$lib/components/timeline";
-    import {formatDistance, MOVEMENT_COLORS, movementTypeOf} from "$lib/app/movements";
+    import type {MovementItem} from "#lib/api/history/history_repository.ts";
+    import {pickValue, TIMELINE_PICK, type TimelineLaneScale} from "#lib/components/timeline/index.ts";
+    import {formatDistance, MOVEMENT_COLORS, movementTypeOf} from "#lib/app/movements.ts";
     import { CarIcon, PersonSimpleBikeIcon, PersonSimpleWalkIcon } from "phosphor-svelte";
 
     let {

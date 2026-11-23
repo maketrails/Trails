@@ -1,7 +1,7 @@
 import {readonly, writable} from "svelte/store";
-import {currentUser, type User} from "$lib/state/current_user";
-import {pruneCachedHistories} from "$lib/api/history/history_cache";
-import {t} from "$lib/i18n";
+import {currentUser, type User} from "#lib/state/current_user.ts";
+import {pruneCachedHistories} from "#lib/api/history/history_cache.ts";
+import {t} from "#lib/i18n/index.ts";
 
 export interface Battery {
     percentage: number;

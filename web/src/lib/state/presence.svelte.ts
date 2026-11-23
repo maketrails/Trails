@@ -1,5 +1,5 @@
-import {webappSocket} from "$lib/state/webapp_socket.svelte";
-import {foreignShares} from "$lib/state/share_socket.svelte";
+import {webappSocket} from "#lib/state/webapp_socket.svelte.ts";
+import {foreignShares} from "#lib/state/share_socket.svelte.ts";
 
 /**
  * Whether the thing drawn under [id] is reachable right now — an own device by its

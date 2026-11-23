@@ -6,11 +6,11 @@
         DialogFooter,
         DialogHeader,
         DialogTitle
-    } from "$lib/components/ui/dialog";
-    import {Button} from "$lib/components/ui/button";
-    import {Input} from "$lib/components/ui/input";
+    } from "#lib/components/ui/dialog/index.ts";
+    import {Button} from "#lib/components/ui/button/index.ts";
+    import {Input} from "#lib/components/ui/input/index.ts";
     import {CircleNotchIcon} from "phosphor-svelte";
-    import {ShareRepository, type RenameShareResult} from "$lib/api/shares/share_repository";
+    import {ShareRepository, type RenameShareResult} from "#lib/api/shares/share_repository.ts";
     import {_} from "svelte-i18n";
 
     let {

@@ -1,6 +1,6 @@
 import {writable} from "svelte/store";
-import {getMe} from "$lib/api/auth/get_me";
-import {clearAllCachedHistories} from "$lib/api/history/history_cache";
+import {getMe} from "#lib/api/auth/get_me.ts";
+import {clearAllCachedHistories} from "#lib/api/history/history_cache.ts";
 
 export interface User {
     id: string;

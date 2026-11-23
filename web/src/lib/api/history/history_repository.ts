@@ -1,6 +1,6 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
-import {shareOriginBase} from "$lib/api/shares/get_share_snapshot";
-import type {Battery} from "$lib/state/webapp_socket.svelte";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
+import {shareOriginBase} from "#lib/api/shares/get_share_snapshot.ts";
+import type {Battery} from "#lib/state/webapp_socket.svelte.ts";
 
 /**
  * One recorded position of a device. `timestamp` is epoch **milliseconds**,

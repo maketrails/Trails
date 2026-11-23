@@ -8,7 +8,7 @@
  * The options mirror the steps the app offers when creating a share, so a share
  * edited in the browser can still be described by the app's slider.
  */
-import {t} from "$lib/i18n";
+import {t} from "#lib/i18n/index.ts";
 
 export const INFINITE_HISTORY_SECONDS = -1;
 

@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {MovementItem} from "$lib/api/history/history_repository";
+import type {MovementItem} from "#lib/api/history/history_repository.ts";
 import {formatDistance, movementAt, movementTypeOf} from "./movements";
 
 function movement(from: number, to: number, type = "walking"): MovementItem {

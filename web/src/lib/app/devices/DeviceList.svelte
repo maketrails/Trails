@@ -1,6 +1,6 @@
 <script lang="ts">
-    import {webappSocket} from "$lib/state/webapp_socket.svelte";
-    import {foreignShares} from "$lib/state/share_socket.svelte";
+    import {webappSocket} from "#lib/state/webapp_socket.svelte.ts";
+    import {foreignShares} from "#lib/state/share_socket.svelte.ts";
     import DeviceItem from "./DeviceItem.svelte";
     import ShareItem from "./ShareItem.svelte";
     import EmittedShareItem from "./EmittedShareItem.svelte";

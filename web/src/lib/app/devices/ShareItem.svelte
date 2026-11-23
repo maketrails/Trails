@@ -1,10 +1,10 @@
 <script lang="ts">
-    import type {Share} from "$lib/state/webapp_socket.svelte";
-    import {shareOriginBase, shareOwnerHandle} from "$lib/state/share_socket.svelte";
-    import {currentUser} from "$lib/state/current_user";
+    import type {Share} from "#lib/state/webapp_socket.svelte.ts";
+    import {shareOriginBase, shareOwnerHandle} from "#lib/state/share_socket.svelte.ts";
+    import {currentUser} from "#lib/state/current_user.ts";
     import {DeviceMobileIcon} from "phosphor-svelte";
-    import BatteryIcon from "$lib/components/BatteryIcon.svelte";
-    import dayjs from "$lib/dayjs";
+    import BatteryIcon from "#lib/components/BatteryIcon.svelte";
+    import dayjs from "#lib/dayjs.ts";
     import {_} from "svelte-i18n";
 
     let {

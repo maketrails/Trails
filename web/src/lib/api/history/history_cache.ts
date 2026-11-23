@@ -1,6 +1,6 @@
-import {browser} from "$app/environment";
-import Dexie, {type IndexableType, type Table} from "dexie";
-import type {HistoryPoint, HistorySource, MovementItem} from "$lib/api/history/history_repository";
+import { browser } from "$app/env";
+import Dexie, { type IndexableType, type Table } from "dexie";
+import type { HistoryPoint, HistorySource, MovementItem } from "#lib/api/history/history_repository.ts";
 
 /**
  * IndexedDB cache for a device's location history, via Dexie.
@@ -233,7 +233,13 @@ export async function storeCachedHistory(
                 await opened.points.bulkPut(fresh.map((point) => ({...point, device: deviceId, source})));
             }
             if (cursor != null || resume != null) {
-                await opened.cursors.put({device: deviceId, source, cursor, rebuiltAt, ...(resume == null ? {} : {resume})});
+                await opened.cursors.put({
+                    device: deviceId,
+                    source,
+                    cursor,
+                    rebuiltAt,
+                    ...resume == null ? {} : { resume }
+                });
             }
         });
     } catch (e) {

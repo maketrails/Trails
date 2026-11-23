@@ -1,7 +1,7 @@
 <script lang="ts">
-    import {currentUser} from "$lib/state/current_user";
-    import {Button} from "$lib/components/ui/button";
-    import DeviceList from "$lib/app/devices/DeviceList.svelte";
+    import {currentUser} from "#lib/state/current_user.ts";
+    import {Button} from "#lib/components/ui/button/index.ts";
+    import DeviceList from "#lib/app/devices/DeviceList.svelte";
     import {_} from "svelte-i18n";
 </script>
 

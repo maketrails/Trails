@@ -1,5 +1,5 @@
-import requireResponseIsFromTrails from "$lib/api/requireResponseIsFromTrails";
-import {shareOriginBase} from "$lib/api/shares/get_share_snapshot";
+import requireResponseIsFromTrails from "#lib/api/requireResponseIsFromTrails.ts";
+import {shareOriginBase} from "#lib/api/shares/get_share_snapshot.ts";
 
 /** Why a rename was refused, or `"ok"` if it went through. */
 export type RenameShareResult = "ok" | "name-taken" | "name-blank" | "error";

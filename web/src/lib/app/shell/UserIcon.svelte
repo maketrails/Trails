@@ -1,12 +1,12 @@
 <script lang="ts">
-    import {currentUser, logout} from "$lib/state/current_user";
+    import {currentUser, logout} from "#lib/state/current_user.ts";
     import {
         DropdownMenu,
         DropdownMenuContent,
         DropdownMenuGroup,
         DropdownMenuItem,
         DropdownMenuTrigger
-    } from "$lib/components/ui/dropdown-menu";
+    } from "#lib/components/ui/dropdown-menu/index.ts";
     import {SignOutIcon} from "phosphor-svelte";
     import {_} from "svelte-i18n";
 

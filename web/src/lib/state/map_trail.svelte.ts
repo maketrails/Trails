@@ -1,4 +1,4 @@
-import type {HistoryPoint, MovementItem} from "$lib/api/history/history_repository";
+import type {HistoryPoint, MovementItem} from "#lib/api/history/history_repository.ts";
 
 /** A stretch of time, as the two moments that bound it. */
 export interface TrailRange {

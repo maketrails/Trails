@@ -3,7 +3,7 @@
         fetchDeviceOptimization,
         reoptimizeDevice,
         type DeviceOptimization,
-    } from "$lib/api/devices/optimization";
+    } from "#lib/api/devices/optimization.ts";
 
     /**
      * Last known state per device, deliberately outside the component.
@@ -27,8 +27,8 @@
 
 <script lang="ts">
     import {ArrowsClockwiseIcon, CircleNotchIcon, PathIcon, XIcon} from "phosphor-svelte";
-    import {Button} from "$lib/components/ui/button";
-    import {OptimizationSocket} from "$lib/state/optimization_socket.svelte";
+    import {Button} from "#lib/components/ui/button/index.ts";
+    import {OptimizationSocket} from "#lib/state/optimization_socket.svelte.ts";
     import {_, locale} from "svelte-i18n";
 
     let {

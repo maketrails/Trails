@@ -1,8 +1,8 @@
 <script lang="ts">
     import {BellRingingIcon, CheckIcon, CircleNotchIcon, PhoneCallIcon, PhoneSlashIcon, XIcon} from "phosphor-svelte";
-    import {pingDevice} from "$lib/api/devices/ping_device";
-    import {ringDevice, stopRingDevice} from "$lib/api/devices/ring_device";
-    import {DeviceRingSocket} from "$lib/state/ring_socket.svelte";
+    import {pingDevice} from "#lib/api/devices/ping_device.ts";
+    import {ringDevice, stopRingDevice} from "#lib/api/devices/ring_device.ts";
+    import {DeviceRingSocket} from "#lib/state/ring_socket.svelte.ts";
 
     let {
         deviceId,

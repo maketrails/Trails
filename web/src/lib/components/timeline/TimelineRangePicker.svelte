@@ -2,9 +2,9 @@
     import {CalendarDate, type DateValue} from "@internationalized/date";
     import {CalendarBlankIcon} from "phosphor-svelte";
     import {_, locale} from "svelte-i18n";
-    import {Input} from "$lib/components/ui/input";
-    import {Popover, PopoverContent, PopoverTrigger} from "$lib/components/ui/popover";
-    import {RangeCalendar} from "$lib/components/ui/range-calendar";
+    import {Input} from "#lib/components/ui/input/index.ts";
+    import {Popover, PopoverContent, PopoverTrigger} from "#lib/components/ui/popover/index.ts";
+    import {RangeCalendar} from "#lib/components/ui/range-calendar/index.ts";
     import type {TimelineRange} from "./timeline_window";
 
     let {

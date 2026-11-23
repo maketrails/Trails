@@ -1,15 +1,15 @@
 <script lang="ts">
     import './layout.css';
-    import favicon from '$lib/assets/favicon.svg';
-    import MapComponent from "$lib/app/shell/map/MapComponent.svelte";
-    import {currentUser, authInitialized, updateUser} from "$lib/state/current_user";
+    import favicon from '#lib/assets/favicon.svg';
+    import MapComponent from "#lib/app/shell/map/MapComponent.svelte";
+    import {currentUser, authInitialized, updateUser} from "#lib/state/current_user.ts";
     import {onMount} from "svelte";
-    import UserIcon from "$lib/app/shell/UserIcon.svelte";
-    import {isReconnecting, startWebappSocket} from "$lib/state/webapp_socket.svelte";
-    import {startForeignShareSync} from "$lib/state/share_socket.svelte";
-    import {setContentRect, setOverlayRect, type ContentRect} from "$lib/state/map_camera.svelte";
-    import {mapOverlay} from "$lib/state/map_overlay.svelte";
-    import CameraModeSwitch from "$lib/app/shell/map/CameraModeSwitch.svelte";
+    import UserIcon from "#lib/app/shell/UserIcon.svelte";
+    import {isReconnecting, startWebappSocket} from "#lib/state/webapp_socket.svelte.ts";
+    import {startForeignShareSync} from "#lib/state/share_socket.svelte.ts";
+    import {setContentRect, setOverlayRect, type ContentRect} from "#lib/state/map_camera.svelte.ts";
+    import {mapOverlay} from "#lib/state/map_overlay.svelte.ts";
+    import CameraModeSwitch from "#lib/app/shell/map/CameraModeSwitch.svelte";
     import {CircleNotchIcon} from "phosphor-svelte";
     import {page} from "$app/state";
     import {beforeNavigate} from "$app/navigation";
@@ -41,6 +41,7 @@
     const routeDepth = (pathname: string) => pathname.split("/").filter(Boolean).length;
 
     beforeNavigate((nav) => {
+        if (nav.shallow && nav.type === 'goto') return;
         if (!nav.from || !nav.to) return;
         direction = routeDepth(nav.to.url.pathname) < routeDepth(nav.from.url.pathname)
             ? "back"
@@ -92,7 +93,7 @@
 
         const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
         reducedMotion = mq.matches;
-        const onChange = () => (reducedMotion = mq.matches);
+        const onChange = () => reducedMotion = mq.matches;
         mq.addEventListener("change", onChange);
         return () => mq.removeEventListener("change", onChange);
     })
@@ -205,13 +206,14 @@
     {#if $currentUser}
         <!-- The extra padding on small screens is what the icon used to carry on
              top of the overlay inset, so it keeps its distance from the corner. -->
-        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-1 justify-self-end max-md:p-4">
-            <UserIcon />
-        </div>
 
-        <div class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-3 self-end justify-self-end">
-            <CameraModeSwitch />
-        </div>
+        <div
+            class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-1 justify-self-end max-md:p-4"
+        ><UserIcon /></div>
+
+        <div
+            class="pointer-events-auto relative col-start-[-2] col-end-[-1] row-start-3 self-end justify-self-end"
+        ><CameraModeSwitch /></div>
     {/if}
 </div>
 
